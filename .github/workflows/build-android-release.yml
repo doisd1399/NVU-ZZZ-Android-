@@ -17,7 +17,6 @@ jobs:
     timeout-minutes: 45
 
     env:
-      ZIP_FILE: NVU-CAPACITOR-ANDROID-R3.35.zip
       EXPECTED_ZIP_SHA256: 43583f5905163f5f3c78b0502c40b1ebb73931696a41b5c1495be1ad83f1bebb
 
       EXPECTED_APPLICATION_ID: com.nvu.operacional
@@ -35,22 +34,40 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [ ! -f "$ZIP_FILE" ]; then
-            echo "::error::Arquivo $ZIP_FILE não encontrado."
+          echo "Procurando o ZIP certificado da R3.35..."
+
+          FOUND_ZIP=""
+
+          while IFS= read -r -d '' FILE; do
+            ACTUAL_SHA="$(sha256sum "$FILE" | awk '{print $1}')"
+
+            echo "Arquivo encontrado: $(basename "$FILE")"
+            echo "SHA-256: $ACTUAL_SHA"
+
+            if [ "$ACTUAL_SHA" = "$EXPECTED_ZIP_SHA256" ]; then
+              FOUND_ZIP="$FILE"
+              break
+            fi
+          done < <(
+            find "$GITHUB_WORKSPACE" \
+              -maxdepth 1 \
+              -type f \
+              -iname '*.zip' \
+              -print0
+          )
+
+          if [ -z "$FOUND_ZIP" ]; then
+            echo "::error::Nenhum ZIP no repositório corresponde à R3.35 certificada."
+            echo "::error::SHA esperado: $EXPECTED_ZIP_SHA256"
             exit 1
           fi
 
-          ACTUAL_SHA="$(sha256sum "$ZIP_FILE" | awk '{print $1}')"
+          echo "R3.35 encontrada:"
+          echo "$FOUND_ZIP"
 
-          echo "SHA esperado: $EXPECTED_ZIP_SHA256"
-          echo "SHA recebido: $ACTUAL_SHA"
+          echo "ZIP_FILE=$FOUND_ZIP" >> "$GITHUB_ENV"
 
-          if [ "$ACTUAL_SHA" != "$EXPECTED_ZIP_SHA256" ]; then
-            echo "::error::O ZIP não corresponde à R3.35 certificada."
-            exit 1
-          fi
-
-          echo "ZIP R3.35 validado."
+          echo "ZIP R3.35 validado corretamente pelo SHA-256."
 
       - name: Extrair projeto
         shell: bash

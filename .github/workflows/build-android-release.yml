@@ -18,23 +18,21 @@ jobs:
 
     env:
       EXPECTED_ZIP_SHA256: 43583f5905163f5f3c78b0502c40b1ebb73931696a41b5c1495be1ad83f1bebb
-
       EXPECTED_APPLICATION_ID: com.nvu.operacional
       EXPECTED_VERSION_CODE: "52"
       EXPECTED_VERSION_NAME: "1.0.52"
-
       EXPECTED_SIGNING_CERT_SHA256: "80:6A:03:EA:92:B6:9E:7F:9A:70:52:6E:9C:4D:6A:4A:E5:2E:C4:F9:CF:7C:AC:05:DD:B1:AA:28:08:42:46:EA"
 
     steps:
       - name: Baixar repositório
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Validar ZIP R3.35
         shell: bash
         run: |
           set -euo pipefail
 
-          echo "Procurando o ZIP certificado da R3.35..."
+          echo "Procurando ZIP certificado da R3.35..."
 
           FOUND_ZIP=""
 
@@ -57,17 +55,14 @@ jobs:
           )
 
           if [ -z "$FOUND_ZIP" ]; then
-            echo "::error::Nenhum ZIP no repositório corresponde à R3.35 certificada."
+            echo "::error::Nenhum ZIP corresponde à R3.35 certificada."
             echo "::error::SHA esperado: $EXPECTED_ZIP_SHA256"
             exit 1
           fi
 
-          echo "R3.35 encontrada:"
-          echo "$FOUND_ZIP"
+          echo "ZIP R3.35 encontrado: $FOUND_ZIP"
 
           echo "ZIP_FILE=$FOUND_ZIP" >> "$GITHUB_ENV"
-
-          echo "ZIP R3.35 validado corretamente pelo SHA-256."
 
       - name: Extrair projeto
         shell: bash
@@ -81,23 +76,42 @@ jobs:
 
           PROJECT_DIR="$GITHUB_WORKSPACE/extracted/NVU-CAPACITOR-ANDROID-R3.35"
 
-          test -f "$PROJECT_DIR/package.json"
-          test -f "$PROJECT_DIR/package-lock.json"
-          test -d "$PROJECT_DIR/android"
-          test -f "$PROJECT_DIR/android/gradlew"
-          test -d "$PROJECT_DIR/functions"
+          if [ ! -f "$PROJECT_DIR/package.json" ]; then
+            echo "::error::package.json não encontrado na pasta esperada."
+            exit 1
+          fi
+
+          if [ ! -f "$PROJECT_DIR/package-lock.json" ]; then
+            echo "::error::package-lock.json não encontrado."
+            exit 1
+          fi
+
+          if [ ! -d "$PROJECT_DIR/android" ]; then
+            echo "::error::Pasta android não encontrada."
+            exit 1
+          fi
+
+          if [ ! -f "$PROJECT_DIR/android/gradlew" ]; then
+            echo "::error::Gradle Wrapper não encontrado."
+            exit 1
+          fi
+
+          if [ ! -d "$PROJECT_DIR/functions" ]; then
+            echo "::error::Pasta functions não encontrada."
+            exit 1
+          fi
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
           echo "Projeto R3.35 extraído corretamente."
 
       - name: Configurar Node 22
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@v4
         with:
           node-version: "22"
 
       - name: Configurar Java 21
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "21"
@@ -109,6 +123,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
+          yes | sdkmanager --licenses >/dev/null || true
 
           sdkmanager \
             "platform-tools" \
@@ -153,13 +169,24 @@ jobs:
 
           cd "$PROJECT_DIR"
 
-          grep -Fq 'applicationId "com.nvu.operacional"' android/app/build.gradle
-          grep -Fq 'versionCode 52' android/app/build.gradle
-          grep -Fq 'versionName "1.0.52"' android/app/build.gradle
+          if ! grep -Fq 'applicationId "com.nvu.operacional"' android/app/build.gradle; then
+            echo "::error::applicationId incorreto."
+            exit 1
+          fi
 
-          echo "Pacote: $EXPECTED_APPLICATION_ID"
-          echo "Versão: $EXPECTED_VERSION_NAME"
-          echo "versionCode: $EXPECTED_VERSION_CODE"
+          if ! grep -Fq 'versionCode 52' android/app/build.gradle; then
+            echo "::error::versionCode incorreto."
+            exit 1
+          fi
+
+          if ! grep -Fq 'versionName "1.0.52"' android/app/build.gradle; then
+            echo "::error::versionName incorreto."
+            exit 1
+          fi
+
+          echo "Pacote confirmado: $EXPECTED_APPLICATION_ID"
+          echo "versionCode confirmado: $EXPECTED_VERSION_CODE"
+          echo "versionName confirmado: $EXPECTED_VERSION_NAME"
 
       - name: Compilar APK Release
         shell: bash
@@ -171,7 +198,13 @@ jobs:
           chmod +x gradlew
 
           ./gradlew --stop || true
-          ./gradlew clean assembleRelease --no-daemon
+
+          ./gradlew \
+            clean \
+            assembleRelease \
+            --no-daemon
+
+          echo "APK Release compilado."
 
       - name: Validar Secrets de assinatura
         shell: bash
@@ -183,19 +216,27 @@ jobs:
         run: |
           set -euo pipefail
 
-          for NAME in \
-            ANDROID_KEYSTORE_BASE64 \
-            ANDROID_KEYSTORE_PASSWORD \
-            ANDROID_KEY_ALIAS \
-            ANDROID_KEY_PASSWORD
-          do
-            if [ -z "${!NAME:-}" ]; then
-              echo "::error::$NAME não foi configurado nos Secrets."
-              exit 1
-            fi
-          done
+          if [ -z "${ANDROID_KEYSTORE_BASE64:-}" ]; then
+            echo "::error::ANDROID_KEYSTORE_BASE64 não configurado."
+            exit 1
+          fi
 
-          echo "Secrets encontrados."
+          if [ -z "${ANDROID_KEYSTORE_PASSWORD:-}" ]; then
+            echo "::error::ANDROID_KEYSTORE_PASSWORD não configurado."
+            exit 1
+          fi
+
+          if [ -z "${ANDROID_KEY_ALIAS:-}" ]; then
+            echo "::error::ANDROID_KEY_ALIAS não configurado."
+            exit 1
+          fi
+
+          if [ -z "${ANDROID_KEY_PASSWORD:-}" ]; then
+            echo "::error::ANDROID_KEY_PASSWORD não configurado."
+            exit 1
+          fi
+
+          echo "Secrets de assinatura encontrados."
 
       - name: Reconstruir keystore temporária
         shell: bash
@@ -210,11 +251,16 @@ jobs:
             | base64 --decode \
             > "$KEYSTORE_PATH"
 
-          test -s "$KEYSTORE_PATH"
+          if [ ! -s "$KEYSTORE_PATH" ]; then
+            echo "::error::Falha ao reconstruir a keystore."
+            exit 1
+          fi
 
           chmod 600 "$KEYSTORE_PATH"
 
           echo "KEYSTORE_PATH=$KEYSTORE_PATH" >> "$GITHUB_ENV"
+
+          echo "Keystore reconstruída."
 
       - name: Validar certificado da keystore
         shell: bash
@@ -224,36 +270,36 @@ jobs:
         run: |
           set -euo pipefail
 
-          EXPECTED="$(
+          EXPECTED_CERT="$(
             printf '%s' "$EXPECTED_SIGNING_CERT_SHA256" \
-            | tr -d '[:space:]:-' \
-            | tr '[:lower:]' '[:upper:]'
+              | tr -d '[:space:]:-' \
+              | tr '[:lower:]' '[:upper:]'
           )"
 
-          ACTUAL="$(
+          ACTUAL_CERT="$(
             keytool \
               -list \
               -v \
               -keystore "$KEYSTORE_PATH" \
               -storepass "$ANDROID_KEYSTORE_PASSWORD" \
               -alias "$ANDROID_KEY_ALIAS" \
-            | sed -n 's/.*SHA256: //p' \
-            | head -n 1 \
-            | tr -d '[:space:]:-' \
-            | tr '[:lower:]' '[:upper:]'
+              | sed -n 's/.*SHA256: //p' \
+              | head -n 1 \
+              | tr -d '[:space:]:-' \
+              | tr '[:lower:]' '[:upper:]'
           )"
 
-          if [ -z "$ACTUAL" ]; then
-            echo "::error::Não foi possível identificar o certificado da keystore."
+          if [ -z "$ACTUAL_CERT" ]; then
+            echo "::error::Não foi possível identificar o certificado."
             exit 1
           fi
 
-          if [ "$ACTUAL" != "$EXPECTED" ]; then
+          if [ "$ACTUAL_CERT" != "$EXPECTED_CERT" ]; then
             echo "::error::A keystore não corresponde à chave oficial da NVU."
             exit 1
           fi
 
-          echo "Keystore oficial confirmada."
+          echo "Certificado oficial da NVU confirmado."
 
       - name: Alinhar e assinar APK
         shell: bash
@@ -266,14 +312,15 @@ jobs:
 
           cd "$PROJECT_DIR"
 
-          RELEASE_DIR="release-artifacts"
+          RELEASE_DIR="$PROJECT_DIR/release-artifacts"
+
           mkdir -p "$RELEASE_DIR"
 
-          UNSIGNED_APK="android/app/build/outputs/apk/release/app-release-unsigned.apk"
+          UNSIGNED_APK="$PROJECT_DIR/android/app/build/outputs/apk/release/app-release-unsigned.apk"
 
           if [ ! -f "$UNSIGNED_APK" ]; then
             UNSIGNED_APK="$(
-              find android/app/build/outputs/apk/release \
+              find "$PROJECT_DIR/android/app/build/outputs/apk/release" \
                 -maxdepth 1 \
                 -type f \
                 -name '*.apk' \
@@ -281,8 +328,13 @@ jobs:
             )"
           fi
 
-          if [ -z "${UNSIGNED_APK:-}" ] || [ ! -f "$UNSIGNED_APK" ]; then
-            echo "::error::APK Release não foi encontrado."
+          if [ -z "${UNSIGNED_APK:-}" ]; then
+            echo "::error::Nenhum APK Release encontrado."
+            exit 1
+          fi
+
+          if [ ! -f "$UNSIGNED_APK" ]; then
+            echo "::error::Arquivo APK Release não existe."
             exit 1
           fi
 
@@ -290,18 +342,150 @@ jobs:
 
           ZIPALIGN="$BUILD_TOOLS/zipalign"
           APKSIGNER="$BUILD_TOOLS/apksigner"
-          AAPT="$BUILD_TOOLS/aapt"
 
-          test -x "$ZIPALIGN"
-          test -x "$APKSIGNER"
-          test -x "$AAPT"
+          if [ ! -x "$ZIPALIGN" ]; then
+            echo "::error::zipalign não encontrado."
+            exit 1
+          fi
+
+          if [ ! -x "$APKSIGNER" ]; then
+            echo "::error::apksigner não encontrado."
+            exit 1
+          fi
 
           ALIGNED_APK="$RUNNER_TEMP/NVU-R3.35-aligned.apk"
+
           SIGNED_APK="$RELEASE_DIR/NVU-R3.35-release.apk"
+
+          echo "APK de origem:"
+          echo "$UNSIGNED_APK"
 
           "$ZIPALIGN" \
             -p \
             -f \
             4 \
             "$UNSIGNED_APK" \
-            "$
+            "$ALIGNED_APK"
+
+          "$APKSIGNER" sign \
+            --ks "$KEYSTORE_PATH" \
+            --ks-key-alias "$ANDROID_KEY_ALIAS" \
+            --ks-pass "pass:$ANDROID_KEYSTORE_PASSWORD" \
+            --key-pass "pass:$ANDROID_KEY_PASSWORD" \
+            --out "$SIGNED_APK" \
+            "$ALIGNED_APK"
+
+          "$APKSIGNER" verify \
+            --verbose \
+            --print-certs \
+            "$SIGNED_APK" \
+            | tee "$RELEASE_DIR/signing-report.txt"
+
+          if [ ! -s "$SIGNED_APK" ]; then
+            echo "::error::APK assinado não foi criado."
+            exit 1
+          fi
+
+          echo "APK R3.35 alinhado e assinado com sucesso."
+
+      - name: Validar APK final
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd "$PROJECT_DIR"
+
+          RELEASE_DIR="$PROJECT_DIR/release-artifacts"
+
+          APK="$RELEASE_DIR/NVU-R3.35-release.apk"
+
+          BUILD_TOOLS="$ANDROID_SDK_ROOT/build-tools/36.0.0"
+
+          AAPT="$BUILD_TOOLS/aapt"
+          APKSIGNER="$BUILD_TOOLS/apksigner"
+
+          if [ ! -f "$APK" ]; then
+            echo "::error::APK final não encontrado."
+            exit 1
+          fi
+
+          BADGING="$("$AAPT" dump badging "$APK" | head -n 1)"
+
+          printf '%s\n' "$BADGING" \
+            | tee "$RELEASE_DIR/package-badging.txt"
+
+          if ! printf '%s\n' "$BADGING" \
+            | grep -Fq "package: name='$EXPECTED_APPLICATION_ID'"; then
+
+            echo "::error::applicationId final incorreto."
+            exit 1
+          fi
+
+          if ! printf '%s\n' "$BADGING" \
+            | grep -Fq "versionCode='$EXPECTED_VERSION_CODE'"; then
+
+            echo "::error::versionCode final incorreto."
+            exit 1
+          fi
+
+          if ! printf '%s\n' "$BADGING" \
+            | grep -Fq "versionName='$EXPECTED_VERSION_NAME'"; then
+
+            echo "::error::versionName final incorreto."
+            exit 1
+          fi
+
+          CERT_SHA="$(
+            "$APKSIGNER" \
+              verify \
+              --print-certs \
+              "$APK" \
+              | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' \
+              | head -n 1 \
+              | tr -d '[:space:]:-' \
+              | tr '[:lower:]' '[:upper:]'
+          )"
+
+          EXPECTED_CERT="$(
+            printf '%s' "$EXPECTED_SIGNING_CERT_SHA256" \
+              | tr -d '[:space:]:-' \
+              | tr '[:lower:]' '[:upper:]'
+          )"
+
+          if [ "$CERT_SHA" != "$EXPECTED_CERT" ]; then
+            echo "::error::Certificado do APK final incorreto."
+            exit 1
+          fi
+
+          printf '%s\n' "$CERT_SHA" \
+            > "$RELEASE_DIR/signing-cert-sha256.txt"
+
+          sha256sum "$APK" \
+            | tee "$RELEASE_DIR/NVU-R3.35-release.apk.sha256"
+
+          {
+            echo "NVU R3.35"
+            echo "applicationId=$EXPECTED_APPLICATION_ID"
+            echo "versionName=$EXPECTED_VERSION_NAME"
+            echo "versionCode=$EXPECTED_VERSION_CODE"
+            echo "signingCertificateSHA256=$CERT_SHA"
+            echo "workflowRun=$GITHUB_RUN_ID"
+            echo "gitCommit=$GITHUB_SHA"
+          } > "$RELEASE_DIR/release-info.txt"
+
+          echo "APK R3.35 final validado com sucesso."
+
+      - name: Apagar material temporário
+        if: always()
+        shell: bash
+        run: |
+          rm -f "${KEYSTORE_PATH:-}"
+          rm -f "$RUNNER_TEMP/NVU-R3.35-aligned.apk"
+
+      - name: Disponibilizar APK para download
+        uses: actions/upload-artifact@v4
+        with:
+          name: NVU-R3.35-release
+          path: extracted/NVU-CAPACITOR-ANDROID-R3.35/release-artifacts/
+          if-no-files-found: error
+          retention-days: 30

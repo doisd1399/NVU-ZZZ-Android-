@@ -160,7 +160,7 @@ jobs:
           echo "$BADGING" | grep -Fq "versionCode='$EXPECTED_VERSION_CODE'"
           echo "$BADGING" | grep -Fq "versionName='$EXPECTED_VERSION_NAME'"
 
-          CERT_SHA256="$($APKSIGNER verify --print-certs "$SIGNED_APK" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -n 1 | tr -d '[:space:]:-' | tr '[:lower:]' '[:upper:]')"
+          CERT_SHA256="$($APKSIGNER verify --print-certs "$SIGNED_APK" | sed -nE 's/^.*certificate SHA-256 digest:[[:space:]]*//p' | head -n 1 | tr -d '[:space:]:-' | tr '[:lower:]' '[:upper:]')"
           if [ -z "$CERT_SHA256" ]; then
             echo "::error::Could not read the APK signing certificate SHA-256."
             exit 1

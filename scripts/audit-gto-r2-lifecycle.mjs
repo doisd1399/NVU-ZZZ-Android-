@@ -13,15 +13,6 @@ const appContext = read('src/context/AppContext.tsx');
 const backend = read('functions/src/gtoTrips.ts');
 const gradle = read('android/app/build.gradle');
 const pkg = JSON.parse(read('package.json'));
-const bundledRecordTrip = fs.readdirSync('android/app/src/main/assets/public/assets')
-  .filter((n) => /^RecordTrip-.*\.js$/.test(n))
-  .map((n) => read(`android/app/src/main/assets/public/assets/${n}`))
-  .join('\n');
-const bundledIndex = fs.readdirSync('android/app/src/main/assets/public/assets')
-  .filter((n) => /^index-.*\.js$/.test(n))
-  .map((n) => read(`android/app/src/main/assets/public/assets/${n}`))
-  .join('\n');
-
 const checks = [];
 const check = (name, ok) => { checks.push({ name, ok }); console.log(`${ok ? 'OK  ' : 'FAIL'} ${name}`); };
 

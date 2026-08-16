@@ -1,0 +1,56 @@
+NVU HF25 - ATUALIZAR PELO ANDROID + CODESPACES E GERAR APK RELEASE
+
+1) Baixe NVU-CAPACITOR-ANDROID-R3.34-PC-HF25.zip.
+2) No GitHub pelo navegador, envie temporariamente o ZIP para a branch main e faca commit.
+3) Abra o Codespace do repositorio.
+4) No terminal:
+
+   git pull
+   ZIP="NVU-CAPACITOR-ANDROID-R3.34-PC-HF25.zip"
+   rm -rf /tmp/hf25 && mkdir -p /tmp/hf25
+   unzip -q "$ZIP" -d /tmp/hf25
+   SRC="/tmp/hf25/NVU-CAPACITOR-ANDROID-R3.34-PC-HF25"
+
+5) Confira a identidade:
+
+   grep -nE "versionCode|versionName" "$SRC/android/app/build.gradle"
+
+Esperado:
+   versionCode 77
+   versionName "1.0.77"
+
+6) Crie backup local da branch e aplique o projeto sem tocar em .git:
+
+   git branch backup-pre-hf25
+   rsync -a --delete --exclude='.git' "$SRC/" ./
+
+7) Valide antes do push:
+
+   npm ci
+   npm run test:gto-r3.34-hf25-focused-fields
+   npm run verify:release
+
+Se o verify monolitico demorar demais no Codespace, o GitHub Action executara a mesma cadeia em runner dedicado.
+
+8) Commit e push:
+
+   git add -A
+   git commit -m "NVU R3.34 PC-HF25 Android 1.0.77"
+   git push origin main
+
+9) GitHub > Actions > Build NVU R3.34 PC-HF25 Release > Run workflow > main > Run workflow.
+
+10) O workflow deve validar, compilar, zipalign, assinar e publicar:
+    NVU-R3.34-PC-HF25-release
+
+Dentro do artifact:
+    NVU-R3.34-PC-HF25-release.apk
+
+IMPORTANTE
+- Os secrets de assinatura devem continuar configurados:
+  ANDROID_KEYSTORE_BASE64
+  ANDROID_KEYSTORE_PASSWORD
+  ANDROID_KEY_ALIAS
+  ANDROID_KEY_PASSWORD
+- Mantenha EXPECTED_SIGNING_CERT_SHA256 para bloquear APK assinado com certificado incorreto.
+- A HF25 ja contem as duas correcoes de pipeline descobertas na HF23: checkout limpo sem assets Capacitor e parser de certificado apksigner V3.

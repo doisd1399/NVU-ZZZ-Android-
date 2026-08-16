@@ -12,8 +12,10 @@ const lifecycle = read("scripts/audit-gto-r2-lifecycle.mjs");
 const checks = [];
 const check = (name, ok) => { checks.push({name, ok: !!ok}); console.log(`${ok ? "PASS" : "FAIL"} ${name}`); };
 
-check("HF25 identity is 1.0.77 / 77", /versionCode\s+77/.test(gradle) && /versionName\s+"1\.0\.77"/.test(gradle));
-check("workflow aligned to HF25", workflow.includes("PC-HF25") && workflow.includes('EXPECTED_VERSION_CODE: "77"') && workflow.includes('EXPECTED_VERSION_NAME: "1.0.77"'));
+const code = Number((gradle.match(/versionCode\s+(\d+)/)||[])[1]||0);
+const patch = Number((gradle.match(/versionName\s+"1\.0\.(\d+)"/)||[])[1]||0);
+check("HF25+ identity remains at or above 1.0.77 / 77", code >= 77 && patch >= 77);
+check("workflow remains aligned to current HF25+ identity", workflow.includes(`EXPECTED_VERSION_CODE: "${code}"`) && workflow.includes(`EXPECTED_VERSION_NAME: "1.0.${patch}"`));
 check("clean checkout lifecycle validation does not require generated Capacitor assets", !lifecycle.includes("readdirSync('android/app/src/main/assets/public/assets')"));
 check("modern apksigner certificate parser retained", workflow.includes("certificate SHA-256 digest:[[:space:]]"));
 check("text conflicts use focused retry instead of immediate driver review", service.includes("scheduleFocusedFreightConflictRetry") && service.includes("runFocusedFreightConflictRetry"));

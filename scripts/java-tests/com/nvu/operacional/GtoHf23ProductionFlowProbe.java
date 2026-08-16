@@ -42,8 +42,11 @@ public final class GtoHf23ProductionFlowProbe {
             "origin ROI must exclude 600Km/R$/Aceitar and keep the selected-row origin");
 
         require("CONFIRMING_FREIGHT".equals(GtoSessionRecoveryPolicy.restoredState(
-            "CONFIRMING_FREIGHT", "CONFIRMED", "REVIEW_REQUIRED", "ORIGIN_COMPANY")),
-            "confirmed field review must survive process death");
+            "CONFIRMING_FREIGHT", "CONFIRMED", "REVIEW_REQUIRED", "ORIGIN_COMPANY", "precise-touch")),
+            "human-backed confirmed field review must survive process death");
+        require("WAITING_FREIGHT".equals(GtoSessionRecoveryPolicy.restoredState(
+            "CONFIRMING_FREIGHT", "CONFIRMED", "REVIEW_REQUIRED", "ORIGIN_COMPANY", "frame-lock")),
+            "legacy visual-only field review must not survive process death as selected freight");
         require("WAITING_FREIGHT".equals(GtoSessionRecoveryPolicy.restoredState(
             "CONFIRMING_FREIGHT", "TOUCH_LOCKED", "", "")),
             "unconfirmed touch candidate may safely return to waiting after process death");
@@ -71,6 +74,14 @@ public final class GtoHf23ProductionFlowProbe {
             require(GtoDeterministicFlowPolicy.isAllowedTripTransition(state, "WAITING_FREIGHT"), "init/wait transition " + i);
             state = "WAITING_FREIGHT";
 
+            require(GtoSelectionEvidencePolicy.mayConfirmSelection(true, i, freights.length),
+                "real driver action must authorize freight row " + i);
+            require(GtoFreightSemanticCertificationPolicy.isCertifiedPage(
+                freights.length, freights.length, freights.length
+            ), "Aceitar + money page certification must pass for freight " + i);
+            require(GtoFreightSemanticCertificationPolicy.selectedRowCanCertify(
+                true, true, f.cargo, f.origin, f.destination, f.km, f.offered
+            ), "selected row must carry Aceitar + money/context evidence for freight " + i);
             int selected = GtoSelectionIdentityPolicy.resolveExactTouchAfterTransition(i, freights.length, true, -1);
             require(selected == i, "touch must confirm exact freight row " + i);
             require(GtoDeterministicFlowPolicy.isAllowedTripTransition(state, "CONFIRMING_FREIGHT"), "wait/confirm transition " + i);

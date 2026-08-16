@@ -41,7 +41,7 @@ final class GtoFreightReviewPolicy {
         if (DISTANCE.equals(key)) return validDistance(value);
         if (VALUE.equals(key)) return validMoney(value);
         return CARGO.equals(key) || ORIGIN_COMPANY.equals(key) || DESTINATION.equals(key)
-            ? validText(value)
+            ? validManualText(value)
             : false;
     }
 
@@ -49,10 +49,47 @@ final class GtoFreightReviewPolicy {
         return value == null ? "" : value.trim();
     }
 
+    static boolean isAutomaticTextUsable(String value) {
+        return validText(value) && !isObviousNoise(value);
+    }
+
     private static boolean validText(String value) {
         if (value == null) return false;
         String trimmed = value.trim();
-        return trimmed.length() >= 2 && trimmed.length() <= 220;
+        if (trimmed.length() < 2 || trimmed.length() > 220) return false;
+        int letters = 0;
+        int useful = 0;
+        for (int i = 0; i < trimmed.length(); i++) {
+            char c = trimmed.charAt(i);
+            if (Character.isLetter(c)) letters++;
+            if (!Character.isWhitespace(c)) useful++;
+        }
+        return letters >= 2 && useful > 0 && letters / (float) useful >= 0.55f;
+    }
+
+    private static boolean validManualText(String value) {
+        return validText(value) && !isObviousNoise(value);
+    }
+
+    private static boolean isObviousNoise(String value) {
+        if (value == null) return true;
+        String normalized = value.trim().toLowerCase(Locale.ROOT);
+        // Common HUD/action fragments and the exact garbage observed in the rejected
+        // HF25 physical run are never valid freight field values by themselves.
+        return normalized.equals("oi")
+            || normalized.equals("ok")
+            || normalized.equals("fps")
+            || normalized.equals("km")
+            || normalized.equals("nvu")
+            || normalized.equals("aceitar")
+            || normalized.equals("operação")
+            || normalized.equals("operacao")
+            || normalized.equals("carga")
+            || normalized.equals("origem")
+            || normalized.equals("destino")
+            || normalized.equals("valor")
+            || normalized.equals("distância")
+            || normalized.equals("distancia");
     }
 
     private static boolean validDistance(String value) {

@@ -75,7 +75,7 @@ check(
   "active trip replacement requires an explicit driver arm and a real new selection",
   !service.includes('menuButton("Trocar frete atual")')
     && service.includes("armExplicitFreightReplacement()")
-    && service.includes("replacementFreightTouchPending || replacementFreightPressedRow >= 0")
+    && service.includes("boolean selectedNewRow = replacementFreightTouchPending")
     && policy.includes('return explicitlyArmed && "TRIP_IN_PROGRESS".equals(state);'),
 );
 check(

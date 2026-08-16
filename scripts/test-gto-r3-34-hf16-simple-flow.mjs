@@ -33,9 +33,9 @@ check("freight list uses one strong Accept+info row",
 check("driver list message waits for semantic freight OCR",
   service.includes("freightSemanticConfirmedAt")
     && service.includes("raw button geometry updates the internal screen state immediately"));
-check("reopened list during trip arms replacement without deleting old freight",
-  service.includes("FREIGHT_LIST_AFTER_TRIP_CANCEL")
-    && service.includes("frete atual preservado até um novo Aceitar"));
+check("reopened visual list during trip stays a replacement candidate until a new human Accept",
+  service.includes("FREIGHT_LIST_CANDIDATE_AFTER_TRIP")
+    && service.includes("replacementFreightTouchPending"));
 const promotionStart = service.indexOf("private boolean promoteReplacementFreightCandidateToWaiting(\n        boolean fromTouch,");
 const promotionEnd = service.indexOf("private void clearReplacementFreightCandidate", promotionStart);
 const promotion = promotionStart >= 0 && promotionEnd > promotionStart ? service.slice(promotionStart, promotionEnd) : "";

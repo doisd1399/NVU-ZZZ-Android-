@@ -1,0 +1,125 @@
+NVU R3.34-PC-HF26 — RELATORIO DE AUDITORIA E VALIDACAO
+Android 1.0.78 | versionCode 78
+Base: R3.34-PC-HF25
+Data: 2026-08-16
+
+STATUS
+------
+HF25: REPROVADA em teste fisico por permitir uma selecao de frete sem a lista ter sido aberta.
+HF26: candidata corrigida para novo APK. Os gates automatizados e regressivos abaixo passaram.
+Compilacao Gradle/Javac real neste ambiente: NAO EXECUTADA, pois o wrapper nao consegue resolver services.gradle.org (UnknownHostException). O workflow GitHub Actions continua sendo o gate real de build/assinatura.
+
+CAUSA RAIZ CONFIRMADA DA HF25
+-----------------------------
+1. Existiam caminhos visual-only (frame-lock / visual-buffer / visual-press) capazes de transformar mudanca entre frames em identidade de frete sem uma acao humana real.
+2. A protecao de substituicao de frete durante viagem tambem podia aceitar evidencia visual sem um novo toque real.
+3. A lista era detectada por geometria/cor de forma probabilistica antes de uma certificacao semantica suficiente.
+4. REVIEW_REQUIRED podia, depois de uma identidade falsa, permitir preencher campos demais e acabar fabricando uma viagem praticamente inteira.
+5. Uma selecao falsa antiga podia sobreviver a reinicio/upgrade por causa da recuperacao persistente do estado.
+
+INVARIANTE CENTRAL HF26
+-----------------------
+SEM ACAO HUMANA REAL, NENHUM FRETE PODE SER CONFIRMADO.
+
+A cadeia valida e obrigatoria agora e:
+  LISTA CANDIDATA
+  -> OCR pequeno certifica pelo menos ACEITAR + VALOR NA MESMA LINHA
+  -> acao humana real (touch/outside-touch correlacionado)
+  -> linha N fica TOUCH_LOCKED
+  -> transicao compativel/lista fecha
+  -> OCR/snapshot da MESMA linha certifica o frete
+  -> CONFIRMED
+  -> coleta/revisao dos campos
+  -> TRIP_IN_PROGRESS
+
+Mudanca visual sozinha nunca promove uma linha.
+
+CORRECOES HF26
+--------------
+- GtoSelectionEvidencePolicy: fontes human-backed obrigatorias para CONFIRMED.
+- detectDirectButtonPress(): agora e somente diagnostico (VISUAL_PRESS_IGNORED), nunca seleciona.
+- fast visual selector: visual-only nao arma nem finaliza selecao.
+- replacement de frete: exige novo toque real para substituir viagem ativa.
+- persistSelectionIdentity(CONFIRMED): rejeita fonte sem evidencia humana.
+- hasConfirmedSelectionIdentity(): exige provenance humana persistida.
+- GtoAutoTripSync.lockSelectedFreight(): defesa em profundidade; recusa lock duravel sem selecao humana.
+- GtoAutoTripSync.restoreLockedFreightToPrefs(): recusa restaurar snapshot sem provenance humana.
+- Startup sanitation: descarta estado legado visual-only inseguro e impede que falso frete da HF25 seja restaurado como viagem valida.
+- Certificacao de lista: geometria e apenas candidata; para virar FREIGHT_LIST exige evidencia OCR de "Aceitar" + valor monetario associado na mesma linha/card.
+- Selected-row fallback: tambem exige Accept geometry + texto Aceitar + dinheiro/contexto quando nao existe pagina previamente certificada.
+- REVIEW_REQUIRED: somente last-mile. Exige pelo menos 3 dos 5 campos operacionais automaticos e no maximo 2 pendentes.
+- Valores obvios de lixo vistos no teste fisico (ex. "Oi", "9i") nao contam como campo de frete valido.
+- As 5 capturas fisicas da falha HF25 foram incorporadas como fixtures negativas permanentes.
+
+TESTES NEGATIVOS NOVOS
+----------------------
+- 600 frames x 5 linhas sem acao humana: nenhuma linha pode ser confirmada.
+- source frame-lock / visual-buffer / visual-press: nao e human-backed.
+- restart com REVIEW_REQUIRED visual-only: volta para WAITING_FREIGHT, nao restaura frete.
+- N ou NONE: toque na linha N jamais resolve para M != N.
+- geometria laranja sem Aceitar + valor: nao certifica lista.
+- Accept geometry + valor sem texto Aceitar: nao certifica selected-row fallback.
+- 1 ou 2 campos automaticos: nao pode abrir revisao para construir o restante da viagem.
+- fixtures reais HF25 sem lista: 5/5 classificadas como nao-lista no strict-screen regression.
+- lock/restore duravel sem evidencia humana: bloqueados.
+
+TESTES DE FLUXO / REGRESSAO EXECUTADOS
+--------------------------------------
+Java syntax: 39 fontes PASS
+validate:gto-native: 49/49 PASS
+validate:gto-auto-sync: 74/74 PASS
+audit:gto-r2 lifecycle: 26/26 PASS
+R3.29 strict screen: 15/15 PASS
+HF18 freight evidence: 16/16 PASS
+HF21 selected-row authority: 13/13 PASS
+HF23 production: 10/10 PASS
+  - inclui 5 viagens distintas: inicializacao -> lista -> acao real -> linha exata -> viagem -> resultado -> Receber -> fingerprint -> envio automatico
+HF24 resilience: 16/16 PASS
+HF25 focused fields: 16/16 PASS
+HF26 human evidence: 20/20 PASS
+HF26 pure policy: 3.080 assertions PASS
+
+A cadeia historica restante HF12-HF22 tambem foi executada em blocos durante a auditoria HF26 e permaneceu verde. A execucao monolitica verify:release excede o limite de tempo desta ferramenta; os mesmos blocos foram executados segmentadamente para evitar interpretar timeout do executor como falha do NVU.
+
+GITHUB ACTIONS
+--------------
+Workflow: Build NVU R3.34 PC-HF26 Release
+applicationId: com.nvu.operacional
+versionName: 1.0.78
+versionCode: 78
+artifact esperado: NVU-R3.34-PC-HF26-release
+
+Correcoes de CI anteriores preservadas:
+- checkout limpo nao depende de android/app/src/main/assets/public/assets antes do build Capacitor;
+- parser de certificado aceita saida moderna "V3.0 Signer: certificate SHA-256 digest";
+- workflow YAML validado sintaticamente;
+- concurrency group alinhado para HF26.
+
+PARIDADE
+--------
+Comparacao HF25 -> HF26:
+- src/: inalterado
+- public/: inalterado
+- app/: inalterado
+- functions/: inalterado
+- project/: inalterado
+- resources/: inalterado
+- capacitor.config.ts: inalterado
+- capacitor.remote.json: inalterado
+- package-lock.json: inalterado
+- firebase.json / firestore.rules: inalterados
+Mudancas funcionais concentram-se no Android nativo, testes, package.json (gate de teste) e workflow de release.
+
+RISCO RESTANTE / CRITERIO HONESTO
+---------------------------------
+Os bugs fisicos conhecidos que causaram falso frete foram transformados em invariantes e fixtures negativas. Nenhum teste automatizado, entretanto, consegue provar comportamento de todos os OEMs, MediaProjection/WindowManager e todas as condicoes fisicas reais. Portanto o APK HF26 deve passar pelo teste fisico final no aparelho antes de producao ampla.
+
+Teste fisico recomendado, bloqueador de producao:
+1. iniciar modo automatico sem abrir lista por varios minutos e movimentar camera/caminhao: NUNCA pode aparecer frete selecionado;
+2. abrir lista real: mensagem de lista so depois de certificacao;
+3. aceitar linhas 1 a 5 em rodadas separadas: N ou NONE, nunca outra linha;
+4. cancelar A, lista retorna, aceitar B: so B vale;
+5. sair/voltar GTO, notificacoes, Recentes;
+6. perder captura e reautorizar;
+7. resultado -> Receber -> envio -> ACK;
+8. segunda/quinta viagem na mesma MediaProjection.

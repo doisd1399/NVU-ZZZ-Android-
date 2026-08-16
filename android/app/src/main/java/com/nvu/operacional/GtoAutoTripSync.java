@@ -147,6 +147,11 @@ final class GtoAutoTripSync {
         if (snapshot == null || !snapshot.optBoolean("freightLocked", false)) return false;
         if (!cleanSession.equals(clean(snapshot.optString("sessionId", "")))) return false;
         if (validateContextSnapshot(snapshot) != null) return false;
+        String durableSelectionSource = clean(snapshot.optString("selectionSource", ""));
+        if (!GtoSelectionEvidencePolicy.isHumanBackedSource(durableSelectionSource)) {
+            markIntegrityError(prefs, "Snapshot de frete sem evidência humana de seleção; restauração bloqueada.");
+            return false;
+        }
 
         JSONObject freight = new JSONObject();
         try {
@@ -261,6 +266,14 @@ final class GtoAutoTripSync {
             markIntegrityError(prefs, "Sessão GTO ausente ao confirmar o frete.");
             return false;
         }
+        String selectionEvidenceSource = clean(prefs.getString(
+            "selectionIdentitySource",
+            prefs.getString("selectionSource", "")
+        ));
+        if (!GtoSelectionEvidencePolicy.isHumanBackedSource(selectionEvidenceSource)) {
+            markIntegrityError(prefs, "Frete sem evidência humana de seleção; bloqueio durável recusado.");
+            return false;
+        }
 
         SharedPreferences snapshots = context.getSharedPreferences(SNAPSHOT_PREFS, Context.MODE_PRIVATE);
         JSONObject snapshot = readJson(snapshots.getString(SNAPSHOT_PREFIX + sessionId, ""));
@@ -325,7 +338,7 @@ final class GtoAutoTripSync {
                 snapshot.put(field, candidate.optString(field, ""));
             }
             snapshot.put("selectedRow", candidate.optInt("selectedRow", -1));
-            snapshot.put("selectionSource", clean(prefs.getString("selectionSource", "")));
+            snapshot.put("selectionSource", selectionEvidenceSource);
             snapshot.put("freightLocked", true);
             snapshot.put("freightLockedAt", System.currentTimeMillis());
         } catch (JSONException error) {

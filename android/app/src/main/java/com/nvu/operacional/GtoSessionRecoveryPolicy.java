@@ -14,9 +14,23 @@ final class GtoSessionRecoveryPolicy {
         String selectionConfirmationStatus,
         String reviewRequiredField
     ) {
+        return restoredState(
+            restoredState, selectionIdentityStatus, selectionConfirmationStatus, reviewRequiredField, ""
+        );
+    }
+
+    static String restoredState(
+        String restoredState,
+        String selectionIdentityStatus,
+        String selectionConfirmationStatus,
+        String reviewRequiredField,
+        String selectionIdentitySource
+    ) {
         String state = restoredState == null ? "" : restoredState.trim();
         if (!"CONFIRMING_FREIGHT".equals(state)) return state;
-        boolean confirmedReview = "CONFIRMED".equals(selectionIdentityStatus)
+        boolean confirmedReview = GtoSelectionEvidencePolicy.mayRestoreConfirmedSelection(
+                selectionIdentityStatus, selectionIdentitySource
+            )
             && "REVIEW_REQUIRED".equals(selectionConfirmationStatus)
             && reviewRequiredField != null
             && !reviewRequiredField.trim().isEmpty();

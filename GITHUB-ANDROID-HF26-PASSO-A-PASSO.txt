@@ -1,0 +1,86 @@
+NVU R3.34-PC-HF26 — ANDROID + GITHUB/CODESPACES
+Android 1.0.78 / versionCode 78
+
+ARQUIVO
+NVU-CAPACITOR-ANDROID-R3.34-PC-HF26.zip
+
+1) No github.com do repositorio:
+   Code > Add file > Upload files
+   envie SOMENTE o ZIP HF26 como transporte temporario.
+   Commit: Upload ZIP HF26 temporario
+   branch: main
+
+2) No Codespace do mesmo repositorio, terminal:
+   git pull
+   ls -lh *HF26*.zip
+
+3) Extraia temporariamente:
+   ZIP="NVU-CAPACITOR-ANDROID-R3.34-PC-HF26.zip"
+   rm -rf /tmp/hf26
+   mkdir -p /tmp/hf26
+   unzip -q "$ZIP" -d /tmp/hf26
+   find /tmp/hf26 -maxdepth 3 -name package.json -print
+
+Esperado:
+/tmp/hf26/NVU-CAPACITOR-ANDROID-R3.34-PC-HF26/package.json
+
+4) Valide ANTES de substituir:
+   SRC="/tmp/hf26/NVU-CAPACITOR-ANDROID-R3.34-PC-HF26"
+   grep -nE "versionCode|versionName" "$SRC/android/app/build.gradle"
+
+Esperado:
+versionCode 78
+versionName "1.0.78"
+
+   grep -R -E "HF26|versionCode 78|1\.0\.78" "$SRC/.github/workflows"
+
+5) Backup local e substituicao segura (NAO APAGA .git):
+   git branch -f backup-pre-hf26 HEAD
+   rsync -a --delete --exclude='.git' "$SRC/" ./
+   rm -f NVU-CAPACITOR-ANDROID-R3.34-PC-HF26.zip
+
+6) Valide novamente:
+   grep -nE "versionCode|versionName" android/app/build.gradle
+   npm ci
+   npm run verify:release
+
+Se qualquer comando falhar, NAO faça commit/push. Corrija a primeira falha.
+
+7) Se passou:
+   git status --short
+   git add -A
+   git commit -m "NVU R3.34 PC-HF26 Android 1.0.78"
+   git push origin main
+
+8) No github.com:
+   Actions > Build NVU R3.34 PC-HF26 Release
+   Run workflow > main > Run workflow
+
+9) O job deve validar:
+   - secrets de assinatura
+   - Node 22 / Java 21 / SDK Android 36
+   - npm ci + Functions build
+   - verify:release
+   - Capacitor build/sync
+   - applicationId com.nvu.operacional
+   - versionCode 78 / versionName 1.0.78
+   - Gradle assembleRelease
+   - zipalign + apksigner
+   - certificado SHA-256
+   - artifact
+
+10) Artifact esperado:
+    NVU-R3.34-PC-HF26-release
+    contendo NVU-R3.34-PC-HF26-release.apk
+
+SE DER ERRO NO ACTIONS
+- nao use Re-run imediatamente;
+- abra a PRIMEIRA etapa vermelha;
+- copie/mande as ultimas linhas do log;
+- nao altere keystore nem EXPECTED_SIGNING_CERT_SHA256 sem confirmar a causa.
+
+PROBLEMAS DA TENTATIVA ANTERIOR JA CORRIGIDOS/PRESERVADOS
+- audit lifecycle em checkout limpo nao exige assets Capacitor ainda nao gerados;
+- parser do certificado aceita "V3.0 Signer: certificate SHA-256 digest";
+- workflow HF26 usa versionCode 78 / versionName 1.0.78;
+- concurrency group esta alinhado a HF26.

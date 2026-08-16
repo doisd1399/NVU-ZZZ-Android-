@@ -1,0 +1,23 @@
+NVU R3.34-PC-HF26 — WINDOWS
+Android 1.0.78 / versionCode 78
+
+OPCAO RECOMENDADA
+1. Extraia o ZIP HF26.
+2. Execute PREPARAR-ANDROID-WINDOWS.bat.
+3. So prossiga se terminar com sucesso.
+
+MANUAL (raiz do projeto)
+npm ci
+npm run check:android-java-syntax
+npm run verify:release
+npm run build
+npm run prepare:cap-assets
+npx cap sync android
+npm run verify:cap-assets
+
+cd android
+gradlew.bat :app:compileDebugJavaWithJavac --no-daemon
+gradlew.bat assembleRelease --no-daemon
+
+A release deve ser assinada com a MESMA keystore de producao usada no APK instalado.
+Para build assinado e validado automaticamente, prefira o GitHub Actions incluido no projeto.

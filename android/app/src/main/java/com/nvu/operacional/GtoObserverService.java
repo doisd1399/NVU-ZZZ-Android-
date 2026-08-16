@@ -448,6 +448,10 @@ public class GtoObserverService extends Service {
     // are deliberately ignored because Android may redact them as (0,0).
     private final List<ButtonFrameSample> buttonFrameHistory = new ArrayList<>();
     private boolean selectionProbeActive = false;
+    // HF26: visual differences may corroborate a real touch but can never create one.
+    private boolean selectionProbeHumanActionObserved = false;
+    private String selectionProbeHumanActionSource = "";
+    private long lastVisualOnlyPressIgnoredAt = 0L;
     private long selectionProbeStartedAt = 0L;
     private ButtonFrameSample selectionProbeBaseline;
     private int selectionProbeBestRow = -1;
@@ -471,6 +475,12 @@ public class GtoObserverService extends Service {
     private GtoFastVisualDetector.Frame fastLastSnapshotFrame;
     private long lastFastPanelSnapshotAt = 0L;
     private long freightPageGeneration = 0L;
+    // HF26: visual geometry is only a candidate. A page becomes a real freight list
+    // after OCR ties at least one monetary value to an Aceitar-row geometry.
+    private long freightSemanticCertifiedGeneration = -1L;
+    private long freightSemanticCertifiedAt = 0L;
+    private int freightSemanticAnchorRows = 0;
+    private int freightEvidenceRetryCount = 0;
     private long lastFreightPageOcrAt = 0L;
     private boolean fastTouchPulseActive = false;
     private long fastTouchPulseAt = 0L;
@@ -687,8 +697,69 @@ public class GtoObserverService extends Service {
         }
     }
 
+    private void sanitizeLegacyUntrustedPendingSelectionOnStartup() {
+        if (prefs == null) return;
+        String state = prefs.getString("tripState", STATE_IDLE);
+        String status = prefs.getString("selectionIdentityStatus", "");
+        String source = prefs.getString("selectionIdentitySource", prefs.getString("selectionSource", ""));
+        boolean hasReview = prefs.getBoolean("pendingFreightReview", false)
+            || "REVIEW_REQUIRED".equals(prefs.getString("selectionConfirmationStatus", ""));
+        boolean pendingUntrusted = STATE_CONFIRMING_FREIGHT.equals(state)
+            && ("CONFIRMED".equals(status) || hasReview)
+            && !GtoSelectionEvidencePolicy.isHumanBackedSource(source);
+        boolean activeLegacyUntrusted = STATE_TRIP_IN_PROGRESS.equals(state)
+            && "CONFIRMED".equals(prefs.getString("selectionConfirmationStatus", ""))
+            && !GtoSelectionEvidencePolicy.isHumanBackedSource(source);
+        if (!pendingUntrusted && !activeLegacyUntrusted) return;
+
+        if (activeLegacyUntrusted) {
+            String unsafeSession = prefs.getString("gtoTripSessionId", "");
+            GtoAutoTripSync.discardSessionSnapshot(this, unsafeSession);
+            clearTripAnalysis();
+            prefs.edit()
+                .putString("tripState", STATE_IDLE)
+                .putString("lastEvent", "Frete legado sem prova humana descartado · inicie o trabalho novamente")
+                .putString("gtoTripIntegrityStatus", "LEGACY_UNTRUSTED_SELECTION_DROPPED")
+                .apply();
+            recordObserverIncident("LEGACY_UNTRUSTED_ACTIVE_TRIP_DROPPED", "source=" + source);
+            return;
+        }
+
+        prefs.edit()
+            .putString("tripState", STATE_WAITING_FREIGHT)
+            .putString("lastEvent", "Seleção antiga sem prova humana descartada · aguardando lista certificada")
+            .remove("selectionIdentityStatus")
+            .remove("selectionIdentitySource")
+            .remove("selectionIdentityAt")
+            .remove("selectionConfirmationStatus")
+            .remove("pendingFreightReview")
+            .remove("reviewRequiredField")
+            .remove("selectedFreightRow")
+            .remove("preciseSelectedRow")
+            .remove("selectedFreight")
+            .remove("selectedFreightSummary")
+            .remove("reviewCargo")
+            .remove("reviewOriginCompany")
+            .remove("reviewDestinationCompany")
+            .remove("reviewDestination")
+            .remove("reviewKm")
+            .remove("reviewValue")
+            .remove("reviewCargoSource")
+            .remove("reviewOriginCompanySource")
+            .remove("reviewDestinationCompanySource")
+            .remove("reviewDestinationSource")
+            .remove("reviewKmSource")
+            .remove("reviewValueSource")
+            .apply();
+        recordObserverIncident("LEGACY_UNTRUSTED_SELECTION_DROPPED", "source=" + source);
+    }
+
     private boolean prepareJourneyForGtoLaunch() {
         String state = getTripState();
+        if (STATE_CONFIRMING_FREIGHT.equals(state) && !hasConfirmedSelectionIdentity()) {
+            sanitizeLegacyUntrustedPendingSelectionOnStartup();
+            state = getTripState();
+        }
         if (GtoDeterministicFlowPolicy.shouldPrepareWaitingBeforeGtoOpen(state)) {
             // Do not ask for MediaProjection while NVU is still portrait/foreground.
             // The consent is armed below and displayed only after GTO is confirmed.
@@ -1053,6 +1124,7 @@ public class GtoObserverService extends Service {
         textRecognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS);
         selectionTextRecognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS);
         recordObserverEvent("SERVICE_STARTED", "Observador inicializado");
+        sanitizeLegacyUntrustedPendingSelectionOnStartup();
         // MediaProjection itself cannot survive process death, but the immutable FIX18
         // operation/freight snapshot can. Preserve a real in-progress session and only
         // require the driver to re-authorize screen reading when capture is needed again.
@@ -1085,7 +1157,8 @@ public class GtoObserverService extends Service {
                 restoredState,
                 prefs.getString("selectionIdentityStatus", ""),
                 prefs.getString("selectionConfirmationStatus", ""),
-                prefs.getString("reviewRequiredField", "")
+                prefs.getString("reviewRequiredField", ""),
+                prefs.getString("selectionIdentitySource", "")
             );
             prefs.edit()
                 .putString("tripState", recoverableState)
@@ -4236,6 +4309,10 @@ public class GtoObserverService extends Service {
         freightHistory.clear();
         freightHistoryPage = -1;
         freightHistoryUpdatedAt = 0L;
+        freightSemanticCertifiedGeneration = -1L;
+        freightSemanticCertifiedAt = 0L;
+        freightSemanticAnchorRows = 0;
+        freightEvidenceRetryCount = 0;
         pendingFreightSelection = null;
         pendingFreightTouchAt = 0L;
         pendingSelectionSource = "";
@@ -4304,6 +4381,9 @@ public class GtoObserverService extends Service {
             .remove("freightOptions")
             .remove("freightTextGeneration")
             .remove("freightTextAt")
+            .remove("freightSemanticCertifiedGeneration")
+            .remove("freightSemanticConfirmedAt")
+            .remove("freightSemanticAnchorRows")
             .remove("freightPanelLeftScreen")
             .remove("freightPanelScreenAt")
             .remove("selectionConfirmationStatus")
@@ -6352,6 +6432,19 @@ public class GtoObserverService extends Service {
                 }
                 List<FreightOption> parsed = parseFreightOptions(lines, buttonCopy);
                 if (parsed.isEmpty()) return;
+                int semanticAnchors = semanticFreightAnchorRows(parsed);
+                boolean semanticCertified = GtoFreightSemanticCertificationPolicy.isCertifiedPage(
+                    buttonCopy.size(), parsed.size(), semanticAnchors
+                );
+                if (semanticCertified) {
+                    markFreightPageSemanticallyCertified(generation, semanticAnchors, parsed.size());
+                } else {
+                    recordObserverEvent(
+                        "FREIGHT_LIST_CANDIDATE_REJECTED",
+                        "generation=" + generation + " anchors=" + semanticAnchors + " rows=" + parsed.size()
+                    );
+                    return;
+                }
                 // The generation is an immutable page identity from the visual detector.
                 // Stabilize this lightweight list OCR exactly like the older whole-frame
                 // path so a one-frame hallucination can never become a silent fallback.
@@ -6443,11 +6536,12 @@ public class GtoObserverService extends Service {
             long sequence = selectionCoordinator.onFrameProcessed();
 
             if (hasList) {
-                onFreightListVisibleAgain(now);
+                boolean semanticList = isFreightPageSemanticallyCertified(freightPageGeneration);
+                if (semanticList) onFreightListVisibleAgain(now);
                 lastFreightListSeenAt = now;
                 fastMissingListFrames = 0;
-                lastScreenState = "FREIGHT_LIST";
-                persistFreightRuntimeStatus("FREIGHT_LIST", runtimeFreightCount, now, sequence);
+                lastScreenState = semanticList ? "FREIGHT_LIST" : "FREIGHT_LIST_CANDIDATE";
+                persistFreightRuntimeStatus(lastScreenState, semanticList ? runtimeFreightCount : 0, now, sequence);
 
                 recordFastFreightFrame(current, sequence);
                 cacheFastFreightPanel(image, current, now);
@@ -6491,19 +6585,8 @@ public class GtoObserverService extends Service {
                     }
                 }
 
-                // OEM-safe primary fallback: ACTION_OUTSIDE is not guaranteed on every
-                // Android implementation. A press is still identifiable when exactly one
-                // Aceitar row changes while the cargo panel remains the same. This visual
-                // candidate is never committed on its own; the list must subsequently
-                // disappear and the selected row must still pass exact OCR agreement.
-                if (candidate == null && fastPendingSelectedRow < 0 && !fastTouchPulseActive
-                    && fastPreviousFreightFrame != null
-                    && fastVisualDetector.samePage(fastPreviousFreightFrame, current)) {
-                    candidate = fastVisualDetector.detectPressedRow(
-                        fastPreviousFreightFrame, current, captureHeight
-                    );
-                    candidateFromTouch = false;
-                }
+                // HF26: visual differences without a real touch are diagnostic only.
+                // They can no longer create a pending freight selection.
 
                 if (candidate != null && fastPendingSelectedRow < 0 && candidateFromTouch
                     && !coordinateEvidenceAgreesWithRow(candidate.row, fastTouchBaseline.buttons)) {
@@ -6540,23 +6623,8 @@ public class GtoObserverService extends Service {
             if (previousWasList || now - lastFreightListSeenAt <= 300L) {
                 fastMissingListFrames++;
 
-                if (fastPendingSelectedRow < 0 && !fastTouchPulseActive
-                    && fastPreviousFreightFrame != null) {
-                    GtoFastVisualDetector.PressCandidate visualMissing =
-                        fastVisualDetector.detectTemporarilyMissingPressedRow(
-                            fastPreviousFreightFrame, current, captureHeight
-                        );
-                    if (visualMissing != null) {
-                        fastPendingFromTouchPulse = false;
-                        armFastVisualSelection(
-                            visualMissing,
-                            image,
-                            fastPreviousFreightFrame,
-                            current,
-                            now
-                        );
-                    }
-                }
+                // HF26: a visually missing/dark row is not a user action. Only an
+                // active touch pulse may correlate the disappearing row below.
 
                 if (fastPendingSelectedRow < 0 && fastTouchPulseActive && fastTouchBaseline != null
                     && selectionCoordinator.isPostTouch(sequence)) {
@@ -6591,8 +6659,8 @@ public class GtoObserverService extends Service {
                     }
                 }
 
-                int missingRequired = fastPendingFromTouchPulse ? 1 : 2;
-                if (fastPendingSelectedRow >= 0
+                int missingRequired = 1;
+                if (fastPendingSelectedRow >= 0 && fastPendingFromTouchPulse
                     && now - fastPendingSelectedAt <= FAST_SELECTION_CONFIRM_WINDOW_MS
                     && fastMissingListFrames >= missingRequired) {
                     finalizeFastVisualSelection();
@@ -6692,6 +6760,10 @@ public class GtoObserverService extends Service {
         long now
     ) {
         if (candidate == null || baseline == null || candidate.row < 0 || candidate.row >= baseline.buttons.size()) return;
+        if (!fastTouchPulseActive && !fastPendingFromTouchPulse) {
+            recordObserverEvent("VISUAL_PRESS_IGNORED", "row=" + (candidate.row + 1) + " · sem ação humana");
+            return;
+        }
 
         // Prefer the clean pre-touch page snapshot. The pressed/transition frame is only
         // a last-resort OCR source; freight text should never depend on a closing screen.
@@ -6746,6 +6818,11 @@ public class GtoObserverService extends Service {
         int row = fastPendingSelectedRow;
         if (row < 0) return;
         boolean fromPulse = fastPendingFromTouchPulse;
+        if (!fromPulse) {
+            recordObserverIncident("SELECTION_BLOCKED_NO_HUMAN_ACTION", "fast row=" + (row + 1));
+            clearFastPendingSelection();
+            return;
+        }
 
         FreightSelectionTransaction transaction = takePendingSelectionTransaction();
         if (transaction == null) {
@@ -6756,9 +6833,16 @@ public class GtoObserverService extends Service {
         }
         if (transaction == null) {
             FreightOption stable = stableFreightForRow(row);
+            String source = "touch-marker+frame-lock";
             clearFastPendingSelection();
-            setTripState(STATE_CONFIRMING_FREIGHT, "Frete selecionado · revisando dado pendente");
-            enterFreightReview(stable, row, "O frete foi selecionado, mas a página congelada ficou indisponível.", "");
+            if (!ensureHumanSelectionConfirmedForFreight(row, source, freightPageGeneration, stable)) {
+                rejectUncertifiedSelection(
+                    row,
+                    "O toque foi observado, mas não havia snapshot/lista certificada suficiente; nenhum frete foi presumido."
+                );
+                return;
+            }
+            enterFreightReview(stable, row, "O frete foi tocado, mas a página congelada ficou indisponível.", "");
             return;
         }
 
@@ -6773,11 +6857,9 @@ public class GtoObserverService extends Service {
             .putString("selectionSource", transaction.source)
             .putLong("selectionTouchSequence", transaction.touchSequence)
             .apply();
-        persistSelectionIdentity(row, "CONFIRMED", transaction.source);
-
-        // The immutable transaction owns its bitmap and button geometry before the UI
-        // changes state. Removing the 1px sensor or refreshing the overlay cannot recycle it.
-        setTripState(STATE_CONFIRMING_FREIGHT, "Frete identificado · validando dados");
+        // HF26: list exit confirms the driver's action, but semantic freight evidence
+        // still has to certify the frozen row before identity becomes CONFIRMED.
+        persistSelectionIdentity(row, "TOUCH_LOCKED", transaction.source);
         runPreciseSelectedRowOcr(transaction);
     }
 
@@ -6899,23 +6981,15 @@ public class GtoObserverService extends Service {
                 activeState, true, activeTripFreightListFrames, now - activeTripFreightListSeenSince
             );
             activeTripFreightListVisible = stableList;
+            // Visual geometry alone is only a candidate while a trip is active. Do not
+            // announce or expose a freight list until a human action starts replacement;
+            // the normal page OCR will then semantically certify Aceitar + value.
             prefs.edit()
                 .putBoolean("activeTripFreightListVisible", stableList)
-                .putInt("freightCount", stableList ? Math.max(0, count) : 0)
-                .putString("screenState", stableList ? "FREIGHT_LIST_AFTER_TRIP_CANCEL" : "TRIP")
-                .putString("lastEvent", stableList
-                    ? "Lista reaberta no GTO · frete atual preservado até um novo Aceitar"
-                    : prefs.getString("lastEvent", ""))
+                .putInt("freightCount", 0)
+                .putString("screenState", stableList ? "FREIGHT_LIST_CANDIDATE_AFTER_TRIP" : "TRIP")
                 .apply();
-            if (stableList) {
-                mainHandler.post(this::updateFreightTouchPulseSensor);
-                announceDriverStage(
-                    "FREIGHT_LIST_RETURNED_AFTER_CANCEL",
-                    "Lista reaberta · selecione o novo frete.",
-                    3200L,
-                    true
-                );
-            }
+            if (stableList) mainHandler.post(this::updateFreightTouchPulseSensor);
 
             if (replacementFreightTouchPending
                 && now - replacementFreightTouchAt <= CRITICAL_TOUCH_WINDOW_MS + 260L
@@ -7040,7 +7114,7 @@ public class GtoObserverService extends Service {
         // evidenced by a touch marker or an isolated pressed-row transition.
         if (STATE_TRIP_IN_PROGRESS.equals(activeState)) {
             if (!explicitReplacement) return true;
-            boolean selectedNewRow = replacementFreightTouchPending || replacementFreightPressedRow >= 0;
+            boolean selectedNewRow = replacementFreightTouchPending;
             if (!selectedNewRow) return true;
             return promoteReplacementFreightCandidateToWaiting(true);
         }
@@ -7216,7 +7290,7 @@ public class GtoObserverService extends Service {
                 activeTripFreightListSeenSince > 0L ? now - activeTripFreightListSeenSince : 0L
             );
             boolean exactNewAccept = fromTouch && replacementFreightPressedRow >= 0;
-            boolean newAcceptEvidence = fromTouch || replacementFreightTouchPending || replacementFreightPressedRow >= 0;
+            boolean newAcceptEvidence = fromTouch || replacementFreightTouchPending;
             if (!GtoSimpleScreenDetectionPolicy.mayReplaceCancelledTripOnNewAccept(
                 replacedState, replacementFreightCandidateArmed, stableReturnedList, newAcceptEvidence, exactNewAccept
             )) {
@@ -7312,8 +7386,8 @@ public class GtoObserverService extends Service {
                 freightPageGeneration, savedPanel, savedOffset, savedButtons, System.currentTimeMillis()
             );
             prefs.edit()
-                .putString("screenState", "FREIGHT_LIST")
-                .putInt("freightCount", savedButtons.size())
+                .putString("screenState", "FREIGHT_LIST_CANDIDATE")
+                .putInt("freightCount", 0)
                 .putLong("freightStructureAt", savedAt)
                 .apply();
         } else if (savedPanel != null && !savedPanel.isRecycled()) {
@@ -7511,7 +7585,8 @@ public class GtoObserverService extends Service {
         }
 
         buttons.sort(Comparator.comparingInt(Rect::centerY));
-        onFreightListVisibleAgain(now);
+        // HF26: geometry is only a freight-list candidate. Lifecycle/driver messaging
+        // starts after semantic OCR certifies at least one same-row freight value.
         recordButtonFrame(frame, buttons, now);
         if (selectionProbeActive) evaluateSelectionProbe(frame, buttons, now);
         synchronized (freightFrameLock) {
@@ -7520,10 +7595,11 @@ public class GtoObserverService extends Service {
         }
 
         lastFreightListSeenAt = now;
-        lastScreenState = "FREIGHT_LIST";
+        lastScreenState = isFreightPageSemanticallyCertified(freightPageGeneration)
+            ? "FREIGHT_LIST" : "FREIGHT_LIST_CANDIDATE";
         prefs.edit()
-            .putString("screenState", "FREIGHT_LIST")
-            .putInt("freightCount", buttons.size())
+            .putString("screenState", lastScreenState)
+            .putInt("freightCount", "FREIGHT_LIST".equals(lastScreenState) ? buttons.size() : 0)
             .putLong("freightStructureAt", now)
             .putBoolean("touchCaptureNeeded", true)
             .apply();
@@ -7564,6 +7640,8 @@ public class GtoObserverService extends Service {
             selectionProbeBaseline = baseline;
             selectionProbeStartedAt = touchAt;
             selectionProbeActive = true;
+            selectionProbeHumanActionObserved = true;
+            selectionProbeHumanActionSource = "outside-touch+visual-buffer";
             selectionProbeBestRow = -1;
             selectionProbeBestScore = 0f;
             selectionProbeBestMargin = 0f;
@@ -7579,7 +7657,7 @@ public class GtoObserverService extends Service {
             for (Rect rect : baseline.buttons) frozenSelectionButtons.add(new Rect(rect));
         }
         prefs.edit()
-            .putString("selectionSource", "visual-buffer")
+            .putString("selectionSource", "outside-touch+visual-buffer")
             .putString("lastEvent", "Toque detectado na lista; confirmando visualmente o frete selecionado.")
             .apply();
     }
@@ -7589,6 +7667,8 @@ public class GtoObserverService extends Service {
         preciseTouchAcceptancePending = true;
         selectionProbeStartedAt = touchAt > 0L ? touchAt : System.currentTimeMillis();
         selectionProbeActive = true;
+        selectionProbeHumanActionObserved = true;
+        selectionProbeHumanActionSource = "precise-touch+visual-buffer";
         selectionProbeBestRow = -1;
         selectionProbeBestScore = 0f;
         selectionProbeBestMargin = 0f;
@@ -7709,25 +7789,17 @@ public class GtoObserverService extends Service {
         float margin = best - second;
         if (best < 0.050f || margin < 0.018f || stableOthers < Math.max(1, count - 2)) return;
 
-        synchronized (freightFrameLock) {
-            selectionProbeBaseline = previous.copy();
-            selectionProbeStartedAt = current.at;
-            selectionProbeActive = true;
-            selectionProbeBestRow = bestRow;
-            selectionProbeBestScore = best;
-            selectionProbeBestMargin = margin;
-            selectionProbeEvidenceFrames = 1;
-            selectionProbeLastEvidenceRow = bestRow;
-
-            recycleFrozenSelectionPanel();
-            if (latestFreightPanelFrame != null && !latestFreightPanelFrame.isRecycled()) {
-                frozenSelectionPanelFrame = latestFreightPanelFrame.copy(Bitmap.Config.ARGB_8888, false);
-                frozenSelectionPanelOffsetX = latestFreightPanelOffsetX;
-            }
-            frozenSelectionButtons.clear();
-            for (Rect rect : previous.buttons) frozenSelectionButtons.add(new Rect(rect));
+        // HF26: a visually changed button without a touch is never a selection. Keep
+        // this detector only as throttled diagnostics so scenery/camera changes cannot
+        // create or restore a freight identity.
+        long now = System.currentTimeMillis();
+        if (now - lastVisualOnlyPressIgnoredAt >= 1200L) {
+            lastVisualOnlyPressIgnoredAt = now;
+            recordObserverEvent(
+                "VISUAL_PRESS_IGNORED",
+                "row=" + (bestRow + 1) + " score=" + best + " margin=" + margin + " · sem toque"
+            );
         }
-        commitVisualSelectedRow(bestRow, best, margin);
     }
 
 
@@ -7816,6 +7888,15 @@ public class GtoObserverService extends Service {
 
     private void commitVisualSelectedRow(int row, float score, float margin) {
         if (!selectionProbeActive || row < 0) return;
+        if (!GtoSelectionEvidencePolicy.mayConfirmSelection(
+            selectionProbeHumanActionObserved || preciseTouchAcceptancePending,
+            row,
+            Math.max(1, frozenSelectionButtons.size())
+        )) {
+            recordObserverIncident("SELECTION_BLOCKED_NO_HUMAN_ACTION", "visual-buffer row=" + (row + 1));
+            clearSelectionProbe();
+            return;
+        }
         if (preciseTouchAcceptancePending && preciseSelectedRow >= 0 && row != preciseSelectedRow) {
             prefs.edit()
                 .putString("lastEvent", "Linha visual divergente do toque exato; seleção não confirmada.")
@@ -7825,19 +7906,21 @@ public class GtoObserverService extends Service {
         preciseTouchAcceptancePending = false;
         preciseSelectedRow = row;
         preciseSelectedTouchAt = System.currentTimeMillis();
+        String humanSource = selectionProbeHumanActionSource == null || selectionProbeHumanActionSource.isEmpty()
+            ? "touch-probe+visual-buffer" : selectionProbeHumanActionSource;
         selectionProbeActive = false;
         prefs.edit()
             .putInt("preciseSelectedRow", row)
-            .putString("selectionSource", "visual-buffer")
-            .putString("lastEvent", "Frete selecionado · confirmando dados da linha " + (row + 1))
+            .putString("selectionSource", humanSource)
+            .putString("lastEvent", "Ação em Aceitar confirmada · validando a linha " + (row + 1))
             .putBoolean("touchCaptureNeeded", false)
             .apply();
-        persistSelectionIdentity(row, "CONFIRMED", "visual-buffer");
-        // Important: leave WAITING immediately. Otherwise a stale MediaProjection frame
-        // containing the old freight list can auto-close the NVU menu after the driver
-        // has already accepted the job.
-        setTripState(STATE_CONFIRMING_FREIGHT, "Frete selecionado. Confirmando informações…");
-        runPreciseSelectedRowOcr(row);
+        // Keep identity TOUCH_LOCKED until the frozen row/page also proves this was a
+        // semantic freight list. OCR/review cannot fabricate confirmation by itself.
+        persistSelectionIdentity(row, "TOUCH_LOCKED", humanSource);
+        FreightSelectionTransaction transaction = buildSelectionTransaction(row, humanSource);
+        if (transaction != null) runPreciseSelectedRowOcr(transaction);
+        else runPreciseSelectedRowOcr(row);
     }
 
     private void clearSelectionProbe() {
@@ -7845,6 +7928,8 @@ public class GtoObserverService extends Service {
             && prefs != null
             && "TOUCH_LOCKED".equals(prefs.getString("selectionIdentityStatus", ""));
         selectionProbeActive = false;
+        selectionProbeHumanActionObserved = false;
+        selectionProbeHumanActionSource = "";
         selectionProbeStartedAt = 0L;
         selectionProbeBaseline = null;
         selectionProbeBestRow = -1;
@@ -7883,6 +7968,13 @@ public class GtoObserverService extends Service {
         if (prefs == null || row < 0) return;
         String safeStatus = status == null ? "" : status.trim();
         String safeSource = source == null ? "" : source.trim();
+        if ("CONFIRMED".equals(safeStatus) && !GtoSelectionEvidencePolicy.isHumanBackedSource(safeSource)) {
+            recordObserverIncident(
+                "SELECTION_CONFIRMATION_REJECTED",
+                "row=" + (row + 1) + " source=" + safeSource + " · sem ação humana"
+            );
+            return;
+        }
         prefs.edit()
             .putInt("preciseSelectedRow", row)
             .putInt("selectedFreightRow", row)
@@ -7896,7 +7988,10 @@ public class GtoObserverService extends Service {
     private boolean hasConfirmedSelectionIdentity() {
         return prefs != null
             && "CONFIRMED".equals(prefs.getString("selectionIdentityStatus", ""))
-            && prefs.getInt("selectedFreightRow", -1) >= 0;
+            && prefs.getInt("selectedFreightRow", -1) >= 0
+            && GtoSelectionEvidencePolicy.isHumanBackedSource(
+                prefs.getString("selectionIdentitySource", prefs.getString("selectionSource", ""))
+            );
     }
 
     private void handlePreciseTouch(float x, float y, long eventTime) {
@@ -8055,6 +8150,110 @@ public class GtoObserverService extends Service {
         return null;
     }
 
+    private int semanticFreightAnchorRows(List<FreightOption> options) {
+        if (options == null || options.isEmpty()) return 0;
+        int anchors = 0;
+        for (FreightOption option : options) {
+            if (option == null || option.acceptRect == null || !option.acceptTextEvidence) continue;
+            if (GtoFreightReviewPolicy.isManualValueValid(
+                GtoFreightReviewPolicy.VALUE, option.offeredValue
+            )) {
+                anchors++;
+            }
+        }
+        return anchors;
+    }
+
+    private void markFreightPageSemanticallyCertified(long generation, int anchorRows, int rowCount) {
+        if (generation <= 0L || generation != freightPageGeneration) return;
+        boolean firstCertificationForGeneration = !isFreightPageSemanticallyCertified(generation);
+        freightSemanticCertifiedGeneration = generation;
+        freightSemanticCertifiedAt = System.currentTimeMillis();
+        freightSemanticAnchorRows = Math.max(0, anchorRows);
+        prefs.edit()
+            .putLong("freightSemanticCertifiedGeneration", generation)
+            .putLong("freightSemanticConfirmedAt", freightSemanticCertifiedAt)
+            .putInt("freightSemanticAnchorRows", freightSemanticAnchorRows)
+            .putInt("freightCount", Math.max(0, rowCount))
+            .putString("screenState", "FREIGHT_LIST")
+            .apply();
+        if (!firstCertificationForGeneration) return;
+        onFreightListVisibleAgain(freightSemanticCertifiedAt);
+        announceDriverStage(
+            "FREIGHT_LIST_DETECTED",
+            "Lista de fretes detectada · " + Math.max(1, rowCount) + " opção" + (rowCount == 1 ? "" : "ões") + ".",
+            2600L,
+            false
+        );
+    }
+
+    private boolean isFreightPageSemanticallyCertified(long generation) {
+        if (generation <= 0L) return false;
+        long persistedGeneration = prefs == null ? -1L : prefs.getLong("freightSemanticCertifiedGeneration", -1L);
+        return freightSemanticCertifiedGeneration == generation || persistedGeneration == generation;
+    }
+
+    private boolean selectedRowSemanticallyCertifiesFreight(FreightOption option) {
+        if (option == null) return false;
+        return GtoFreightSemanticCertificationPolicy.selectedRowCanCertify(
+            option.acceptRect != null,
+            option.acceptTextEvidence,
+            option.cargo, option.originCompany, option.destination, option.km, option.offeredValue
+        );
+    }
+
+    private boolean ensureHumanSelectionConfirmedForFreight(
+        int row, String source, long pageGeneration, FreightOption evidence
+    ) {
+        String safeSource = source == null ? "" : source.trim();
+        if (!GtoSelectionEvidencePolicy.isHumanBackedSource(safeSource)) {
+            recordObserverIncident(
+                "SELECTION_BLOCKED_NO_HUMAN_ACTION",
+                "row=" + (row + 1) + " source=" + safeSource
+            );
+            return false;
+        }
+        boolean semantic = isFreightPageSemanticallyCertified(pageGeneration)
+            || selectedRowSemanticallyCertifiesFreight(evidence);
+        if (!semantic) {
+            recordObserverIncident(
+                "SELECTION_BLOCKED_UNCERTIFIED_LIST",
+                "row=" + (row + 1) + " pageGeneration=" + pageGeneration
+            );
+            return false;
+        }
+        persistSelectionIdentity(row, "CONFIRMED", safeSource);
+        if (!STATE_CONFIRMING_FREIGHT.equals(getTripState())) {
+            setTripState(STATE_CONFIRMING_FREIGHT, "Frete identificado · validando dados");
+        }
+        return true;
+    }
+
+    private void rejectUncertifiedSelection(int row, String reason) {
+        String safe = reason == null ? "Seleção sem evidência suficiente." : reason.trim();
+        prefs.edit()
+            .remove("selectionIdentityStatus")
+            .remove("selectionIdentitySource")
+            .remove("selectionIdentityAt")
+            .remove("selectedFreightRow")
+            .remove("preciseSelectedRow")
+            .remove("selectionConfirmationStatus")
+            .remove("pendingFreightReview")
+            .remove("reviewRequiredField")
+            .putBoolean("touchCaptureNeeded", true)
+            .putString("lastEvent", safe)
+            .apply();
+        preciseSelectedRow = -1;
+        preciseSelectedTouchAt = 0L;
+        preciseTouchAcceptancePending = false;
+        clearFastPendingSelection();
+        clearSelectionProbe();
+        if (!STATE_WAITING_FREIGHT.equals(getTripState())) {
+            setTripState(STATE_WAITING_FREIGHT, "Aguardando uma lista de fretes confirmada");
+        }
+        recordObserverIncident("SELECTION_REJECTED", "row=" + (row + 1) + " · " + safe);
+    }
+
     private void restoreWaitingAfterSelectionFailure(int rowIndex, String reason) {
         if (screenAnalysisPausedOutsideGto || !gtoForeground) {
             deferredPreciseFreightCommit = null;
@@ -8185,6 +8384,51 @@ public class GtoObserverService extends Service {
         FreightOption draft = trustedReviewDraft(candidate, rowIndex);
         if (forcedField != null && !forcedField.isEmpty()) clearReviewField(draft, forcedField);
         String required = forcedField != null && !forcedField.isEmpty() ? forcedField : firstReviewField(draft);
+
+        // HF26: REVIEW_REQUIRED is a last-mile correction path, never a way to build an
+        // almost-empty freight by hand. If more than two operational fields are still
+        // missing, retry the immutable selected row automatically before involving the
+        // driver. Persistent low evidence invalidates the candidate instead of asking
+        // cargo -> origin -> destination -> distance -> value sequentially.
+        if (!required.isEmpty() && !GtoFreightReviewPolicy.LOCAL_INTEGRITY.equals(required)
+            && !GtoFreightReviewEligibilityPolicy.mayAskDriver(
+                draft.cargo, draft.originCompany, draft.destination, draft.km, draft.offeredValue
+            )) {
+            String source = prefs.getString("selectionIdentitySource", prefs.getString("selectionSource", ""));
+            if (freightEvidenceRetryCount < 2 && GtoSelectionEvidencePolicy.isHumanBackedSource(source)) {
+                FreightSelectionTransaction retry = buildSelectionTransaction(rowIndex, source + "+evidence-retry");
+                if (retry != null) {
+                    freightEvidenceRetryCount++;
+                    recordObserverEvent(
+                        "FREIGHT_EVIDENCE_RETRY",
+                        "row=" + (rowIndex + 1) + " attempt=" + freightEvidenceRetryCount
+                    );
+                    mainHandler.postDelayed(() -> runPreciseSelectedRowOcr(retry), 260L);
+                    return;
+                }
+            }
+            prefs.edit()
+                .remove("selectionIdentityStatus")
+                .remove("selectionIdentitySource")
+                .remove("selectionIdentityAt")
+                .remove("selectedFreightRow")
+                .remove("preciseSelectedRow")
+                .putString("lastEvent", "Seleção descartada: dados automáticos insuficientes para revisão segura")
+                .apply();
+            recordObserverIncident(
+                "FREIGHT_REVIEW_BLOCKED_LOW_EVIDENCE",
+                "row=" + (rowIndex + 1) + " automaticFields="
+                    + GtoFreightReviewEligibilityPolicy.automaticFieldCount(
+                        draft.cargo, draft.originCompany, draft.destination, draft.km, draft.offeredValue
+                    )
+            );
+            restoreWaitingAfterSelectionFailure(
+                rowIndex,
+                "Não foi possível ler dados suficientes do frete com segurança; nenhum frete foi presumido."
+            );
+            return;
+        }
+        freightEvidenceRetryCount = 0;
         freightConfirmationWatchdogGeneration++;
         preciseSelectedRow = rowIndex;
         preciseSelectionOcrBusy = false;
@@ -8296,6 +8540,13 @@ public class GtoObserverService extends Service {
 
     private void commitReviewedFreight(FreightOption selected) {
         if (selected == null || !STATE_CONFIRMING_FREIGHT.equals(getTripState())) return;
+        if (!hasConfirmedSelectionIdentity()) {
+            rejectUncertifiedSelection(
+                selected.rowIndex,
+                "Revisão bloqueada: a seleção não possui evidência humana válida."
+            );
+            return;
+        }
         String missing = firstReviewField(selected);
         if (!missing.isEmpty()) {
             prefs.edit().putString("reviewRequiredField", missing).apply();
@@ -8306,6 +8557,12 @@ public class GtoObserverService extends Service {
         selected.offeredValue = canonicalMoney(selected.offeredValue);
         // Manual review records provenance in SharedPreferences. Never manufacture OCR
         // votes/consensus to satisfy an automatic confidence gate.
+        String identitySource = prefs.getString("selectionIdentitySource", prefs.getString("selectionSource", ""));
+        if (!GtoSelectionEvidencePolicy.isHumanBackedSource(identitySource)) {
+            rejectUncertifiedSelection(selected.rowIndex, "Revisão bloqueada: origem da seleção não é humana.");
+            return;
+        }
+        String reviewedIdentitySource = identitySource + "+field-review";
         String json = freightOptionToJson(selected).toString();
         prefs.edit()
             .putString("selectedFreight", json)
@@ -8326,10 +8583,10 @@ public class GtoObserverService extends Service {
             .putString("selectedKmSource", prefs.getString("reviewKmSource", "OCR"))
             .putString("selectedValueSource", prefs.getString("reviewValueSource", "OCR"))
             .putString("selectionConfirmationStatus", "CONFIRMED")
-            .putString("selectionIdentityStatus", "CONFIRMED")
-            .putString("selectionSource", prefs.getString("selectionSource", "frame-lock") + "+field-review")
+            .putString("selectionSource", reviewedIdentitySource)
             .putBoolean("touchCaptureNeeded", false)
             .apply();
+        persistSelectionIdentity(selected.rowIndex, "CONFIRMED", reviewedIdentitySource);
         persistFreightFieldStatuses(selected, "");
         recordObserverEvent("FREIGHT_FIELDS_CONFIRMED", "row=" + (selected.rowIndex + 1) + " source=review");
         if (!GtoAutoTripSync.lockSelectedFreight(this, prefs)) {
@@ -8347,6 +8604,11 @@ public class GtoObserverService extends Service {
     }
 
     private void transitionConfirmedFreightToTripInProgress() {
+        if (!hasConfirmedSelectionIdentity()) {
+            int row = prefs == null ? -1 : prefs.getInt("selectedFreightRow", -1);
+            rejectUncertifiedSelection(row, "Transição para viagem bloqueada: seleção sem prova humana confirmada.");
+            return;
+        }
         activeReviewInputDraft = "";
         activeReviewInputField = "";
         activeReviewInput = null;
@@ -8368,7 +8630,6 @@ public class GtoObserverService extends Service {
             .remove("reviewKmSource")
             .remove("reviewValueSource")
             .putString("selectionConfirmationStatus", "CONFIRMED")
-            .putString("selectionIdentityStatus", "CONFIRMED")
             .apply();
         pendingFreightSelection = null;
         visualFreightSelection = null;
@@ -8400,9 +8661,18 @@ public class GtoObserverService extends Service {
     }
 
     private void runPreciseSelectedRowOcr(int rowIndex) {
-        FreightSelectionTransaction transaction = buildSelectionTransaction(rowIndex, "legacy-row-selection");
+        String source = prefs == null ? "" : prefs.getString("selectionSource", "");
+        if (!GtoSelectionEvidencePolicy.isHumanBackedSource(source)) {
+            rejectUncertifiedSelection(rowIndex, "Leitura de frete bloqueada: não existe ação humana vinculada à seleção.");
+            return;
+        }
+        FreightSelectionTransaction transaction = buildSelectionTransaction(rowIndex, source);
         if (transaction == null) {
             FreightOption stable = stableFreightForRow(rowIndex);
+            if (!ensureHumanSelectionConfirmedForFreight(rowIndex, source, freightPageGeneration, stable)) {
+                rejectUncertifiedSelection(rowIndex, "A seleção não pôde ser associada a uma lista de fretes certificada.");
+                return;
+            }
             if (isStableFreightSafeToCommit(stable)) commitPreciseFreight(stable);
             else enterFreightReview(stable, rowIndex, freightSafetyFailure(stable,
                 "Frete selecionado; faltam dados legíveis para concluir a confirmação."), "");
@@ -8419,11 +8689,17 @@ public class GtoObserverService extends Service {
             transaction.close();
             return;
         }
+        final String transactionSource = transaction.source == null ? "" : transaction.source;
+        final long transactionPageGeneration = transaction.pageGeneration;
         if (selectionTextRecognizer == null) {
             int reviewRow = transaction.rowIndex;
             FreightOption frozen = transaction.baselineOption == null
                 ? null : copyFreightOption(transaction.baselineOption);
             transaction.close();
+            if (!ensureHumanSelectionConfirmedForFreight(reviewRow, transactionSource, transactionPageGeneration, frozen)) {
+                rejectUncertifiedSelection(reviewRow, "OCR indisponível e a lista não estava semanticamente certificada; nenhum frete foi presumido.");
+                return;
+            }
             enterFreightReview(frozen, reviewRow, "OCR local indisponível; a linha selecionada foi preservada.", "");
             return;
         }
@@ -8464,8 +8740,12 @@ public class GtoObserverService extends Service {
                     ? null : copyFreightOption(transaction.baselineOption);
                 transaction.close();
                 // Do not commit a live page-history row after a timeout. The frozen
-                // pre-touch page may seed review, but only selected-row OCR can auto-lock
-                // the trip after the touch.
+                // pre-touch page may seed review only when the human action and the
+                // freight page were independently certified.
+                if (!ensureHumanSelectionConfirmedForFreight(row, transactionSource, transactionPageGeneration, frozen)) {
+                    rejectUncertifiedSelection(row, "Timeout de OCR sem evidência semântica suficiente; nenhum frete foi presumido.");
+                    return;
+                }
                 enterFreightReview(frozen, row, freightSafetyFailure(frozen,
                     "A leitura da linha selecionada demorou além do seguro; confirme somente o campo necessário."), "");
                 return;
@@ -8491,6 +8771,10 @@ public class GtoObserverService extends Service {
             FreightOption frozen = transaction.baselineOption == null
                 ? null : copyFreightOption(transaction.baselineOption);
             transaction.close();
+            if (!ensureHumanSelectionConfirmedForFreight(rowIndex, transactionSource, transactionPageGeneration, frozen)) {
+                rejectUncertifiedSelection(rowIndex, "Imagem congelada indisponível e lista não certificada; nenhum frete foi presumido.");
+                return;
+            }
             enterFreightReview(frozen, rowIndex, freightSafetyFailure(frozen,
                 "Frete selecionado, mas a imagem congelada não pôde ser copiada."), "");
             return;
@@ -8501,6 +8785,10 @@ public class GtoObserverService extends Service {
             FreightOption frozen = transaction.baselineOption == null
                 ? null : copyFreightOption(transaction.baselineOption);
             transaction.close();
+            if (!ensureHumanSelectionConfirmedForFreight(rowIndex, transactionSource, transactionPageGeneration, frozen)) {
+                rejectUncertifiedSelection(rowIndex, "Geometria da linha inválida e lista não certificada; nenhum frete foi presumido.");
+                return;
+            }
             enterFreightReview(frozen, rowIndex, freightSafetyFailure(frozen,
                 "Frete selecionado, mas os campos da linha precisam de revisão."), "");
             return;
@@ -8614,6 +8902,15 @@ public class GtoObserverService extends Service {
                 if (selected == null) {
                     FreightOption frozen = frozenSelectedPageBaseline == null
                         ? null : copyFreightOption(frozenSelectedPageBaseline);
+                    if (!ensureHumanSelectionConfirmedForFreight(
+                        exactRow, transactionSource, transactionPageGeneration, frozen
+                    )) {
+                        rejectUncertifiedSelection(
+                            exactRow,
+                            "A ação do motorista foi detectada, mas a imagem não comprovou uma lista de fretes; nenhum frete foi presumido."
+                        );
+                        return;
+                    }
                     enterFreightReview(frozen, exactRow,
                         "A linha selecionada ficou parcialmente ilegível ou encoberta; a seleção foi preservada.", "");
                     return;
@@ -8645,6 +8942,22 @@ public class GtoObserverService extends Service {
                             .putString("lastOriginExtractionSource", geometricOriginFallback.source)
                             .putLong("lastOriginExtractionAt", System.currentTimeMillis())
                             .apply();
+                    }
+
+                    if (!ensureHumanSelectionConfirmedForFreight(
+                        exactRow, transactionSource, transactionPageGeneration, selected
+                    )) {
+                        FreightOption semanticFallback = frozenSelectedPageBaseline == null
+                            ? null : copyFreightOption(frozenSelectedPageBaseline);
+                        if (!ensureHumanSelectionConfirmedForFreight(
+                            exactRow, transactionSource, transactionPageGeneration, semanticFallback
+                        )) {
+                            rejectUncertifiedSelection(
+                                exactRow,
+                                "A linha tocada não apresentou evidência semântica suficiente de frete; nenhum frete foi presumido."
+                            );
+                            return;
+                        }
                     }
 
                     FreightOption stableSamePage = frozenSelectedPageBaseline == null
@@ -8715,8 +9028,18 @@ public class GtoObserverService extends Service {
                 if (!isCurrentPreciseSelectionOcr(scheduledSelectionGeneration, scheduledSelectionSessionId)) return;
                 FreightOption frozen = frozenSelectedPageBaseline == null
                     ? null : copyFreightOption(frozenSelectedPageBaseline);
-                // A failed selected-row OCR must never auto-commit page history. Preserve
-                // the exact row identity and ask only for fields that truly need review.
+                // A failed selected-row OCR must never auto-commit page history. Review is
+                // allowed only when the human action and the frozen freight page were
+                // already semantically certified.
+                if (!ensureHumanSelectionConfirmedForFreight(
+                    exactRow, transactionSource, transactionPageGeneration, frozen
+                )) {
+                    rejectUncertifiedSelection(
+                        exactRow,
+                        "Falha de OCR sem certificação semântica da lista; nenhum frete foi presumido."
+                    );
+                    return;
+                }
                 enterFreightReview(frozen, exactRow,
                     "Falha temporária de OCR (" + error.getClass().getSimpleName() + "); a linha selecionada foi preservada.", "");
             })
@@ -9446,7 +9769,7 @@ public class GtoObserverService extends Service {
             .putString("selectedCargo", selected.cargo)
             .putString("selectedKm", selected.km)
             .putString("selectedValue", selected.offeredValue)
-            .putString("selectionSource", prefs.getString("selectionSource", "frame-lock") + "+row-ocr")
+            .putString("selectionSource", prefs.getString("selectionIdentitySource", prefs.getString("selectionSource", "")) + "+row-ocr")
             .putString("selectionConfirmationStatus", "CONFIRMED")
             .putBoolean("touchCaptureNeeded", false)
             .remove("pendingFreight")
@@ -9795,6 +10118,19 @@ public class GtoObserverService extends Service {
             ? parseFreightOptions(lines, visualButtons)
             : Collections.emptyList();
         if (!parsedOptions.isEmpty()) {
+            int semanticAnchors = semanticFreightAnchorRows(parsedOptions);
+            boolean semanticCertified = GtoFreightSemanticCertificationPolicy.isCertifiedPage(
+                visualButtons.size(), parsedOptions.size(), semanticAnchors
+            );
+            if (!semanticCertified) {
+                lastScreenState = "FREIGHT_LIST_CANDIDATE";
+                prefs.edit()
+                    .putString("screenState", lastScreenState)
+                    .putInt("freightCount", 0)
+                    .putString("lastEvent", "Estrutura semelhante à lista detectada, mas sem evidência semântica suficiente")
+                    .apply();
+                return;
+            }
             lastScreenState = "FREIGHT_LIST";
             lastFreightListSeenAt = System.currentTimeMillis();
             freightListMissingSince = 0L;
@@ -9826,34 +10162,28 @@ public class GtoObserverService extends Service {
                 freightOptions.clear();
                 freightOptions.addAll(stableOptions);
             }
-            long semanticListAt = System.currentTimeMillis();
+            markFreightPageSemanticallyCertified(
+                freightPageGeneration > 0L ? freightPageGeneration : Math.max(1, freightPage),
+                semanticAnchors,
+                stableOptions.size()
+            );
             prefs.edit()
                 .putString("screenState", lastScreenState)
                 .putString("freightOptions", freightOptionsToJson(stableOptions))
                 .putInt("freightCount", stableOptions.size())
                 .putInt("freightPage", freightPage)
                 .putLong("freightStableAt", freightHistoryUpdatedAt)
-                .putLong("freightSemanticConfirmedAt", semanticListAt)
                 .apply();
-            announceDriverStage(
-                "FREIGHT_LIST_DETECTED",
-                "Lista de fretes detectada · " + stableOptions.size() + " opção" + (stableOptions.size() == 1 ? "" : "ões") + ".",
-                2600L,
-                false
-            );
             return;
         }
 
-        // Geometry is authoritative for list presence/count. OCR is allowed to lag or
-        // miss a text field without making the app think the freight screen disappeared.
+        // Geometry alone is only a candidate. It may keep the low-cost touch sensor
+        // armed, but it must never be exposed as a certified list or create a selection.
         if (waitingForFreight && visualButtons != null && !visualButtons.isEmpty()) {
-            lastScreenState = "FREIGHT_LIST";
-            lastFreightListSeenAt = System.currentTimeMillis();
-            freightListMissingSince = 0L;
-            freightListMissingFrames = 0;
+            lastScreenState = "FREIGHT_LIST_CANDIDATE";
             prefs.edit()
                 .putString("screenState", lastScreenState)
-                .putInt("freightCount", visualButtons.size())
+                .putInt("freightCount", 0)
                 .putBoolean("touchCaptureNeeded", true)
                 .apply();
             return;
@@ -9999,6 +10329,12 @@ public class GtoObserverService extends Service {
             option.rowTop = top;
             option.rowBottom = bottom;
             option.rawText = joinCardText(cardLines);
+            for (OcrLine line : cardLines) {
+                if (normalize(line.text).contains("aceitar")) {
+                    option.acceptTextEvidence = true;
+                    break;
+                }
+            }
 
             // Prefer the visually detected orange button. Its geometry is independent
             // from OCR and gives us an exact row target even when Android hides touch
@@ -10504,6 +10840,7 @@ public class GtoObserverService extends Service {
         dst.km = src.km;
         dst.offeredValue = src.offeredValue;
         dst.rawText = src.rawText;
+        dst.acceptTextEvidence = src.acceptTextEvidence;
         dst.dataConfidence = src.dataConfidence;
         dst.consensusFrames = src.consensusFrames;
         dst.cargoVotes = src.cargoVotes;
@@ -12312,6 +12649,7 @@ public class GtoObserverService extends Service {
         String km = "";
         String offeredValue = "";
         String rawText = "";
+        boolean acceptTextEvidence = false;
         float dataConfidence = 0f;
         int consensusFrames = 0;
         int cargoVotes = 0;

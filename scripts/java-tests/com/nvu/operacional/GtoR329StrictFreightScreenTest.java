@@ -21,7 +21,12 @@ public final class GtoR329StrictFreightScreenTest {
             "scripts/fixtures/r329-gameplay-stale-1.png",
             "scripts/fixtures/r329-gameplay-stale-2.png",
             "scripts/fixtures/r331-trip-phantom-list.png",
-            "scripts/fixtures/r331-post-trip-screen.png"
+            "scripts/fixtures/r331-post-trip-screen.png",
+            "scripts/fixtures/hf26-negative-gameplay-1.png",
+            "scripts/fixtures/hf26-negative-gameplay-2.png",
+            "scripts/fixtures/hf26-negative-gameplay-3.png",
+            "scripts/fixtures/hf26-negative-gameplay-4.png",
+            "scripts/fixtures/hf26-negative-gameplay-5.png"
         };
         GtoFastVisualDetector detector = new GtoFastVisualDetector();
         long ts = 1L;

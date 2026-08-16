@@ -157,6 +157,8 @@ public class GtoObserverService extends Service {
     // Recovery must remain available for the entire authorized MediaProjection session.
     // A short cooldown prevents a tight rebind loop without creating a terminal attempt cap.
     private static final long PROJECTION_SURFACE_REBIND_COOLDOWN_MS = 1500L;
+    private static final long PROJECTION_AUTO_REAUTH_COOLDOWN_MS = 12_000L;
+    private static final int PROJECTION_SURFACE_REAUTH_ESCALATION_ATTEMPTS = 3;
     private static final long EXPLICIT_FREIGHT_REPLACEMENT_TIMEOUT_MS = 30_000L;
     private static final long DRIVER_ERROR_NOTICE_THROTTLE_MS = 4500L;
     private static final long BUBBLE_TAP_DEBOUNCE_MS = 180L;
@@ -208,6 +210,7 @@ public class GtoObserverService extends Service {
 
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final AtomicBoolean ocrBusy = new AtomicBoolean(false);
+    private boolean focusedFreightConflictRetryBusy = false;
     private final AtomicBoolean resultSnapshotRecoveryBusy = new AtomicBoolean(false);
     private long resultSnapshotRecoveryGeneration = 0L;
     private long resultEvidenceSequence = 0L;
@@ -223,6 +226,9 @@ public class GtoObserverService extends Service {
 
     private FrameLayout bubbleView;
     private View captureHealthDotView;
+    private TextView bubbleRemoveTargetView;
+    private WindowManager.LayoutParams bubbleRemoveTargetParams;
+    private boolean bubbleRemoveTargetHighlighted = false;
     private Boolean lastCaptureHealthIndicatorState = null;
     private WindowManager.LayoutParams bubbleParams;
     private LinearLayout menuView;
@@ -359,6 +365,7 @@ public class GtoObserverService extends Service {
     private int captureResizeRetryCount = 0;
     private int projectionSurfaceRebindAttempts = 0;
     private long lastProjectionSurfaceRecoveryAt = 0L;
+    private long lastProjectionAutoReauthAt = 0L;
     private long lastProjectionFrameAt = 0L;
     private long lastProjectionAnalyzedFrameAt = 0L;
     private VirtualDisplay virtualDisplay;
@@ -549,6 +556,10 @@ public class GtoObserverService extends Service {
                 && (packageMatchesGto || visualBridgeAllowed);
 
             if (rawGto) {
+                // A remove target is only meaningful outside GTO while the user is dragging.
+                // If foreground changes mid-gesture, remove the helper immediately without
+                // touching the primary bubble or the observer state.
+                hideBubbleRemoveTarget();
                 long absenceMs = nonGtoForegroundSince > 0L ? now - nonGtoForegroundSince : 0L;
                 lastGtoForegroundEvidenceAt = now;
                 nonGtoForegroundSince = 0L;
@@ -583,7 +594,7 @@ public class GtoObserverService extends Service {
                 maybeLaunchInitialProjectionPermissionOverGto(now);
                 retryPendingDriverStageIfNeeded(now);
                 updateFreightTouchPulseSensor();
-                maybeNotifyProjectionReauthorization();
+                ensureProjectionAuthorizationIfNeeded(now);
             } else if (transientForegroundSurfaceActive && gtoForeground) {
                 // Do not destroy/recreate the main floating bubble for notification shade,
                 // permission controller or OEM game-assistant surfaces. OCR/touch sensing is
@@ -822,6 +833,7 @@ public class GtoObserverService extends Service {
             .putString("projectionStatus", safeStatus)
             .putString("projectionError", safeError)
             .putBoolean("projectionReauthRequired", true)
+            .putBoolean("projectionReauthAutoAllowed", true)
             .putBoolean("projectionReauthNoticeShown", false)
             .putString("lastEvent", safeError.isEmpty()
                 ? "Falha terminal no fluxo de autorização da leitura da tela"
@@ -851,6 +863,7 @@ public class GtoObserverService extends Service {
             .putString("projectionStatus", projectionStatus)
             .putString("projectionError", error == null ? "" : error)
             .putBoolean("projectionReauthRequired", true)
+            .putBoolean("projectionReauthAutoAllowed", true)
             .putBoolean("projectionReauthNoticeShown", false)
             .apply();
         updateFreightTouchPulseSensor();
@@ -1078,6 +1091,7 @@ public class GtoObserverService extends Service {
                 .putString("tripState", recoverableState)
                 .putString("projectionStatus", "REAUTH_REQUIRED_AFTER_RESTART")
                 .putBoolean("projectionReauthRequired", true)
+                .putBoolean("projectionReauthAutoAllowed", true)
                 .putBoolean("projectionReauthNoticeShown", false)
                 .putString("lastEvent", STATE_TRIP_IN_PROGRESS.equals(recoverableState)
                     ? "Viagem GTO preservada após reinício · autorize a leitura da tela para finalizar"
@@ -1144,6 +1158,7 @@ public class GtoObserverService extends Service {
                 .remove("projectionPermissionAfterGtoOpenArmedAt")
                 .putString("screenState", "CAPTURE_DENIED")
                 .putBoolean("projectionReauthRequired", true)
+                .putBoolean("projectionReauthAutoAllowed", false)
                 .putBoolean("projectionReauthNoticeShown", false)
                 .putBoolean("touchCaptureNeeded", false)
                 .putString("lastEvent", "Captura de tela não autorizada")
@@ -1212,6 +1227,7 @@ public class GtoObserverService extends Service {
                     .putString("projectionStatus", projectionStatus)
                     .putString("projectionError", "O Android retornou autorização sem um token de captura válido.")
                     .putBoolean("projectionReauthRequired", true)
+                    .putBoolean("projectionReauthAutoAllowed", true)
                     .putBoolean("projectionReauthNoticeShown", false)
                     .putString("lastEvent", "Autorização recebida sem token de captura válido")
                     .apply();
@@ -1477,6 +1493,68 @@ public class GtoObserverService extends Service {
         updateNotification();
     }
 
+    private void ensureProjectionAuthorizationIfNeeded(long now) {
+        if (!prefs.getBoolean("projectionReauthRequired", false) || !captureIsNeededForCurrentState()) return;
+        maybeNotifyProjectionReauthorization();
+
+        DisplayMetrics metrics = realDisplayMetrics();
+        boolean exactGto = gtoForeground && GTO_PACKAGE.equals(foregroundPackage);
+        boolean landscape = metrics.widthPixels > metrics.heightPixels && metrics.heightPixels > 0;
+        boolean bubbleAttached = bubbleView != null && bubbleView.isAttachedToWindow();
+        boolean autoAllowed = prefs.getBoolean("projectionReauthAutoAllowed", true);
+        if (!GtoProjectionRecoveryPolicy.shouldAutoRequest(
+            true,
+            autoAllowed,
+            gtoForeground,
+            exactGto,
+            landscape,
+            bubbleAttached,
+            true,
+            projectionActive,
+            projectionSurfacePending,
+            projectionPermissionInFlight,
+            now,
+            lastProjectionAutoReauthAt,
+            PROJECTION_AUTO_REAUTH_COOLDOWN_MS
+        )) return;
+
+        lastProjectionAutoReauthAt = now;
+        prefs.edit()
+            .putLong("projectionAutoReauthRequestedAt", now)
+            .putString("lastEvent", "Detecção indisponível · solicitando nova autorização automaticamente")
+            .apply();
+        announceDriverStage(
+            "CAPTURE_REAUTH_REQUIRED",
+            "A leitura da tela precisa ser reativada. Confirme a autorização do Android.",
+            4200L,
+            true
+        );
+        launchProjectionPermissionActivityOnlyWhenGtoLandscape("AUTO_REAUTH_AFTER_CAPTURE_LOSS");
+    }
+
+    private void escalateProjectionToFreshAuthorization(String reason) {
+        if (destroying || !running || !captureIsNeededForCurrentState()) return;
+        String safeReason = reason == null || reason.trim().isEmpty()
+            ? "Captura permaneceu sem quadros após recuperação da superfície"
+            : reason.trim();
+        stopProjection();
+        projectionStatus = "REAUTH_REQUIRED_AFTER_STALL";
+        prefs.edit()
+            .putString("projectionStatus", projectionStatus)
+            .putBoolean("projectionReauthRequired", true)
+            .putBoolean("projectionReauthAutoAllowed", true)
+            .putBoolean("projectionReauthNoticeShown", false)
+            .putString("projectionError", safeReason)
+            .putString("captureReadiness", "REAUTH_REQUIRED")
+            .putBoolean("captureReadyForAnalysis", false)
+            .putString("lastEvent", safeReason + " · solicitando nova autorização")
+            .apply();
+        updateNotification();
+        if (gtoForeground) {
+            mainHandler.postDelayed(() -> ensureProjectionAuthorizationIfNeeded(System.currentTimeMillis()), 320L);
+        }
+    }
+
     private void reconcileProjectionPermissionLifecycle(long now) {
         // A real bound/active MediaProjection is authoritative. If a stale UI latch
         // survived a lifecycle edge, clear only the latch; never discard the grant.
@@ -1510,6 +1588,7 @@ public class GtoObserverService extends Service {
                 .putBoolean("projectionPermissionInFlight", false)
                 .putString("projectionStatus", projectionStatus)
                 .putBoolean("projectionReauthRequired", true)
+                .putBoolean("projectionReauthAutoAllowed", true)
                 .putBoolean("projectionReauthNoticeShown", false)
                 .putString("projectionError", "O Android devolveu o resultado da autorização, mas nenhuma sessão de captura ficou vinculada.")
                 .putString("lastEvent", "Resultado de autorização sem sessão vinculada · nova tentativa manual necessária")
@@ -1525,6 +1604,7 @@ public class GtoObserverService extends Service {
             .putBoolean("projectionPermissionInFlight", false)
             .putString("projectionStatus", projectionStatus)
             .putBoolean("projectionReauthRequired", true)
+            .putBoolean("projectionReauthAutoAllowed", true)
             .putBoolean("projectionReauthNoticeShown", false)
             .putString("projectionError", "A tela de autorização não devolveu um resultado ao NVU dentro do tempo esperado.")
             .putString("lastEvent", "Autorização do Android sem retorno · fluxo desbloqueado com segurança")
@@ -1752,6 +1832,9 @@ public class GtoObserverService extends Service {
                         // Dragging is an explicit user action, so collapsing the menu here
                         // is deterministic. Minor finger jitter never closes it anymore.
                         closeMenu(false);
+                        if (GtoBubbleDismissPolicy.shouldShowRemoveTarget(gtoForeground, true)) {
+                            showBubbleRemoveTarget();
+                        }
                     }
                     if (!dragging[0]) return true;
                     DisplayMetrics screen = realDisplayMetrics();
@@ -1770,9 +1853,11 @@ public class GtoObserverService extends Service {
                     );
                     try {
                         windowManager.updateViewLayout(bubbleView, bubbleParams);
+                        updateBubbleRemoveTargetHighlight();
                     } catch (Exception ex) {
                         recordOverlayFailure(ex);
-                                    try { windowManager.removeView(bubbleView); } catch (Exception ignored) {}
+                        hideBubbleRemoveTarget();
+                        try { windowManager.removeView(bubbleView); } catch (Exception ignored) {}
                         bubbleView = null;
                         captureHealthDotView = null;
                         lastCaptureHealthIndicatorState = null;
@@ -1784,6 +1869,12 @@ public class GtoObserverService extends Service {
                     // In that case ACTION_MOVE already detached the broken overlay and
                     // cleared bubbleParams. Never dereference that stale LayoutParams on
                     // ACTION_UP; let the foreground self-heal recreate the bubble instead.
+                    if (dragging[0] && isBubbleDroppedOnRemoveTarget()) {
+                        hideBubbleRemoveTarget();
+                        stopObserverFromFloatingBubble();
+                        return true;
+                    }
+                    hideBubbleRemoveTarget();
                     if (bubbleParams != null) {
                         prefs.edit().putInt("bubbleX", bubbleParams.x).putInt("bubbleY", bubbleParams.y).apply();
                     }
@@ -1795,6 +1886,7 @@ public class GtoObserverService extends Service {
                     return true;
                 case MotionEvent.ACTION_CANCEL:
                     dragging[0] = false;
+                    hideBubbleRemoveTarget();
                     return true;
                 default:
                     return false;
@@ -1822,6 +1914,125 @@ public class GtoObserverService extends Service {
             lastCaptureHealthIndicatorState = null;
             bubbleParams = null;
             recordOverlayFailure(ex);
+        }
+    }
+
+    private void showBubbleRemoveTarget() {
+        if (gtoForeground || windowManager == null || bubbleRemoveTargetView != null) return;
+        DisplayMetrics screen = realDisplayMetrics();
+        final int width = dp(184);
+        final int height = dp(52);
+        final int bottomMargin = safeBottomInsetPx() + dp(20);
+
+        TextView target = new TextView(this);
+        target.setText("Remover e parar NVU");
+        target.setTextColor(Color.WHITE);
+        target.setTextSize(14f);
+        target.setGravity(Gravity.CENTER);
+        target.setTypeface(target.getTypeface(), android.graphics.Typeface.BOLD);
+        target.setPadding(dp(14), 0, dp(14), 0);
+        target.setBackground(makeRoundedBackground(Color.rgb(92, 45, 48), dp(18)));
+        target.setElevation(dp(8));
+
+        WindowManager.LayoutParams params = new WindowManager.LayoutParams(
+            width,
+            height,
+            overlayType(),
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            PixelFormat.TRANSLUCENT
+        );
+        params.gravity = Gravity.TOP | Gravity.START;
+        params.x = Math.max(dp(8), (screen.widthPixels - width) / 2);
+        params.y = Math.max(
+            safeTopInsetPx() + dp(8),
+            screen.heightPixels - bottomMargin - height
+        );
+
+        try {
+            windowManager.addView(target, params);
+            bubbleRemoveTargetView = target;
+            bubbleRemoveTargetParams = params;
+            bubbleRemoveTargetHighlighted = false;
+            prefs.edit()
+                .putBoolean("bubbleRemoveTargetVisible", true)
+                .putString("lastEvent", "Arraste a bolinha até Remover e parar NVU para encerrar o observador")
+                .apply();
+        } catch (Exception ex) {
+            bubbleRemoveTargetView = null;
+            bubbleRemoveTargetParams = null;
+            bubbleRemoveTargetHighlighted = false;
+            // The optional remove target is not the primary NVU overlay. A failure to
+            // attach this helper must never mark the main bubble as unavailable or
+            // interfere with capture/observer health.
+            if (prefs != null) {
+                prefs.edit()
+                    .putBoolean("bubbleRemoveTargetVisible", false)
+                    .putString("bubbleRemoveTargetError", describeError(ex))
+                    .putLong("bubbleRemoveTargetErrorAt", System.currentTimeMillis())
+                    .apply();
+            }
+        }
+    }
+
+    private void updateBubbleRemoveTargetHighlight() {
+        if (bubbleRemoveTargetView == null || bubbleRemoveTargetParams == null || bubbleParams == null || bubbleView == null) return;
+        int bubbleWidth = bubbleView.getWidth() > 0 ? bubbleView.getWidth() : dp(69);
+        int bubbleHeight = bubbleView.getHeight() > 0 ? bubbleView.getHeight() : dp(56);
+        boolean inside = GtoBubbleDismissPolicy.isDropInside(
+            bubbleParams.x, bubbleParams.y, bubbleWidth, bubbleHeight,
+            bubbleRemoveTargetParams.x, bubbleRemoveTargetParams.y,
+            bubbleRemoveTargetParams.width, bubbleRemoveTargetParams.height
+        );
+        if (inside == bubbleRemoveTargetHighlighted) return;
+        bubbleRemoveTargetHighlighted = inside;
+        bubbleRemoveTargetView.setBackground(makeRoundedBackground(
+            inside ? Color.rgb(177, 47, 55) : Color.rgb(92, 45, 48),
+            dp(18)
+        ));
+        bubbleRemoveTargetView.setText(inside ? "Solte para remover" : "Remover e parar NVU");
+    }
+
+    private boolean isBubbleDroppedOnRemoveTarget() {
+        if (gtoForeground || bubbleRemoveTargetView == null || bubbleRemoveTargetParams == null
+            || bubbleParams == null || bubbleView == null) return false;
+        int bubbleWidth = bubbleView.getWidth() > 0 ? bubbleView.getWidth() : dp(69);
+        int bubbleHeight = bubbleView.getHeight() > 0 ? bubbleView.getHeight() : dp(56);
+        return GtoBubbleDismissPolicy.isDropInside(
+            bubbleParams.x, bubbleParams.y, bubbleWidth, bubbleHeight,
+            bubbleRemoveTargetParams.x, bubbleRemoveTargetParams.y,
+            bubbleRemoveTargetParams.width, bubbleRemoveTargetParams.height
+        );
+    }
+
+    private void hideBubbleRemoveTarget() {
+        if (bubbleRemoveTargetView != null && windowManager != null) {
+            try { windowManager.removeView(bubbleRemoveTargetView); } catch (Exception ignored) {}
+        }
+        bubbleRemoveTargetView = null;
+        bubbleRemoveTargetParams = null;
+        bubbleRemoveTargetHighlighted = false;
+        if (prefs != null) prefs.edit().putBoolean("bubbleRemoveTargetVisible", false).apply();
+    }
+
+    private void stopObserverFromFloatingBubble() {
+        if (prefs != null) {
+            prefs.edit()
+                .putString("lastEvent", "Observador GTO encerrado pelo gesto de remover da bolinha")
+                .putLong("observerStoppedFromBubbleAt", System.currentTimeMillis())
+                .apply();
+        }
+        Intent stopIntent = new Intent(this, GtoObserverService.class).setAction(ACTION_STOP);
+        try {
+            startService(stopIntent);
+        } catch (Exception ex) {
+            // Same-process fallback. The gesture must never leave a half-running observer.
+            if (prefs != null) prefs.edit().putBoolean("enabled", false).apply();
+            stopProjection();
+            hideOverlays();
+            stopForeground(STOP_FOREGROUND_REMOVE);
+            stopSelf();
         }
     }
 
@@ -3377,13 +3588,14 @@ public class GtoObserverService extends Service {
             .putBoolean("captureSurfaceReady", false)
             .putString("projectionStatus", projectionStatus)
             .putBoolean("projectionReauthRequired", true)
+            .putBoolean("projectionReauthAutoAllowed", true)
             .putBoolean("projectionReauthNoticeShown", false)
             .putString("captureContinuityStatus", "REAUTH_REQUIRED")
             .putString("captureContinuityError", "MediaProjection indisponível ao retornar ao GTO")
             .putLong("captureContinuityCheckedAt", System.currentTimeMillis())
             .putString("lastEvent", "Viagem preservada · leitura da tela precisa ser reativada")
             .apply();
-        maybeNotifyProjectionReauthorization();
+        ensureProjectionAuthorizationIfNeeded(System.currentTimeMillis());
     }
 
     private boolean isCapturePipelineHealthy(long now) {
@@ -3929,6 +4141,7 @@ public class GtoObserverService extends Service {
                 .putString("projectionStatus", projectionStatus)
                 .putString("projectionError", detail)
                 .putBoolean("projectionReauthRequired", true)
+                .putBoolean("projectionReauthAutoAllowed", true)
                 .putBoolean("projectionReauthNoticeShown", false)
                 .putString("lastEvent", "Falha ao abrir autorização transparente sobre o GTO: " + detail)
                 .apply();
@@ -4485,6 +4698,7 @@ public class GtoObserverService extends Service {
     }
 
     private void hideOverlays() {
+        hideBubbleRemoveTarget();
         closeMenu();
         hideStatusChip();
         hideFreightTouchPulseSensor();
@@ -5053,6 +5267,7 @@ public class GtoObserverService extends Service {
                 .putString("screenState", "CAPTURE_START_FAILED")
                 .putString("projectionError", detail)
                 .putBoolean("projectionReauthRequired", true)
+                .putBoolean("projectionReauthAutoAllowed", true)
                 .putBoolean("projectionReauthNoticeShown", false)
                 .putBoolean("touchCaptureNeeded", false)
                 .putString("lastEvent", "Falha ao criar captura em paisagem: " + detail)
@@ -5103,6 +5318,43 @@ public class GtoObserverService extends Service {
             .putString("lastEvent", "Captura sem quadros reais · reconectando superfície sem perder a viagem")
             .apply();
         rebindProjectionSurfaceWithoutReauthorization();
+
+        final int scheduledAttempts = projectionSurfaceRebindAttempts;
+        if (scheduledAttempts >= PROJECTION_SURFACE_REAUTH_ESCALATION_ATTEMPTS) {
+            mainHandler.postDelayed(() -> {
+                long checkAt = System.currentTimeMillis();
+                if (projectionSurfaceRebindAttempts < scheduledAttempts) return;
+                if (!GtoProjectionRecoveryPolicy.shouldEscalateSurfaceRecovery(
+                    projectionSurfaceRebindAttempts,
+                    gtoForeground,
+                    captureIsNeededForCurrentState(),
+                    projectionPermissionInFlight,
+                    checkAt,
+                    lastProjectionFrameAt,
+                    lastProjectionAnalyzedFrameAt,
+                    projectionStartedAt,
+                    Math.max(PROJECTION_STALE_FRAME_WATCHDOG_MS, PROJECTION_STALE_ANALYSIS_WATCHDOG_MS)
+                )) return;
+                boolean healthy = GtoCaptureHealthPolicy.isHealthy(
+                    projectionActive,
+                    mediaProjection != null,
+                    virtualDisplay != null,
+                    imageReader != null,
+                    captureHandler != null,
+                    gtoForeground,
+                    screenAnalysisPausedOutsideGto,
+                    captureStabilityGate.isReady(),
+                    checkAt,
+                    lastProjectionFrameAt,
+                    lastProjectionAnalyzedFrameAt
+                );
+                if (!healthy) {
+                    escalateProjectionToFreshAuthorization(
+                        "A leitura continuou sem quadros válidos após " + projectionSurfaceRebindAttempts + " recuperações"
+                    );
+                }
+            }, 1300L);
+        }
     }
 
     private void rebindProjectionSurfaceWithoutReauthorization() {
@@ -5234,6 +5486,7 @@ public class GtoObserverService extends Service {
                             .putLong("projectionStoppedAt", stoppedAt)
                             .putLong("projectionActiveForMs", activeForMs)
                             .putBoolean("projectionReauthRequired", true)
+                            .putBoolean("projectionReauthAutoAllowed", true)
                             .putBoolean("projectionReauthNoticeShown", false)
                             .putBoolean("touchCaptureNeeded", false);
                         if ("STOPPED_BEFORE_SURFACE".equals(projectionStatus)) {
@@ -5262,8 +5515,8 @@ public class GtoObserverService extends Service {
                             }
                             updateNotification();
                             if (gtoForeground) {
-                                maybeNotifyProjectionReauthorization();
-                                            }
+                                ensureProjectionAuthorizationIfNeeded(System.currentTimeMillis());
+                            }
                         }
                     });
                 }
@@ -5305,6 +5558,7 @@ public class GtoObserverService extends Service {
                 .remove("projectionError")
                 .remove("projectionReauthRequired")
                 .remove("projectionReauthNoticeShown")
+                .putBoolean("projectionReauthAutoAllowed", false)
                 .putString("lastEvent", "Autorização validada · criando captura antes de fechar a confirmação")
                 .apply();
 
@@ -5367,6 +5621,7 @@ public class GtoObserverService extends Service {
                 .putString("screenState", "CAPTURE_START_FAILED")
                 .putString("projectionError", detail)
                 .putBoolean("projectionReauthRequired", true)
+                .putBoolean("projectionReauthAutoAllowed", true)
                 .putBoolean("projectionReauthNoticeShown", false)
                 .putBoolean("touchCaptureNeeded", false)
                 .putString("lastEvent", "Falha ao vincular autorização de leitura: " + detail)
@@ -5529,6 +5784,7 @@ public class GtoObserverService extends Service {
                 .remove("projectionError")
                 .remove("projectionReauthRequired")
                 .remove("projectionReauthNoticeShown")
+                .putBoolean("projectionReauthAutoAllowed", false)
                 .putString("lastEvent", "Leitura funcional · primeiro quadro recebido, detecção liberada")
                 .apply();
             updateNotification();
@@ -6396,6 +6652,10 @@ public class GtoObserverService extends Service {
                 ? frozenSelectionPanelOffsetX
                 : latestFreightPanelOffsetX;
             FreightOption frozenBaseline = stableFreightForRow(rowIndex);
+            if (frozenBaseline != null) {
+                frozenBaseline = copyFreightOption(frozenBaseline);
+                markFrozenTouchBaselineEvidence(frozenBaseline);
+            }
             return new FreightSelectionTransaction(
                 rowIndex,
                 panelCopy,
@@ -6406,7 +6666,7 @@ public class GtoObserverService extends Service {
                 prefs.getString("gtoTripSessionId", ""),
                 preciseSelectionOcrGeneration,
                 freightPageGeneration,
-                frozenBaseline == null ? null : copyFreightOption(frozenBaseline)
+                frozenBaseline
             );
         }
     }
@@ -8196,7 +8456,7 @@ public class GtoObserverService extends Service {
         // and a race between page stabilization and row confirmation on weak devices.
         // Serialize both passes; the frozen selection bitmap remains owned by the
         // transaction while we wait.
-        if (preciseSelectionOcrBusy || ocrBusy.get()) {
+        if (preciseSelectionOcrBusy || focusedFreightConflictRetryBusy || ocrBusy.get()) {
             long waitedMs = System.currentTimeMillis() - transaction.createdAt;
             if (waitedMs >= PRECISE_OCR_BUSY_WAIT_TIMEOUT_MS) {
                 int row = transaction.rowIndex;
@@ -8394,6 +8654,27 @@ public class GtoObserverService extends Service {
                         return;
                     }
                     FreightOption canonicalCandidate = mergeVerifiedPreciseWithStable(selected, stableSamePage);
+                    boolean initialConflict = stableSamePage != null
+                        && (hasUnresolvedDestinationOneEditConflict(selected, stableSamePage)
+                            || hasCriticalFreightConflict(selected, stableSamePage));
+                    if (initialConflict) {
+                        // HF25: a disagreement no longer jumps straight to driver review.
+                        // Re-read the immutable selected-row ROI (up to two image scales),
+                        // and accept a literal field only when the retry agrees with one of
+                        // the two initial reads. This applies equally to cargo, origin,
+                        // destination, distance and value; no fuzzy correction is introduced.
+                        prefs.edit()
+                            .putString("lastFreightSecondaryReadDiff", freightConflictSummary(selected, stableSamePage))
+                            .putLong("lastFreightSecondaryReadDiffAt", System.currentTimeMillis())
+                            .apply();
+                        scheduleFocusedFreightConflictRetry(
+                            bitmapForOcr, scale, screenLeft, screenTop, exactButton, exactRow,
+                            top, bottom, selected, stableSamePage,
+                            scheduledSelectionGeneration, scheduledSelectionSessionId
+                        );
+                        return;
+                    }
+
                     boolean canonicalSafe = isStableFreightSafeToCommit(canonicalCandidate);
                     if (!GtoFreightSelectionPolicy.canCommitCanonicalRow(
                         exactRow,
@@ -8412,46 +8693,9 @@ public class GtoObserverService extends Service {
                             ? GtoFreightReviewPolicy.DISTANCE
                             : (differentMoneyValue(selected.offeredValue, canonicalCandidate.offeredValue)
                                 ? GtoFreightReviewPolicy.VALUE : "");
-                        enterFreightReview(canonicalCandidate, exactRow, canonicalSafe
-                            ? "Leituras numéricas divergiram; confirme somente o campo conflitante."
-                            : "A lista não alcançou consenso completo; a linha selecionada foi preservada.",
+                        enterFreightReview(canonicalCandidate, exactRow,
+                            "A linha selecionada foi preservada; confirme somente o campo que permaneceu sem evidência suficiente.",
                             forcedField);
-                        return;
-                    }
-                    if (hasUnresolvedDestinationOneEditConflict(selected, stableSamePage)) {
-                        // A one-glyph city disagreement is exactly the class of OCR error that
-                        // can turn a real destination into another spelling. If neither trusted
-                        // route context nor a clearly stronger selected-row read resolves it,
-                        // fail closed instead of sending the page-majority typo to the backend.
-                        prefs.edit()
-                            .putString("lastFreightConflict", freightConflictSummary(selected, stableSamePage))
-                            .putString("lastDestinationCorrectionSource", "UNRESOLVED_ONE_EDIT_CONFLICT")
-                            .putLong("lastFreightConflictAt", System.currentTimeMillis())
-                            .apply();
-                        enterFreightReview(
-                            stableSamePage,
-                            exactRow,
-                            "A cidade de destino teve duas leituras diferentes. A NVU não vai adivinhar o nome.",
-                            GtoFreightReviewPolicy.DESTINATION
-                        );
-                        return;
-                    }
-                    if (hasCriticalFreightConflict(selected, stableSamePage)) {
-                        prefs.edit()
-                            .putString("lastFreightSecondaryReadDiff", freightConflictSummary(selected, stableSamePage))
-                            .putLong("lastFreightSecondaryReadDiffAt", System.currentTimeMillis())
-                            .apply();
-                        FreightOption conflictDraft = copyFreightOption(canonicalCandidate);
-                        if (differentVisibleText(selected.cargo, stableSamePage.cargo)) clearReviewField(conflictDraft, GtoFreightReviewPolicy.CARGO);
-                        if (differentVisibleText(selected.originCompany, stableSamePage.originCompany)) clearReviewField(conflictDraft, GtoFreightReviewPolicy.ORIGIN_COMPANY);
-                        if (differentVisibleText(selected.destination, stableSamePage.destination)) clearReviewField(conflictDraft, GtoFreightReviewPolicy.DESTINATION);
-                        if (differentNumericValue(selected.km, stableSamePage.km)) clearReviewField(conflictDraft, GtoFreightReviewPolicy.DISTANCE);
-                        if (differentMoneyValue(selected.offeredValue, stableSamePage.offeredValue)) clearReviewField(conflictDraft, GtoFreightReviewPolicy.VALUE);
-                        enterFreightReview(
-                            conflictDraft, exactRow,
-                            "Leituras independentes divergiram. A NVU preservou a linha e não vai substituir nenhum dado silenciosamente.",
-                            firstReviewField(conflictDraft)
-                        );
                         return;
                     }
                     selected = canonicalCandidate;
@@ -8509,6 +8753,20 @@ public class GtoObserverService extends Service {
         return result.strong && looksLikeEntityName(result.value)
             ? result
             : GtoOriginGeometryPolicy.Result.none();
+    }
+
+    private void markFrozenTouchBaselineEvidence(FreightOption option) {
+        if (option == null) return;
+        // HF25: once the button row is frozen at the touch boundary, every literal valid
+        // field already present in that immutable row is selected-row evidence. This does
+        // not manufacture an OCR vote and prevents timeout/error paths from asking the
+        // driver to retype a value that was already captured from the exact touched row.
+        markSelectedRowFieldEvidence(option);
+        if (option.originCompanySelectedRowEvidence
+            && (option.originCompanyEvidenceSource == null || option.originCompanyEvidenceSource.isEmpty()
+                || "SELECTED_ROW_OCR".equals(option.originCompanyEvidenceSource))) {
+            option.originCompanyEvidenceSource = "FROZEN_TOUCH_BASELINE";
+        }
     }
 
     private void markSelectedRowFieldEvidence(FreightOption option) {
@@ -8654,52 +8912,63 @@ public class GtoObserverService extends Service {
     }
 
     private FreightOption mergeVerifiedPreciseWithStable(FreightOption exact, FreightOption stable) {
-        // HF21: once a row is frozen by the touch transaction, that immutable selected-row
-        // read is the primary authority. Page history may fill only a field that the row OCR
-        // genuinely missed; it can never overwrite a valid literal value from the selected row.
-        // Selected-row text stays literal: it never autocorrects or silently rewrites names.
-        // This prevents a previous page/row consensus from silently becoming the new trip.
+        // HF24: the immutable pre-touch row is a first-class evidence source. The precise
+        // selected-row OCR remains primary, but if it misses a field completely we may fill
+        // that field from the frozen same-row/same-page baseline even when it only has one
+        // OCR observation. This is not a vote boost: the value is literal, tied to the exact
+        // touched row, and can never overwrite a valid precise read.
         FreightOption canonical = exact == null ? new FreightOption() : copyFreightOption(exact);
         if (exact == null) return stable == null ? canonical : copyFreightOption(stable);
 
+        int recoveredFromFrozenBaseline = 0;
         if (stable != null) {
             if (!GtoFreightFieldEvidencePolicy.text(
                     canonical.cargo, canonical.cargoVotes, canonical.cargoSelectedRowEvidence)
-                && GtoFreightFieldEvidencePolicy.text(stable.cargo, stable.cargoVotes, stable.cargoSelectedRowEvidence)) {
-                canonical.cargo = stable.cargo;
-                canonical.cargoVotes = stable.cargoVotes;
+                && GtoFrozenFreightFallbackPolicy.canUse(GtoFreightReviewPolicy.CARGO, stable.cargo)) {
+                canonical.cargo = stable.cargo.trim();
+                canonical.cargoVotes = Math.max(1, stable.cargoVotes);
+                canonical.cargoSelectedRowEvidence = true;
+                recoveredFromFrozenBaseline++;
             }
             if (!GtoFreightFieldEvidencePolicy.text(
                     canonical.originCompany, canonical.originCompanyVotes, canonical.originCompanySelectedRowEvidence)
-                && GtoFreightFieldEvidencePolicy.text(stable.originCompany, stable.originCompanyVotes, stable.originCompanySelectedRowEvidence)) {
-                canonical.originCompany = stable.originCompany;
-                canonical.originCompanyVotes = stable.originCompanyVotes;
-                canonical.originCompanyEvidenceSource = stable.originCompanyEvidenceSource;
+                && GtoFrozenFreightFallbackPolicy.canUse(GtoFreightReviewPolicy.ORIGIN_COMPANY, stable.originCompany)) {
+                canonical.originCompany = stable.originCompany.trim();
+                canonical.originCompanyVotes = Math.max(1, stable.originCompanyVotes);
+                canonical.originCompanySelectedRowEvidence = true;
+                canonical.originCompanyEvidenceSource = "FROZEN_TOUCH_BASELINE";
+                recoveredFromFrozenBaseline++;
             }
             if (!GtoFreightFieldEvidencePolicy.text(
                     canonical.destination, canonical.destinationVotes, canonical.destinationSelectedRowEvidence)
-                && GtoFreightFieldEvidencePolicy.text(stable.destination, stable.destinationVotes, stable.destinationSelectedRowEvidence)) {
-                canonical.destination = stable.destination;
-                canonical.destinationVotes = stable.destinationVotes;
+                && GtoFrozenFreightFallbackPolicy.canUse(GtoFreightReviewPolicy.DESTINATION, stable.destination)) {
+                canonical.destination = stable.destination.trim();
+                canonical.destinationVotes = Math.max(1, stable.destinationVotes);
+                canonical.destinationSelectedRowEvidence = true;
                 canonical.destinationOcrConfidence = stable.destinationOcrConfidence;
+                recoveredFromFrozenBaseline++;
             }
             if (!GtoFreightFieldEvidencePolicy.distance(
                     canonical.km, canonical.kmVotes, canonical.kmSelectedRowEvidence)
-                && GtoFreightFieldEvidencePolicy.distance(stable.km, stable.kmVotes, stable.kmSelectedRowEvidence)) {
+                && GtoFrozenFreightFallbackPolicy.canUse(GtoFreightReviewPolicy.DISTANCE, stable.km)) {
                 canonical.km = stable.km;
-                canonical.kmVotes = stable.kmVotes;
+                canonical.kmVotes = Math.max(1, stable.kmVotes);
+                canonical.kmSelectedRowEvidence = true;
+                recoveredFromFrozenBaseline++;
             }
             if (!GtoFreightFieldEvidencePolicy.money(
                     canonical.offeredValue, canonical.valueVotes, canonical.valueSelectedRowEvidence)
-                && GtoFreightFieldEvidencePolicy.money(stable.offeredValue, stable.valueVotes, stable.valueSelectedRowEvidence)) {
+                && GtoFrozenFreightFallbackPolicy.canUse(GtoFreightReviewPolicy.VALUE, stable.offeredValue)) {
                 canonical.offeredValue = stable.offeredValue;
-                canonical.valueVotes = stable.valueVotes;
+                canonical.valueVotes = Math.max(1, stable.valueVotes);
+                canonical.valueSelectedRowEvidence = true;
+                recoveredFromFrozenBaseline++;
             }
-            // Optional metadata can be borrowed only when the selected row did not read it.
+            // destinationCompany remains optional metadata and never creates REVIEW_REQUIRED.
             if ((canonical.destinationCompany == null || canonical.destinationCompany.trim().isEmpty())
                 && stable.destinationCompany != null && looksLikeEntityName(stable.destinationCompany)) {
                 canonical.destinationCompany = stable.destinationCompany.trim();
-                canonical.destinationCompanyVotes = stable.destinationCompanyVotes;
+                canonical.destinationCompanyVotes = Math.max(1, stable.destinationCompanyVotes);
             }
         }
 
@@ -8713,7 +8982,317 @@ public class GtoObserverService extends Service {
         canonical.origin = canonical.originCompany == null ? "" : canonical.originCompany.trim();
         canonical.companyRoute = canonical.originCompany
             + (canonical.destinationCompany == null || canonical.destinationCompany.isEmpty() ? "" : " > " + canonical.destinationCompany);
+        if (recoveredFromFrozenBaseline > 0 && prefs != null) {
+            prefs.edit()
+                .putInt("lastFrozenBaselineRecoveredFieldCount", recoveredFromFrozenBaseline)
+                .putLong("lastFrozenBaselineRecoveredAt", System.currentTimeMillis())
+                .putString("lastEvent", "Campos ilegíveis recuperados do snapshot congelado da própria linha selecionada")
+                .apply();
+        }
         return canonical;
+    }
+
+    private void scheduleFocusedFreightConflictRetry(
+        Bitmap sourceRow,
+        float baseScale,
+        int screenLeft,
+        int screenTop,
+        Rect exactButton,
+        int exactRow,
+        int rowTop,
+        int rowBottom,
+        FreightOption exact,
+        FreightOption frozen,
+        long selectionGeneration,
+        String selectionSessionId
+    ) {
+        if (sourceRow == null || sourceRow.isRecycled() || selectionTextRecognizer == null) {
+            FreightOption draft = mergeVerifiedPreciseWithStable(exact, frozen);
+            clearConflictingFreightFields(draft, exact, frozen);
+            enterFreightReview(draft, exactRow,
+                "As leituras do frete divergiram e a releitura focalizada ficou indisponível.", firstReviewField(draft));
+            return;
+        }
+        Bitmap retryBase = sourceRow.copy(Bitmap.Config.ARGB_8888, false);
+        if (retryBase == null) {
+            FreightOption draft = mergeVerifiedPreciseWithStable(exact, frozen);
+            clearConflictingFreightFields(draft, exact, frozen);
+            enterFreightReview(draft, exactRow,
+                "As leituras do frete divergiram e a imagem de confirmação ficou indisponível.", firstReviewField(draft));
+            return;
+        }
+        focusedFreightConflictRetryBusy = true;
+        prefs.edit()
+            .putString("lastEvent", "Campo divergente · executando releitura focalizada da linha selecionada")
+            .putLong("lastFocusedFreightRetryAt", System.currentTimeMillis())
+            .apply();
+        mainHandler.post(() -> runFocusedFreightConflictRetry(
+            retryBase, baseScale, screenLeft, screenTop, exactButton, exactRow,
+            rowTop, rowBottom, copyFreightOption(exact), copyFreightOption(frozen),
+            selectionGeneration, selectionSessionId, 1
+        ));
+    }
+
+    private void runFocusedFreightConflictRetry(
+        Bitmap retryBase,
+        float baseScale,
+        int screenLeft,
+        int screenTop,
+        Rect exactButton,
+        int exactRow,
+        int rowTop,
+        int rowBottom,
+        FreightOption exact,
+        FreightOption frozen,
+        long selectionGeneration,
+        String selectionSessionId,
+        int attempt
+    ) {
+        if (retryBase == null || retryBase.isRecycled()) {
+            finishFocusedFreightRetry();
+            return;
+        }
+        if (!isCurrentPreciseSelectionOcr(selectionGeneration, selectionSessionId)
+            || !hasConfirmedSelectionIdentity()
+            || prefs.getInt("selectedFreightRow", -1) != exactRow
+            || !STATE_CONFIRMING_FREIGHT.equals(getTripState())) {
+            retryBase.recycle();
+            finishFocusedFreightRetry();
+            return;
+        }
+
+        float extraScale = attempt <= 1 ? 1.18f : 1.42f;
+        Bitmap attemptBitmap = Bitmap.createScaledBitmap(
+            retryBase,
+            Math.max(1, Math.round(retryBase.getWidth() * extraScale)),
+            Math.max(1, Math.round(retryBase.getHeight() * extraScale)),
+            true
+        );
+        float mappedScale = baseScale * extraScale;
+        selectionTextRecognizer.process(InputImage.fromBitmap(attemptBitmap, 0))
+            .addOnSuccessListener(text -> {
+                if (!isCurrentPreciseSelectionOcr(selectionGeneration, selectionSessionId)) {
+                    if (!retryBase.isRecycled()) retryBase.recycle();
+                    finishFocusedFreightRetry();
+                    return;
+                }
+                FreightOption retry = buildFocusedRetryFreight(
+                    text, mappedScale, screenLeft, screenTop, exactButton, exactRow,
+                    rowTop, rowBottom, frozen == null ? "" : frozen.destinationCompany
+                );
+                FreightOption resolved = resolveFreightConflictsAfterRetry(exact, frozen, retry);
+                String unresolved = firstReviewField(resolved);
+                boolean safe = isStableFreightSafeToCommit(resolved);
+                if (unresolved.isEmpty() && safe) {
+                    prefs.edit()
+                        .putInt("lastFocusedFreightRetryAttempt", attempt)
+                        .putString("lastEvent", "Releitura focalizada confirmou os campos do frete selecionado")
+                        .apply();
+                    retryBase.recycle();
+                    finishFocusedFreightRetry();
+                    commitPreciseFreight(resolved);
+                    return;
+                }
+
+                if (attempt < 2 && hasCriticalFreightConflict(exact, frozen)) {
+                    mainHandler.post(() -> runFocusedFreightConflictRetry(
+                        retryBase, baseScale, screenLeft, screenTop, exactButton, exactRow,
+                        rowTop, rowBottom, exact, frozen, selectionGeneration, selectionSessionId, attempt + 1
+                    ));
+                    return;
+                }
+
+                retryBase.recycle();
+                finishFocusedFreightRetry();
+                prefs.edit()
+                    .putInt("lastFocusedFreightRetryAttempt", attempt)
+                    .putString("lastEvent", "Releitura focalizada não resolveu todos os campos divergentes")
+                    .apply();
+                enterFreightReview(
+                    resolved, exactRow,
+                    "A releitura focalizada não confirmou um campo com segurança. Confirme somente o campo pendente.",
+                    unresolved
+                );
+            })
+            .addOnFailureListener(error -> {
+                if (!isCurrentPreciseSelectionOcr(selectionGeneration, selectionSessionId)) {
+                    if (!retryBase.isRecycled()) retryBase.recycle();
+                    finishFocusedFreightRetry();
+                    return;
+                }
+                if (attempt < 2) {
+                    mainHandler.post(() -> runFocusedFreightConflictRetry(
+                        retryBase, baseScale, screenLeft, screenTop, exactButton, exactRow,
+                        rowTop, rowBottom, exact, frozen, selectionGeneration, selectionSessionId, attempt + 1
+                    ));
+                    return;
+                }
+                FreightOption draft = mergeVerifiedPreciseWithStable(exact, frozen);
+                clearConflictingFreightFields(draft, exact, frozen);
+                String required = firstReviewField(draft);
+                retryBase.recycle();
+                finishFocusedFreightRetry();
+                enterFreightReview(
+                    draft, exactRow,
+                    "Falha temporária na releitura focalizada; os demais campos continuam preservados.",
+                    required
+                );
+            })
+            .addOnCompleteListener(task -> {
+                if (attemptBitmap != retryBase && !attemptBitmap.isRecycled()) attemptBitmap.recycle();
+            });
+    }
+
+    private FreightOption buildFocusedRetryFreight(
+        Text text,
+        float mappedScale,
+        int screenLeft,
+        int screenTop,
+        Rect exactButton,
+        int exactRow,
+        int rowTop,
+        int rowBottom,
+        String destinationCompanyHint
+    ) {
+        List<OcrLine> lines = new ArrayList<>();
+        if (text != null) {
+            for (Text.TextBlock block : text.getTextBlocks()) {
+                for (Text.Line line : block.getLines()) {
+                    Rect box = line.getBoundingBox();
+                    if (box == null || line.getText() == null) continue;
+                    String value = line.getText().trim();
+                    if (value.isEmpty()) continue;
+                    Rect mapped = new Rect(
+                        screenLeft + Math.round(box.left / mappedScale),
+                        screenTop + Math.round(box.top / mappedScale),
+                        screenLeft + Math.round(box.right / mappedScale),
+                        screenTop + Math.round(box.bottom / mappedScale)
+                    );
+                    lines.add(new OcrLine(value, mapped, line.getConfidence()));
+                }
+            }
+        }
+
+        FreightOption retry = new FreightOption();
+        retry.rowIndex = exactRow;
+        retry.acceptRect = exactButton == null ? null : new Rect(exactButton);
+        retry.acceptCenterY = exactButton == null ? 0 : exactButton.centerY();
+        retry.rowTop = rowTop;
+        retry.rowBottom = rowBottom;
+        retry.rawText = text == null ? "" : text.getText();
+
+        for (OcrLine line : lines) {
+            if (retry.km.isEmpty()) {
+                String km = extractKmDigits(line.text);
+                if (!km.isEmpty()) retry.km = km + "Km";
+            }
+            if (retry.offeredValue.isEmpty()) {
+                String money = extractMoneyValue(line.text);
+                if (!money.isEmpty()) retry.offeredValue = money;
+            }
+        }
+        refinePreciseRowFields(retry, lines, rowTop, rowBottom);
+        GtoOriginGeometryPolicy.Result origin = inferOriginCompanyFromSelectedRowLines(
+            lines, destinationCompanyHint, rowTop, rowBottom
+        );
+        if (origin.strong && looksLikeEntityName(origin.value)) {
+            retry.originCompany = origin.value;
+            retry.origin = origin.value;
+            retry.originCompanyEvidenceSource = "FOCUSED_RETRY_GEOMETRY";
+        }
+        retry.companyRoute = retry.originCompany
+            + (retry.destinationCompany == null || retry.destinationCompany.isEmpty()
+                ? "" : " > " + retry.destinationCompany);
+        markSelectedRowFieldEvidence(retry);
+        return retry;
+    }
+
+    private FreightOption resolveFreightConflictsAfterRetry(
+        FreightOption exact,
+        FreightOption frozen,
+        FreightOption retry
+    ) {
+        FreightOption resolved = mergeVerifiedPreciseWithStable(exact, frozen);
+        resolveFreightFieldAfterRetry(resolved, GtoFreightReviewPolicy.CARGO,
+            exact == null ? "" : exact.cargo,
+            frozen == null ? "" : frozen.cargo,
+            retry == null ? "" : retry.cargo);
+        resolveFreightFieldAfterRetry(resolved, GtoFreightReviewPolicy.ORIGIN_COMPANY,
+            exact == null ? "" : exact.originCompany,
+            frozen == null ? "" : frozen.originCompany,
+            retry == null ? "" : retry.originCompany);
+        resolveFreightFieldAfterRetry(resolved, GtoFreightReviewPolicy.DESTINATION,
+            exact == null ? "" : exact.destination,
+            frozen == null ? "" : frozen.destination,
+            retry == null ? "" : retry.destination);
+        resolveFreightFieldAfterRetry(resolved, GtoFreightReviewPolicy.DISTANCE,
+            exact == null ? "" : exact.km,
+            frozen == null ? "" : frozen.km,
+            retry == null ? "" : retry.km);
+        resolveFreightFieldAfterRetry(resolved, GtoFreightReviewPolicy.VALUE,
+            exact == null ? "" : exact.offeredValue,
+            frozen == null ? "" : frozen.offeredValue,
+            retry == null ? "" : retry.offeredValue);
+        resolved.origin = resolved.originCompany == null ? "" : resolved.originCompany.trim();
+        resolved.companyRoute = resolved.originCompany
+            + (resolved.destinationCompany == null || resolved.destinationCompany.isEmpty()
+                ? "" : " > " + resolved.destinationCompany);
+        resolved.km = canonicalKm(resolved.km);
+        resolved.offeredValue = canonicalMoney(resolved.offeredValue);
+        return resolved;
+    }
+
+    private void resolveFreightFieldAfterRetry(
+        FreightOption target,
+        String field,
+        String exact,
+        String frozen,
+        String retry
+    ) {
+        if (target == null || !GtoFreightFieldConflictPolicy.needsRetry(field, exact, frozen)) return;
+        GtoFreightFieldConflictPolicy.Resolution resolution =
+            GtoFreightFieldConflictPolicy.resolve(field, exact, frozen, retry);
+        if (!resolution.resolved) {
+            clearReviewField(target, field);
+            return;
+        }
+        String value = resolution.value;
+        if (GtoFreightReviewPolicy.CARGO.equals(field)) {
+            target.cargo = value;
+            target.cargoSelectedRowEvidence = true;
+        } else if (GtoFreightReviewPolicy.ORIGIN_COMPANY.equals(field)) {
+            target.originCompany = value;
+            target.originCompanySelectedRowEvidence = true;
+            target.originCompanyEvidenceSource = resolution.source;
+        } else if (GtoFreightReviewPolicy.DESTINATION.equals(field)) {
+            target.destination = value;
+            target.destinationSelectedRowEvidence = true;
+        } else if (GtoFreightReviewPolicy.DISTANCE.equals(field)) {
+            target.km = canonicalKm(value);
+            target.kmSelectedRowEvidence = true;
+        } else if (GtoFreightReviewPolicy.VALUE.equals(field)) {
+            target.offeredValue = canonicalMoney(value);
+            target.valueSelectedRowEvidence = true;
+        }
+    }
+
+    private void clearConflictingFreightFields(FreightOption draft, FreightOption exact, FreightOption frozen) {
+        if (draft == null) return;
+        if (exact == null || frozen == null) return;
+        if (GtoFreightFieldConflictPolicy.needsRetry(GtoFreightReviewPolicy.CARGO, exact.cargo, frozen.cargo))
+            clearReviewField(draft, GtoFreightReviewPolicy.CARGO);
+        if (GtoFreightFieldConflictPolicy.needsRetry(GtoFreightReviewPolicy.ORIGIN_COMPANY, exact.originCompany, frozen.originCompany))
+            clearReviewField(draft, GtoFreightReviewPolicy.ORIGIN_COMPANY);
+        if (GtoFreightFieldConflictPolicy.needsRetry(GtoFreightReviewPolicy.DESTINATION, exact.destination, frozen.destination))
+            clearReviewField(draft, GtoFreightReviewPolicy.DESTINATION);
+        if (GtoFreightFieldConflictPolicy.needsRetry(GtoFreightReviewPolicy.DISTANCE, exact.km, frozen.km))
+            clearReviewField(draft, GtoFreightReviewPolicy.DISTANCE);
+        if (GtoFreightFieldConflictPolicy.needsRetry(GtoFreightReviewPolicy.VALUE, exact.offeredValue, frozen.offeredValue))
+            clearReviewField(draft, GtoFreightReviewPolicy.VALUE);
+    }
+
+    private void finishFocusedFreightRetry() {
+        focusedFreightConflictRetryBusy = false;
     }
 
     private boolean hasUnresolvedDestinationOneEditConflict(FreightOption exact, FreightOption stable) {

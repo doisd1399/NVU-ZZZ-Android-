@@ -1,0 +1,115 @@
+NVU R3.34 PC-HF24 - RELATORIO DE AUDITORIA E VALIDACAO
+Android 1.0.76 / versionCode 76
+Base: HF23
+
+ESCOPO
+------
+Correcao focada nos problemas observados no teste fisico da HF23:
+1. revisao manual desnecessaria de destino/valor/outros campos apos Aceitar;
+2. perda de deteccao na inicializacao ou durante sessao sem recuperacao suficiente;
+3. necessidade de nova autorizacao MediaProjection quando o token/superficie nao volta a produzir frames;
+4. UX para remover a bolha fora do GTO e encerrar o observador;
+5. preservacao integral da selecao, snapshot, fingerprint, fila duravel, ACK e backend.
+
+CAUSAS RAIZ CONFIRMADAS
+-----------------------
+A) CAMPO PEDIDO DESNECESSARIAMENTE
+A leitura OCR precisa da linha selecionada era corretamente a fonte primaria, mas um campo nao enxergado naquele OCR podia cair em REVIEW_REQUIRED mesmo quando o snapshot imutavel pre-toque da MESMA linha ja continha o valor literal valido. O fallback exigia evidencia/votos excessivos para uma fonte que ja estava congelada e vinculada a rowId/snapshot da selecao.
+
+Correcao:
+- OCR preciso da linha selecionada continua tendo prioridade absoluta.
+- Somente campo AUSENTE pode ser completado pelo baseline textual congelado da mesma linha e mesma geracao pre-toque.
+- O baseline nunca sobrescreve valor reconhecido pelo OCR preciso.
+- destinationCompany continua opcional e nao gera revisao.
+- cada campo recuperado registra procedencia FROZEN_TOUCH_BASELINE.
+
+B) PERDA DE CAPTURA SEM NOVA AUTORIZACAO
+A recuperacao conseguia refazer ImageReader/surface enquanto MediaProjection parecia existir, mas um token aparentemente vivo sem entrega real de frames podia ficar em ciclo de rebind sem promover uma nova autorizacao Android.
+
+Correcao:
+- saude continua baseada em frames reais recebidos/analisados;
+- apos repetidas tentativas de recuperar superficie sem progresso real, a sessao preserva o estado e escala para reautorizacao fresca;
+- se GTO estiver realmente em foreground/landscape e a captura for necessaria, o NVU abre o pedido Android de MediaProjection;
+- negacao explicita do usuario desativa repeticao automatica para evitar loop de consentimento;
+- sucesso no grant/primeiro frame limpa o latch de reautorizacao.
+
+C) REMOVER BOLHA FORA DO GTO
+Nao havia uma interacao direta para encerrar o observador pela propria bolha fora do simulador.
+
+Correcao:
+- ao arrastar a bolha fora do GTO aparece alvo "Remover e parar NVU" na parte inferior segura;
+- ao entrar no alvo muda para "Solte para remover";
+- soltar no alvo executa ACTION_STOP e encerra captura/overlay/servico;
+- dentro do GTO o alvo nao aparece;
+- falha do alvo auxiliar nao marca a bolha principal como quebrada nem altera saude da captura;
+- se GTO voltar ao foreground durante o gesto, o alvo auxiliar desaparece imediatamente.
+
+D) PIPELINE GITHUB
+Foram preservadas as correcoes observadas nos builds reais do GitHub:
+- auditoria de clean checkout nao depende de assets Capacitor ainda nao gerados;
+- parser do certificado aceita a saida moderna do apksigner (V3.0 Signer);
+- workflow alinhado a HF24 / 1.0.76 / versionCode 76.
+
+VALIDACOES EXECUTADAS
+---------------------
+PASS check:android-java-syntax: 35 fontes.
+PASS validate:gto-native: 49/49.
+PASS validate:gto-auto-sync: 74/74.
+PASS audit:gto-r2 lifecycle: 26/26.
+PASS R3.34 PC hotfix: 24/24.
+PASS HF18 freight evidence: 16/16.
+PASS HF21 selected-row authority: 13/13.
+PASS HF22 observer UX/diagnostics: 21/21.
+PASS HF23 production certification: 10/10.
+PASS HF24 resilience: 16/16.
+
+O teste HF23 incorporado pela HF24 executa modelo deterministico com 5 fretes diferentes, cobrindo:
+IDLE -> lista -> selecao exata -> lock do snapshot -> TRIP_IN_PROGRESS -> resultado -> Receber -> fingerprint -> fila/envio automatico -> ACK/proxima viagem.
+Resultado: 5/5 fluxos PASS.
+
+HF24 adiciona testes para:
+- alvo de remocao somente fora do GTO;
+- drop no alvo encerra observador;
+- reautorizacao automatica apos perda real de captura;
+- escalonamento depois de recuperacoes de superficie sem frames;
+- negacao explicita sem loop de autorizacao;
+- OCR preciso permanece fonte primaria;
+- baseline congelado da mesma linha completa somente campo ausente;
+- destinationCompany opcional;
+- 5 fretes da certificacao HF23 continuam verdes.
+
+COMPILACAO ANDROID REAL NESTE AMBIENTE
+--------------------------------------
+NAO VALIDADA AQUI por limitacao externa de rede.
+Comando tentado:
+./gradlew :app:compileDebugJavaWithJavac --no-daemon
+
+O Gradle Wrapper parou antes do Javac ao tentar baixar gradle-8.14.3-all.zip:
+java.net.UnknownHostException: services.gradle.org
+
+Isso nao representa erro de compilacao do codigo. A compilacao Java/Gradle real permanece gate obrigatorio no Windows ou GitHub Actions.
+
+ESCOPO DE ARQUIVOS
+------------------
+Comparacao HF23 -> HF24:
+- src/: inalterado
+- public/: inalterado
+- functions/: inalterado
+- app/: inalterado
+Mudancas funcionais concentradas no Android nativo, politicas Java, testes/scripts, identidade de versao e workflow de release.
+
+RISCO RESTANTE / TESTE FISICO RECOMENDADO
+-----------------------------------------
+Mesmo com as regressões verdes, validar no aparelho:
+1. iniciar automatico -> autorizar tela -> ponto branco saudavel;
+2. negar autorizacao uma vez -> confirmar que nao entra em loop;
+3. autorizar novamente -> captura recupera e ponto volta;
+4. selecionar fretes diferentes e confirmar que campos presentes no snapshot nao sao pedidos manualmente;
+5. campo realmente ilegivel -> pedir somente aquele campo;
+6. sair do GTO -> arrastar bolha -> alvo aparece -> soltar fora cancela gesto, soltar no alvo para NVU;
+7. lista -> selecionar -> cancelar no GTO -> nova lista -> novo frete substitui anterior somente apos novo Aceitar;
+8. resultado -> Receber -> envio automatico -> ACK -> segunda viagem.
+
+VEREDITO
+--------
+HF24 e uma candidata de teste fisico/Release apos compilacao real Gradle/Javac PASS. Nao ha mudanca de Web/Netlify/Functions nesta versao.

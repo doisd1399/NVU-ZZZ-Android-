@@ -68,7 +68,7 @@ if exist "android\local.properties" (
 )
 
 echo.
-echo Executando certificacao funcional R3.34-PC-HF23 (base R3.34)...
+echo Executando certificacao funcional R3.34-PC-HF25 (base R3.34)...
 call npm run verify:release
 if errorlevel 1 goto :erro
 
@@ -88,7 +88,7 @@ call npx cap sync android
 if errorlevel 1 goto :erro
 
 echo.
-echo Verificando paridade do Web R3.34-PC-HF23 com os assets Android...
+echo Verificando paridade do Web R3.34-PC-HF25 com os assets Android...
 call npm run verify:cap-assets
 if errorlevel 1 goto :erro
 
@@ -172,9 +172,9 @@ echo [OK] Compilacao Java real do Android validada.
 echo.
 echo ============================================================
 echo [OK] PROJETO PREPARADO COM SUCESSO
-echo R3.34-PC-HF23 foi construido sobre a HF22. HF23 corrige os quatro bloqueadores de producao: destino literal sem autocorrecao, ROI de origem sem Km/R$, recuperacao de REVIEW_REQUIRED confirmado apos restart e sessao duravel sem descarte por tempo.
-echo Netlify/Google AI Studio nao precisam de deploy. Firebase Functions nao mudou na HF23. Se registerGtoTrip da HF14 ja foi publicada, nao e necessario novo deploy.
-echo Para producao, gere uma RELEASE assinada com a keystore oficial. Veja: COMANDOS-R3.34-HF23-RELEASE-WINDOWS.txt
+echo R3.34-PC-HF25 foi construido sobre a HF24. HF25 preserva captura/reautorizacao e remover/parar, e adiciona releitura focalizada para resolver divergencias de carga, origem, destino, distancia e valor antes de pedir intervencao ao motorista.
+echo Netlify/Google AI Studio nao precisam de deploy. Firebase Functions nao mudou na HF25. Se registerGtoTrip da HF14 ja foi publicada, nao e necessario novo deploy.
+echo Para producao, gere uma RELEASE assinada com a keystore oficial. Veja: COMANDOS-R3.34-HF25-RELEASE-WINDOWS.txt
 echo ============================================================
 pause
 exit /b 0

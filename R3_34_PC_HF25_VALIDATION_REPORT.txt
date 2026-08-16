@@ -1,0 +1,80 @@
+NVU R3.34 PC-HF25 - RELATORIO DE AUDITORIA E VALIDACAO
+Android 1.0.77 / versionCode 77
+Base: HF24
+Data: 2026-08-16
+
+OBJETIVO
+Eliminar revisoes manuais desnecessarias quando duas leituras do MESMO frete selecionado divergem em carga, origem, destino, distancia ou valor, sem reduzir a integridade da linha selecionada e sem introduzir autocorrecao silenciosa.
+
+CAUSA RAIZ CONFIRMADA NA HF24
+A HF24 corrigiu campos AUSENTES usando o snapshot congelado da mesma linha, mas ainda tratava CAMPOS DIVERGENTES assim:
+  leitura selecionada != snapshot congelado -> limpar o campo -> REVIEW_REQUIRED.
+Isso afetava especialmente destino e origem, mas o mesmo padrao existia para carga, distancia e valor.
+Em OCR textual, diferencas de acento/uma letra/quebra de linha podiam abrir formulario mesmo quando uma nova leitura focalizada seria suficiente.
+
+CORRECOES HF25
+1. Releitura focalizada antes de qualquer formulario
+- quando leitura precisa e snapshot congelado da mesma linha divergem, o NVU nao pede o campo imediatamente;
+- executa ate 2 releituras da ROI imutavel da linha selecionada, em escalas diferentes (1.18x e 1.42x adicionais);
+- a linha selecionada continua imutavel; nenhum OCR escolhe outra linha.
+
+2. Uma unica politica para os 5 campos operacionais
+- CARGA: retry precisa concordar literalmente com uma das leituras iniciais;
+- ORIGEM: mesma regra + extracao geometrica da ROI selecionada;
+- DESTINO: mesma regra, sem fuzzy/autocorrecao;
+- DISTANCIA: somente acordo numerico literal;
+- VALOR: somente acordo pelo valor monetario semantico.
+
+3. Sem adivinhacao
+- se a releitura nao concordar com nenhuma leitura inicial, somente aquele campo vira PENDING;
+- os outros campos continuam preservados;
+- destinationCompany permanece metadado opcional e nao entra nesse fluxo.
+
+4. Timeout/falha de OCR
+- os campos validos do snapshot congelado no limite do toque passam a ser evidencias da propria linha selecionada;
+- isso NAO aumenta votes nem fabrica consenso;
+- evita pedir novamente um campo ja capturado quando o recognizer falha ou demora.
+
+5. GitHub Actions
+Mantidas e validadas as correcoes que falharam na tentativa HF23:
+- audit:gto-r2 nao depende de android/app/src/main/assets/public/assets em checkout limpo;
+- parser de certificado aceita saida moderna do apksigner V3.0;
+- workflow alinhado a HF25 / applicationId com.nvu.operacional / 1.0.77 / versionCode 77;
+- artifact esperado: NVU-R3.34-PC-HF25-release.
+
+TESTES
+PASS Java syntax: 36 fontes.
+PASS HF25 focused-field: 16/16.
+PASS HF24 resilience: 16/16.
+PASS HF23 production: 10/10.
+PASS modelo de 5 viagens distintas: 5/5, cobrindo inicializacao -> lista -> linha correta -> confirmacao -> viagem -> resultado -> Receber -> fila -> envio -> ACK.
+PASS HF18: 16/16.
+PASS HF19: 24/24.
+PASS HF20: 19/19.
+PASS HF21: 13/13.
+PASS HF22: 21/21.
+PASS R3.23: 16/16 depois de alinhar a regressao ao novo mutex de releitura focalizada.
+PASS R3.30: 17/17.
+PASS PC Hotfix: 24/24 depois de alinhar a regressao ao novo comportamento retry-before-review.
+PASS HF10 projection/runtime: 33/33.
+PASS clean-checkout R2 lifecycle sem assets gerados: 26/26.
+PASS parser SHA-256 V3 simulado com saida real do apksigner.
+PASS YAML do workflow parseado.
+
+CERTIFICACAO COMPLETA
+O comando monolitico npm run verify:release excedeu o limite de tempo do executor depois de avancar com todos os blocos anteriores verdes. Os blocos restantes HF18-HF25 foram executados separadamente e todos passaram. Nenhuma falha funcional ficou aberta na cadeia.
+
+COMPILACAO ANDROID LOCAL
+NAO VALIDADA neste ambiente: o Gradle wrapper continua bloqueado antes do Javac por UnknownHostException em services.gradle.org.
+Isso e limitacao de rede deste ambiente. O workflow GitHub instala Gradle/SDK em runner com internet e preserva os gates de compilacao, assinatura, badging e certificado.
+
+ESCOPO
+Mudancas funcionais: Android nativo GTO + testes/politicas.
+Web/src: inalterado.
+public: inalterado.
+Firebase Functions: inalterado.
+Netlify: inalterado.
+package-lock: dependencias inalteradas.
+
+VEREDITO
+HF25 preparada como candidata para APK Release via GitHub Actions. A revisao manual agora e ultimo recurso para um campo realmente nao resolvido, e nao a primeira resposta a uma divergencia transitória de OCR.

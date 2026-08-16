@@ -1,0 +1,32 @@
+NVU R3.34 PC-HF25 - Android 1.0.77 / versionCode 77
+=====================================================
+
+1) Extraia o ZIP HF25.
+2) Abra o CMD/PowerShell na raiz do projeto.
+3) Execute:
+
+npm ci
+npm run check:android-java-syntax
+npm run verify:release
+npm run build
+npm run cap:prepare:android
+
+4) Valide a compilacao Java real do Android:
+
+cd android
+gradlew.bat :app:compileDebugJavaWithJavac --no-daemon
+
+5) Para gerar o APK Release localmente (se sua keystore oficial estiver configurada):
+
+gradlew.bat assembleRelease --no-daemon
+
+Alternativa recomendada para APK assinado:
+- envie o projeto HF25 para o GitHub;
+- use Actions > "Build NVU R3.34 PC-HF25 Release" > Run workflow;
+- o workflow valida versionCode 77 / versionName 1.0.77, executa a certificacao, compila, assina, verifica o certificado e publica o artifact NVU-R3.34-PC-HF25-release.
+
+IMPORTANTE
+- Nao ha deploy novo de Netlify/Google AI Studio nesta HF25.
+- Firebase Functions nao mudou nesta HF25.
+- Se registerGtoTrip da HF14 ja foi publicada, nao e necessario novo deploy de Functions.
+- Use a mesma keystore/certificado oficial das releases anteriores para permitir atualizacao do APK instalado.

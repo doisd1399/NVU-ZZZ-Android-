@@ -19,8 +19,8 @@ function check(name, ok) {
 }
 const code = Number((gradle.match(/versionCode\s+(\d+)/)||[])[1]||0);
 const patch = Number((gradle.match(/versionName\s+"1\.0\.(\d+)"/)||[])[1]||0);
-check("HF23 identity is 1.0.75 / 75", code === 75 && patch === 75);
-check("workflow is aligned to HF23", workflow.includes("PC-HF23") && workflow.includes('EXPECTED_VERSION_CODE: "75"') && workflow.includes('EXPECTED_VERSION_NAME: "1.0.75"') && workflow.includes("versionCode 75") && workflow.includes('versionName "1.0.75"'));
+check("HF23 baseline identity is preserved or advanced", code >= 75 && patch >= 75);
+check("release workflow identity matches current Android version", workflow.includes(`EXPECTED_VERSION_CODE: "${code}"`) && workflow.includes(`EXPECTED_VERSION_NAME: "1.0.${patch}"`) && workflow.includes(`versionCode ${code}`) && workflow.includes(`versionName "1.0.${patch}"`));
 check("destination resolver is advisory-only", city.includes("NEAR_MATCH_NOT_APPLIED") && !service.includes("option.destination = destinationResolution.value"));
 check("origin ROI rejects compact Km and money labels", origin.includes("isMetricOrActionLabel") && origin.includes("\\\\d+(?:[.,]\\\\d+)?\\\\s*k\\\\s*m"));
 check("confirmed REVIEW_REQUIRED survives process restart", service.includes("GtoSessionRecoveryPolicy.restoredState") && recovery.includes('return confirmedReview ? "CONFIRMING_FREIGHT" : "WAITING_FREIGHT"'));

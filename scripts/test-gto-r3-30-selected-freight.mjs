@@ -37,7 +37,7 @@ check("immutable selected row remains base while frozen page evidence fills only
 check("secondary OCR is advisory except explicit numeric conflict", service.includes("GtoFreightSelectionPolicy.canCommitCanonicalRow"));
 check("secondary text differences are diagnostic and do not overwrite canonical text", service.includes("lastFreightSecondaryReadDiff"));
 check("old all-fields secondary agreement is no longer a commit gate", !service.includes("|| !hasIndependentVisibleAgreement(selected, stableSamePage)"));
-check("selection preserves the touched row when canonical OCR lacks consensus", service.includes("A lista não alcançou consenso completo; a linha selecionada foi preservada") && service.includes("enterFreightReview"));
+check("selection preserves the touched row when canonical OCR lacks consensus", service.includes("A linha selecionada foi preservada; confirme somente o campo que permaneceu sem evidência suficiente.") && service.includes("enterFreightReview"));
 check("selected freight still advances only through commitPreciseFreight", service.includes("commitPreciseFreight(selected)"));
 
 runJava(

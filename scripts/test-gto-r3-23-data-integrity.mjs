@@ -96,7 +96,7 @@ check(
 );
 check(
   "page and selected-row OCR are serialized for low-memory devices",
-  service.includes("preciseSelectionOcrBusy || ocrBusy.get()")
+  service.includes("preciseSelectionOcrBusy || focusedFreightConflictRetryBusy || ocrBusy.get()")
     && service.includes("PRECISE_OCR_BUSY_WAIT_TIMEOUT_MS"),
 );
 check(

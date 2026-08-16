@@ -1,0 +1,861 @@
+25:import android.media.projection.MediaProjection;
+26:import android.media.projection.MediaProjectionManager;
+82:    public static final String EXTRA_RESULT_CODE = "projectionResultCode";
+83:    public static final String EXTRA_RESULT_DATA = "projectionResultData";
+85:    public static final String STATE_IDLE = "IDLE";
+86:    public static final String STATE_WAITING_FREIGHT = "WAITING_FREIGHT";
+87:    public static final String STATE_CONFIRMING_FREIGHT = "CONFIRMING_FREIGHT";
+88:    public static final String STATE_TRIP_IN_PROGRESS = "TRIP_IN_PROGRESS";
+89:    public static final String STATE_RESULT_DETECTED = "RESULT_DETECTED";
+90:    public static final String STATE_AWAITING_BONUS = "AWAITING_BONUS_VALIDATION";
+91:    public static final String STATE_RESULT_CONFIRMED = "RESULT_CONFIRMED";
+92:    public static final String STATE_REJECTED_BONUS = "REJECTED_BONUS";
+93:    public static final String STATE_CANCELLED = "CANCELLED";
+95:    private static final int NOTIFICATION_ID = 4607;
+96:    private static final String CHANNEL_ID = "nvu_gto_observer";
+97:    private static final int MAX_ANALYSIS_WIDTH = 1600;
+98:    private static final int MAX_FREIGHT_ANALYSIS_WIDTH = 1440;
+99:    private static final float FREIGHT_ROI_LEFT = 0.615f;
+100:    private static final int FREIGHT_HISTORY_LIMIT = 5;
+101:    private static final long STRUCTURE_INTERVAL_MS = 24L;
+102:    private static final long SNAPSHOT_INTERVAL_MS = 50L;
+103:    private static final long SELECTION_PROBE_TIMEOUT_MS = 620L;
+104:    private static final int BUTTON_FRAME_HISTORY_LIMIT = 14;
+105:    private static final long MANUAL_FINISH_MIN_DELAY_MS = 180L;
+106:    private static final long MANUAL_FINISH_TIMEOUT_MS = 2200L;
+107:    private static final int MANUAL_FINISH_MAX_ATTEMPTS = 3;
+108:    private static final int AUTO_RESULT_FALLBACK_MISSES = 2;
+109:    private static final long AUTO_RESULT_FALLBACK_WINDOW_MS = 2400L;
+110:    private static final long FOREGROUND_POLL_INTERVAL_MS = 350L;
+115:    private static final long HEARTBEAT_PERSIST_INTERVAL_MS = 1200L;
+116:    private static final long FOREGROUND_STATUS_PERSIST_INTERVAL_MS = 1000L;
+117:    private static final long FREIGHT_RUNTIME_PERSIST_INTERVAL_MS = 300L;
+118:    private static final long FREIGHT_PAGE_OCR_REFRESH_MS = 1800L;
+119:    private static final long PRECISE_OCR_BUSY_RETRY_MS = 80L;
+120:    private static final long PRECISE_OCR_BUSY_WAIT_TIMEOUT_MS = 3500L;
+121:    private static final long GTO_EXIT_GRACE_MS = 1800L;
+122:    private static final long PERMISSION_RETURN_GRACE_MS = 6500L;
+123:    private static final long BUBBLE_TAP_DEBOUNCE_MS = 360L;
+124:    private static final long FAST_SELECTION_CONFIRM_WINDOW_MS = 900L;
+125:    private static final long FAST_SELECTION_FALSE_POSITIVE_TIMEOUT_MS = 950L;
+126:    private static final long FAST_TOUCH_PULSE_WINDOW_MS = 520L;
+127:    private static final int FAST_FRAME_HISTORY_LIMIT = 18;
+128:    private static final long GTO_FRESH_SESSION_RESET_MS = 6000L;
+132:    private static final long ACTIVE_SESSION_STALE_MS = 12L * 60L * 60L * 1000L;
+133:    private static final long CRITICAL_TOUCH_WINDOW_MS = 700L;
+134:    private static final long AUTO_SYNC_RETRY_INTERVAL_MS = 15_000L;
+135:    private static final long BUBBLE_RETRY_INTERVAL_MS = 350L;
+140:    private static final long ACTIVE_TRIP_VISUAL_PROBE_MS = 180L;
+141:    private static final long ACTIVE_TRIP_RESULT_FALLBACK_OCR_MS = 3200L;
+142:    private static final long ACTIVE_TRIP_RESULT_CANDIDATE_OCR_MS = 420L;
+143:    private static final int ACTIVE_TRIP_FREIGHT_LIST_CONFIRM_FRAMES = 4;
+144:    private static final long ACTIVE_TRIP_FREIGHT_LIST_CONFIRM_MS = 420L;
+149:    private static final int UNARMED_FREIGHT_LIST_CONFIRM_FRAMES = 2;
+150:    private static final long UNARMED_FREIGHT_LIST_CONFIRM_MS = 180L;
+151:    // R3.6: an exact touch on Receber is a durable completion event. It has no timeout.
+153:    // Explicit ADS touches remain a separate action and never enter the normal receive path.
+154:    private static final int RESULT_FREIGHT_LIST_CONFIRM_FRAMES = 3;
+155:    private static final long RESULT_FREIGHT_LIST_CONFIRM_MS = 260L;
+157:    private static volatile boolean running = false;
+158:    private static volatile GtoObserverService instance;
+163:    private long resultSnapshotRecoveryGeneration = 0L;
+165:    private final List<List<FreightOption>> freightHistory = new ArrayList<>();
+166:    private int freightHistoryPage = -1;
+167:    private long freightHistoryUpdatedAt = 0L;
+182:    private TextView projectionReauthButtonView;
+183:    private WindowManager.LayoutParams projectionReauthButtonParams;
+184:    // Independent 1px touch-pulse sensor. It never toggles the NVU bubble. During
+185:    // freight selection it marks the critical touch window; during the result dialog it
+189:    private long menuOpenedAt = 0L;
+190:    private long lastStateChangeAt = 0L;
+191:    private long lastActiveTripVisualProbeAt = 0L;
+192:    private long lastActiveTripFallbackOcrAt = 0L;
+193:    private long lastResultCandidateOcrAt = 0L;
+194:    private long activeTripFreightListSeenSince = 0L;
+195:    private int activeTripFreightListFrames = 0;
+199:    // result screen actually disappears while GTO remains continuously foreground.
+200:    private boolean resultTouchFallbackRequired = false;
+201:    private boolean resultTouchFallbackReady = false;
+202:    private boolean resultTouchFallbackContinuityBroken = false;
+208:    private boolean replacementFreightCandidateArmed = false;
+209:    private long replacementFreightCandidateAt = 0L;
+212:    private int replacementFreightPanelOffsetX = 0;
+214:    private int replacementFreightPressedRow = -1;
+215:    private float replacementFreightPressedScore = 0f;
+216:    private boolean replacementFreightTouchPending = false;
+217:    private long replacementFreightTouchAt = 0L;
+219:    private String foregroundPackage = "";
+220:    private long lastUsageQueryAt = 0L;
+221:    private long lastGtoForegroundEventAt = 0L;
+222:    private long lastGtoBackgroundEventAt = 0L;
+223:    private boolean gtoForeground = false;
+224:    private long lastGtoForegroundEvidenceAt = 0L;
+225:    private long nonGtoForegroundSince = 0L;
+226:    private long suppressForegroundHideUntil = 0L;
+227:    private boolean projectionPermissionInFlight = false;
+228:    private String lastRuntimePermissionError = "";
+229:    private long lastBubbleTapAt = 0L;
+230:    private long lastBubbleAttemptAt = 0L;
+231:    private long lastAutoSyncRetryAt = 0L;
+232:    private long lastOcrAt = 0L;
+233:    private String lastScreenState = "UNKNOWN";
+234:    private long lastHeartbeatPersistAt = 0L;
+235:    private long lastForegroundStatusPersistAt = 0L;
+236:    private String lastPersistedForegroundPackage = "";
+237:    private long lastPersistedGtoForegroundEventAt = 0L;
+238:    private long lastPersistedGtoBackgroundEventAt = 0L;
+239:    private long lastFreightRuntimePersistAt = 0L;
+240:    private String lastPersistedFreightRuntimeState = "";
+241:    private int lastPersistedFreightCount = -1;
+249:    private long projectionGeneration = 0L;
+254:    private boolean projectionActive = false;
+255:    private boolean destroying = false;
+256:    private int captureWidth = 0;
+257:    private int captureHeight = 0;
+258:    private int captureDensityDpi = 0;
+259:    private int pendingCapturedWidth = 0;
+260:    private int pendingCapturedHeight = 0;
+261:    private int outsideTouchCount = 0;
+262:    private String projectionStatus = "INACTIVE";
+263:    private float lastOutsideTouchX = -1f;
+264:    private float lastOutsideTouchY = -1f;
+265:    private float lastOutsideAltX = -1f;
+266:    private float lastOutsideAltY = -1f;
+267:    private long lastOutsideTouchAt = 0L;
+268:    private long lastFreightListSeenAt = 0L;
+269:    private long freightListMissingSince = 0L;
+270:    private int freightListMissingFrames = 0;
+273:    private boolean freightListCycleSeen = false;
+274:    private boolean freightListCycleClosed = false;
+275:    private boolean freightListReopenPending = false;
+276:    private long freightListCycleClosedAt = 0L;
+278:    private long pendingFreightTouchAt = 0L;
+279:    private String pendingSelectionSource = "";
+283:    // "Aceitar" buttons before/after the touch and selects only when one row changes
+285:    private long visualSelectionUntil = 0L;
+286:    private long lastVisualAnalysisAt = 0L;
+288:    private float visualSelectionConfidence = 0f;
+289:    private String visualSelectionSource = "";
+293:    private String detectedResultValue = "";
+294:    private long resultScreenLastSeenAt = 0L;
+295:    private long resultActionTouchAt = 0L;
+296:    private long resultExitSeenAt = 0L;
+297:    private int gameplayFramesAfterResult = 0;
+298:    private boolean manualFinishCapturePending = false;
+299:    private long manualFinishRequestedAt = 0L;
+300:    private int manualFinishAttempts = 0;
+301:    private int automaticResultCandidateMisses = 0;
+305:    private int latestFreightPanelOffsetX = 0;
+306:    private long latestFreightPanelAt = 0L;
+307:    private long lastStructureAt = 0L;
+308:    private long lastSnapshotAt = 0L;
+309:    private int preciseSelectedRow = -1;
+310:    private long preciseSelectedTouchAt = 0L;
+311:    private boolean preciseSelectionOcrBusy = false;
+314:    private long preciseSelectionOcrGeneration = 0L;
+315:    private long analysisOcrGeneration = 0L;
+318:    // user touch. ACTION_OUTSIDE is used only as a timestamp trigger; its coordinates
+321:    private boolean selectionProbeActive = false;
+322:    private long selectionProbeStartedAt = 0L;
+324:    private int selectionProbeBestRow = -1;
+325:    private float selectionProbeBestScore = 0f;
+326:    private float selectionProbeBestMargin = 0f;
+327:    private int selectionProbeEvidenceFrames = 0;
+328:    private int selectionProbeLastEvidenceRow = -1;
+330:    private int frozenSelectionPanelOffsetX = 0;
+338:    private final GtoSelectionCoordinator selectionCoordinator = new GtoSelectionCoordinator();
+340:    private long fastPreviousFreightSequence = 0L;
+343:    private long lastFastPanelSnapshotAt = 0L;
+344:    private long freightPageGeneration = 0L;
+345:    private long lastFreightPageOcrAt = 0L;
+346:    private boolean fastTouchPulseActive = false;
+347:    private long fastTouchPulseAt = 0L;
+348:    private long fastTouchMarkerSequence = -1L;
+349:    private boolean fastTouchMarkerQueued = false;
+351:    private long fastTouchBaselineSequence = -1L;
+352:    private int fastPendingSelectedRow = -1;
+353:    private long fastPendingSelectedAt = 0L;
+354:    private float fastPendingSelectedScore = 0f;
+355:    private boolean fastPendingFromTouchPulse = false;
+356:    private int fastMissingListFrames = 0;
+357:    private FreightSelectionTransaction pendingSelectionTransaction;
+359:    private final Runnable foregroundPoll = new Runnable() {
+376:                // Reset the throttle so this same foreground poll can recreate the bubble
+385:            boolean rawGto = observerPermissionsReady && GTO_PACKAGE.equals(foregroundPackage);
+398:                if (!projectionPermissionInFlight
+407:                boolean transientSystemUi = projectionPermissionInFlight || now < suppressForegroundHideUntil;
+414:                        if ((STATE_RESULT_DETECTED.equals(unresolvedState) || STATE_AWAITING_BONUS.equals(unresolvedState))
+421:                            .putBoolean("touchCaptureNeeded", false)
+448:     * projectionPermissionInFlight=true forever and suppress overlay recovery.
+460:            .putBoolean("projectionPermissionInFlight", false)
+461:            .putBoolean("projectionActive", false)
+462:            .putString("projectionStatus", safeStatus)
+463:            .putString("projectionError", safeError)
+464:            .putBoolean("projectionReauthRequired", true)
+465:            .putBoolean("projectionReauthNoticeShown", false)
+477:    private void handleProjectionPermissionTerminalFailure(String status, String error) {
+478:        projectionPermissionInFlight = false;
+480:        projectionStatus = status == null || status.isEmpty() ? "PERMISSION_FLOW_FAILED" : status;
+482:            .putBoolean("projectionPermissionInFlight", false)
+483:            .putBoolean("projectionActive", projectionActive)
+484:            .putString("projectionStatus", projectionStatus)
+485:            .putString("projectionError", error == null ? "" : error)
+486:            .putBoolean("projectionReauthRequired", true)
+487:            .putBoolean("projectionReauthNoticeShown", false)
+491:            startForegroundForTypes(projectionActive);
+502:            if (projectionReauthButtonView == null) {
+519:            live.projectionPermissionInFlight = true;
+521:            live.projectionStatus = "REQUESTING_PERMISSION_APP";
+524:                .putBoolean("projectionPermissionInFlight", true)
+525:                .putString("projectionStatus", live.projectionStatus)
+562:    private static boolean hasUsageStatsAccess(Context context) {
+596:            .putBoolean("projectionActive", false)
+598:            .putBoolean("projectionReauthButtonVisible", false)
+611:        String restoredState = prefs.getString("tripState", STATE_IDLE);
+614:        boolean recoverCompletedTrip = STATE_RESULT_CONFIRMED.equals(restoredState)
+621:            && (STATE_RESULT_DETECTED.equals(restoredState) || STATE_AWAITING_BONUS.equals(restoredState))
+636:            // longer finish. Trips with an already locked freight remain untouched.
+637:            String recoverableState = STATE_CONFIRMING_FREIGHT.equals(restoredState)
+638:                ? STATE_WAITING_FREIGHT
+642:                .putString("projectionStatus", "REAUTH_REQUIRED_AFTER_RESTART")
+643:                .putBoolean("projectionReauthRequired", true)
+644:                .putBoolean("projectionReauthNoticeShown", false)
+645:                .putString("lastEvent", STATE_TRIP_IN_PROGRESS.equals(recoverableState)
+649:        } else if (!STATE_IDLE.equals(restoredState)) {
+653:                .putString("tripState", STATE_IDLE)
+673:    public int onStartCommand(Intent intent, int flags, int startId) {
+690:            projectionPermissionInFlight = false;
+692:            projectionActive = false;
+693:            projectionStatus = "DENIED";
+695:                .putBoolean("projectionActive", false)
+696:                .putString("projectionStatus", projectionStatus)
+697:                .putBoolean("projectionPermissionInFlight", false)
+699:                .putBoolean("projectionReauthRequired", true)
+700:                .putBoolean("projectionReauthNoticeShown", false)
+701:                .putBoolean("touchCaptureNeeded", false)
+704:            if (STATE_WAITING_FREIGHT.equals(getTripState())) {
+741:            projectionPermissionInFlight = false;
+743:            prefs.edit().putBoolean("projectionPermissionInFlight", false).apply();
+763:    private void scheduleForegroundPoll() {
+764:        mainHandler.removeCallbacks(foregroundPoll);
+766:        mainHandler.post(foregroundPoll);
+769:    private void refreshForegroundPackage() {
+814:            foregroundPackage = latestPackage;
+816:            && GTO_PACKAGE.equals(foregroundPackage)
+818:            // On some Android 7-9/OEM builds the next foreground package event can be
+821:            foregroundPackage = "";
+827:    private void persistServiceHeartbeatIfDue(long now) {
+833:    private void persistForegroundRuntimeIfDue(long now) {
+834:        String currentPackage = foregroundPackage == null ? "" : foregroundPackage;
+844:            .putString("foregroundPackage", currentPackage)
+850:    private void persistFreightRuntimeStatus(String state, int freightCount, long now, long sequence) {
+868:    private boolean validateObserverRuntimePermissions() {
+897:        foregroundPackage = "";
+899:            || projectionReauthButtonView != null || freightTouchPulseView != null) {
+904:                .putBoolean("touchCaptureNeeded", false)
+905:                .putString("foregroundPackage", "")
+912:    private boolean captureIsNeededForCurrentState() {
+914:        return STATE_WAITING_FREIGHT.equals(state)
+915:            || STATE_CONFIRMING_FREIGHT.equals(state)
+916:            || STATE_TRIP_IN_PROGRESS.equals(state)
+917:            || STATE_RESULT_DETECTED.equals(state)
+918:            || STATE_AWAITING_BONUS.equals(state);
+921:    private void maybeNotifyProjectionReauthorization() {
+922:        if (projectionActive || projectionPermissionInFlight || !captureIsNeededForCurrentState()) return;
+923:        if (!prefs.getBoolean("projectionReauthRequired", false)) return;
+925:        if (prefs.getBoolean("projectionReauthNoticeShown", false)) return;
+927:            .putBoolean("projectionReauthNoticeShown", true)
+930:        if (projectionReauthButtonView == null) {
+936:    private boolean isTransientForegroundEvent(String packageName, String className) {
+944:        // System UI/permission surfaces can temporarily emit a foreground UsageEvent
+946:        // them only during the projection dialog, which made the bubble disappear on
+948:        // transient system surfaces replace the last real application foreground owner.
+959:    private boolean hasUsageStatsAccess() {
+963:    private void createNotificationChannel() {
+1003:    private String notificationText() {
+1006:        if (prefs != null && prefs.getBoolean("projectionReauthRequired", false) && captureIsNeededForCurrentState()) {
+1010:        if (STATE_WAITING_FREIGHT.equals(state)) return "Etapa 1/4 · escolha seu frete";
+1011:        if (STATE_CONFIRMING_FREIGHT.equals(state)) return "Etapa 1/4 · confirmando frete…";
+1012:        if (STATE_TRIP_IN_PROGRESS.equals(state)) return "Etapa 2/4 · viagem em andamento";
+1013:        if (STATE_RESULT_DETECTED.equals(state) || STATE_AWAITING_BONUS.equals(state)) return "Etapa 3/4 · validando a entrega";
+1014:        if (STATE_REJECTED_BONUS.equals(state)) return "Última viagem recusada por bônus";
+1015:        if (STATE_RESULT_CONFIRMED.equals(state)) {
+1024:    private void startForegroundForTypes(boolean includeProjection) {
+1035:    private void updateNotification() {
+1051:    private void showBubbleIfAllowed() {
+1102:        final int touchSlop = Math.max(dp(10), ViewConfiguration.get(this).getScaledTouchSlop());
+1116:                    if (!dragging[0] && Math.hypot(dx, dy) >= touchSlop) {
+1141:                    // ACTION_UP; let the foreground self-heal recreate the bubble instead.
+1179:    private boolean shouldShowProjectionReauthButton() {
+1185:            && !projectionActive
+1186:            && !projectionPermissionInFlight
+1188:            && prefs.getBoolean("projectionReauthRequired", false)
+1192:    private void updateProjectionReauthButton() {
+1205:        if (projectionReauthButtonView != null && !projectionReauthButtonView.isAttachedToWindow()) {
+1206:            projectionReauthButtonView = null;
+1207:            projectionReauthButtonParams = null;
+1208:            if (prefs.getBoolean("projectionReauthButtonVisible", false)) {
+1209:                prefs.edit().putBoolean("projectionReauthButtonVisible", false).apply();
+1212:        if (projectionReauthButtonView == null) {
+1224:                if (projectionPermissionInFlight || projectionActive) return;
+1229:            projectionReauthButtonParams = new WindowManager.LayoutParams(
+1236:            projectionReauthButtonParams.gravity = Gravity.TOP | Gravity.START;
+1237:            projectionReauthButtonView = action;
+1240:                windowManager.addView(projectionReauthButtonView, projectionReauthButtonParams);
+1242:                    .putBoolean("projectionReauthButtonVisible", true)
+1247:                    .putBoolean("projectionReauthButtonVisible", false)
+1248:                    .putString("projectionReauthButtonError", describeError(ex))
+1249:                    .putLong("projectionReauthButtonErrorAt", System.currentTimeMillis())
+1251:                projectionReauthButtonView = null;
+1252:                projectionReauthButtonParams = null;
+1259:    private void updateProjectionReauthButtonPosition() {
+1260:        if (projectionReauthButtonView == null || projectionReauthButtonParams == null
+1270:            projectionReauthButtonParams.x = Math.max(dp(8), rightX);
+1272:            projectionReauthButtonParams.x = clamp(leftX, dp(8), Math.max(dp(8), screen.widthPixels - buttonWidth - dp(8)));
+1274:        projectionReauthButtonParams.y = clamp(
+1278:        if (projectionReauthButtonView.isAttachedToWindow()) {
+1280:                windowManager.updateViewLayout(projectionReauthButtonView, projectionReauthButtonParams);
+1283:                    .putString("projectionReauthButtonError", describeError(ex))
+1284:                    .putLong("projectionReauthButtonErrorAt", System.currentTimeMillis())
+1291:    private void hideProjectionReauthButton() {
+1292:        boolean hadView = projectionReauthButtonView != null;
+1294:            try { windowManager.removeView(projectionReauthButtonView); } catch (Exception ignored) {}
+1296:        projectionReauthButtonView = null;
+1297:        projectionReauthButtonParams = null;
+1298:        if (prefs != null && (hadView || prefs.getBoolean("projectionReauthButtonVisible", false))) {
+1299:            prefs.edit().putBoolean("projectionReauthButtonVisible", false).apply();
+1303:    private void recordOverlayFailure(Throwable error) {
+1318:    private void updateFreightTouchPulseSensor() {
+1322:        boolean selectionArmed = STATE_WAITING_FREIGHT.equals(state) || replacementSelectionArmed;
+1323:        boolean resultActionArmed = (STATE_RESULT_DETECTED.equals(state) || STATE_AWAITING_BONUS.equals(state))
+1326:            && projectionActive
+1334:    private void showFreightTouchPulseSensor() {
+1345:            boolean selectionArmed = STATE_WAITING_FREIGHT.equals(state) || replacementSelectionArmed;
+1346:            boolean resultActionArmed = (STATE_RESULT_DETECTED.equals(state) || STATE_AWAITING_BONUS.equals(state))
+1379:            boolean resultState = STATE_RESULT_DETECTED.equals(getTripState()) || STATE_AWAITING_BONUS.equals(getTripState());
+1386:                .putBoolean("touchPulseSensorVisible", true)
+1388:                .remove("touchPulseSensorError")
+1389:                .remove("touchPulseSensorErrorAt")
+1394:            boolean resultState = STATE_RESULT_DETECTED.equals(getTripState()) || STATE_AWAITING_BONUS.equals(getTripState());
+1401:                .putBoolean("touchPulseSensorVisible", false)
+1405:                .putString("touchPulseSensorError", describeError(ex))
+1406:                .putLong("touchPulseSensorErrorAt", System.currentTimeMillis())
+1417:    private void hideFreightTouchPulseSensor() {
+1423:        if (prefs != null) prefs.edit().putBoolean("touchPulseSensorVisible", false).apply();
+1428:    private void armResultTouchFallbackReady(String reason) {
+1430:        if (!STATE_RESULT_DETECTED.equals(state) && !STATE_AWAITING_BONUS.equals(state)) return;
+1446:    private void confirmResultTouchFallback() {
+1448:        if (!STATE_RESULT_DETECTED.equals(state) && !STATE_AWAITING_BONUS.equals(state)) return;
+1463:            .putBoolean("touchCaptureNeeded", false)
+1476:    private void discardUnresolvedResultAndStartNewFreight() {
+1478:        if (!STATE_RESULT_DETECTED.equals(state) && !STATE_AWAITING_BONUS.equals(state)) return;
+1507:        setTripState(STATE_CANCELLED, "Entrega anterior descartada com segurança");
+1508:        beginTrip(false);
+1518:    private void markResultActionTouch() {
+1520:        if (!STATE_RESULT_DETECTED.equals(state) && !STATE_AWAITING_BONUS.equals(state)) return;
+1523:        // remain on this screen for any amount of time before touching Receber.
+1536:    private boolean resolveResultActionOutsideTouch(MotionEvent event) {
+1558:                latchExactReceiveAndSend(System.currentTimeMillis(), "outside-touch");
+1562:                latchExactAdsTouch(System.currentTimeMillis(), "outside-touch");
+1569:    private int classifyResultButtonTouch(float x, float y) {
+1584:    private void latchExactReceiveAndSend(long now, String source) {
+1586:        if (!STATE_RESULT_DETECTED.equals(state) && !STATE_AWAITING_BONUS.equals(state)) return;
+1594:            .putString("resultActionSource", source == null ? "exact-touch" : source)
+1597:            .putBoolean("touchCaptureNeeded", false)
+1603:        // R3.6: the exact Receber touch is the completion rule. No HUD return, loading
+1608:    private void latchExactAdsTouch(long now, String source) {
+1610:        if (!STATE_RESULT_DETECTED.equals(state) && !STATE_AWAITING_BONUS.equals(state)) return;
+1618:            .putString("resultActionSource", source == null ? "exact-touch" : source)
+1620:            .putBoolean("touchCaptureNeeded", false)
+1623:        setTripState(STATE_AWAITING_BONUS, "Opção de dobrar valor detectada com toque preciso");
+1626:    private void queueFreightTouchMarker() {
+1627:        if (captureHandler == null || fastTouchMarkerQueued || selectionCoordinator.isCriticalWindow()) return;
+1634:            // list is already visible, this touch is independent evidence that the driver
+1636:            // pressed frame arrives, while preserving the pre-touch page snapshot.
+1639:                if ((STATE_RESULT_DETECTED.equals(replacementState) || STATE_AWAITING_BONUS.equals(replacementState))
+1648:                // One permissive visual candidate plus an arbitrary gameplay touch is not
+1649:                // enough to cancel a real route. Hold the touch marker until either a
+1661:            if (!STATE_WAITING_FREIGHT.equals(getTripState())) return;
+1666:    private void toggleMenu() {
+1677:    private void openMenu() {
+1722:    private void populateMenuContents(LinearLayout target) {
+1742:        if (STATE_IDLE.equals(state) || STATE_CANCELLED.equals(state) || STATE_RESULT_CONFIRMED.equals(state) || STATE_REJECTED_BONUS.equals(state)) {
+1743:            if (STATE_RESULT_CONFIRMED.equals(state) || STATE_REJECTED_BONUS.equals(state)) {
+1746:                if (STATE_RESULT_CONFIRMED.equals(state)) {
+1769:            boolean previousDeliveryPending = STATE_RESULT_CONFIRMED.equals(state)
+1787:                Button start = menuButton(STATE_IDLE.equals(state) ? "Iniciar viagem" : "Iniciar nova viagem");
+1790:                    beginTrip();
+1802:            if (STATE_WAITING_FREIGHT.equals(state)) {
+1805:                if (!projectionActive) {
+1818:                if (!projectionActive) {
+1828:            if (STATE_CONFIRMING_FREIGHT.equals(state)) {
+1835:                if (!projectionActive) {
+1845:            if (STATE_TRIP_IN_PROGRESS.equals(state)) {
+1867:                if (!projectionActive) {
+1897:            if (STATE_RESULT_DETECTED.equals(state) || STATE_AWAITING_BONUS.equals(state)) {
+1928:                if (!projectionActive) {
+1938:            if (STATE_TRIP_IN_PROGRESS.equals(state)) {
+1956:    private void refreshMenuContents() {
+1975:    private void showStatusChip(String text, long durationMs) {
+2021:    private void announceDriverStage(String code, String message, long durationMs, boolean force) {
+2036:    private String currentJourneyGuide(String state) {
+2037:        if (STATE_WAITING_FREIGHT.equals(state)) {
+2040:        if (STATE_CONFIRMING_FREIGHT.equals(state)) {
+2043:        if (STATE_TRIP_IN_PROGRESS.equals(state)) {
+2046:        if (STATE_RESULT_DETECTED.equals(state) || STATE_AWAITING_BONUS.equals(state)) {
+2049:        if (STATE_RESULT_CONFIRMED.equals(state)) {
+2056:        if (STATE_REJECTED_BONUS.equals(state)) {
+2059:        if (STATE_CANCELLED.equals(state)) {
+2065:    private void hideStatusChip() {
+2075:    private void requestManualFinishCapture() {
+2076:        if (!STATE_TRIP_IN_PROGRESS.equals(getTripState())) return;
+2077:        if (!projectionActive) {
+2094:    private void failManualFinishCapture() {
+2105:    private String menuTitle() {
+2135:    private void reconcileSessionAfterGtoReturn(long absenceMs) {
+2141:            if (STATE_TRIP_IN_PROGRESS.equals(state)) {
+2151:        resetForFreshGtoSession();
+2154:    private boolean isRecoverableActiveState(String state) {
+2155:        return STATE_WAITING_FREIGHT.equals(state)
+2156:            || STATE_CONFIRMING_FREIGHT.equals(state)
+2157:            || STATE_TRIP_IN_PROGRESS.equals(state)
+2158:            || STATE_RESULT_DETECTED.equals(state)
+2159:            || STATE_AWAITING_BONUS.equals(state);
+2162:    private boolean hasFreshDurableSession(String state) {
+2167:        boolean requireFreight = STATE_TRIP_IN_PROGRESS.equals(state)
+2168:            || STATE_RESULT_DETECTED.equals(state)
+2169:            || STATE_AWAITING_BONUS.equals(state);
+2174:    private boolean isOperationClosedForNewTrip() {
+2191:    private void resetForFreshGtoSession() {
+2193:        if (STATE_IDLE.equals(state)) return;
+2198:        if (projectionActive) stopProjection();
+2200:            .putString("tripState", STATE_IDLE)
+2206:    private boolean preserveCompletedTripBeforeReset() {
+2208:        if (!STATE_RESULT_CONFIRMED.equals(state)) return true;
+2220:    private void beginTrip() {
+2221:        beginTrip(true);
+2224:    private void beginTrip(boolean announceStage) {
+2230:        if (STATE_RESULT_CONFIRMED.equals(currentState)
+2255:        if (!sessionPersisted || !GtoAutoTripSync.beginSessionSnapshot(this, prefs, sessionId)) {
+2262:            setTripState(STATE_IDLE, "Revise a operação NVU antes de iniciar a viagem GTO");
+2266:        setTripState(STATE_WAITING_FREIGHT, "Aguardando escolha do frete no GTO");
+2277:        if (!projectionActive) {
+2284:    private void requestProjectionPermission() {
+2285:        if (projectionPermissionInFlight) return;
+2287:        projectionPermissionInFlight = true;
+2289:        projectionStatus = "REQUESTING_PERMISSION";
+2291:            .putString("projectionStatus", projectionStatus)
+2294:            .putBoolean("projectionPermissionInFlight", true)
+2314:                projectionPermissionInFlight = false;
+2316:                projectionStatus = "PERMISSION_ACTIVITY_FAILED";
+2318:                    .putBoolean("projectionPermissionInFlight", false)
+2319:                    .putString("projectionStatus", projectionStatus)
+2328:    private void scheduleBubbleRestoreAfterPermission() {
+2329:        prefs.edit().putBoolean("projectionPermissionInFlight", false).apply();
+2340:    private void restoreBubbleAfterPermission(boolean refreshUsage) {
+2344:        boolean recentGto = GTO_PACKAGE.equals(foregroundPackage)
+2354:    private void cancelTrip() {
+2357:        setTripState(STATE_CANCELLED, "Viagem cancelada pelo motorista");
+2361:    private void clearTripAnalysis() {
+2402:        freightHistory.clear();
+2403:        freightHistoryPage = -1;
+2404:        freightHistoryUpdatedAt = 0L;
+2407:        pendingSelectionSource = "";
+2425:        // previous freight page can never become valid again after a reset.
+2426:        freightPageGeneration++;
+2437:        selectionCoordinator.reset();
+2438:        if (pendingSelectionTransaction != null) {
+2439:            pendingSelectionTransaction.close();
+2440:            pendingSelectionTransaction = null;
+2456:            .putBoolean("touchCaptureNeeded", false)
+2467:            .remove("pendingSelectionSource")
+2512:    private void openOperationalPanel() {
+2520:    private void closeMenu() {
+2530:    private void hideOverlays() {
+2545:    private int overlayType() {
+2552:    private void startProjection(int resultCode, Intent resultData) {
+2560:            final long generation = ++projectionGeneration;
+2561:            final MediaProjection projection = manager.getMediaProjection(resultCode, resultData);
+2562:            if (projection == null) throw new IllegalStateException("MediaProjection não autorizado");
+2563:            mediaProjection = projection;
+2565:            projection.registerCallback(new MediaProjection.Callback() {
+2569:                    if (generation != projectionGeneration || mediaProjection != projection) return;
+2581:                        if (generation != projectionGeneration || mediaProjection != projection) return;
+2582:                        projectionGeneration++;
+2583:                        projectionActive = false;
+2584:                        projectionStatus = "STOPPED";
+2586:                            .putBoolean("projectionActive", false)
+2587:                            .putString("projectionStatus", projectionStatus)
+2589:                            .putBoolean("projectionReauthRequired", true)
+2590:                            .putBoolean("projectionReauthNoticeShown", false)
+2591:                            .putBoolean("touchCaptureNeeded", false)
+2615:            Rect projectionBounds;
+2618:                projectionBounds = maximumMetrics.getBounds();
+2621:                projectionBounds = new Rect(0, 0, metrics.widthPixels, metrics.heightPixels);
+2623:            captureWidth = Math.max(1, projectionBounds.width());
+2624:            captureHeight = Math.max(1, projectionBounds.height());
+2638:            imageReader.setOnImageAvailableListener(this::onImageAvailable, captureHandler);
+2640:            virtualDisplay = projection.createVirtualDisplay(
+2651:            projectionActive = true;
+2663:            projectionStatus = "ACTIVE";
+2665:                .putBoolean("projectionActive", true)
+2666:                .putString("projectionStatus", projectionStatus)
+2672:                .remove("projectionError")
+2673:                .remove("projectionReauthRequired")
+2674:                .remove("projectionReauthNoticeShown")
+2680:            projectionActive = false;
+2681:            projectionStatus = "START_FAILED";
+2683:            projectionGeneration++;
+2685:                .putBoolean("projectionActive", false)
+2686:                .putString("projectionStatus", projectionStatus)
+2688:                .putString("projectionError", detail)
+2689:                .putBoolean("projectionReauthRequired", true)
+2690:                .putBoolean("projectionReauthNoticeShown", false)
+2691:                .putBoolean("touchCaptureNeeded", false)
+2698:            } catch (Exception foregroundEx) {
+2700:                    .putString("startError", describeError(foregroundEx))
+2710:    private void resizeProjectionSurface(int width, int height) {
+2714:        long expectedGeneration = projectionGeneration;
+2720:            if (!projectionActive
+2721:                || expectedGeneration != projectionGeneration
+2732:                replacement.setOnImageAvailableListener(this::onImageAvailable, handler);
+2733:                if (!projectionActive
+2734:                    || expectedGeneration != projectionGeneration
+2742:                if (!projectionActive
+2743:                    || expectedGeneration != projectionGeneration
+2767:                    .putString("projectionError", "Resize: " + describeError(ex))
+2768:                    .putLong("projectionErrorAt", System.currentTimeMillis())
+2775:    private void onImageAvailable(ImageReader reader) {
+2779:        if (STATE_WAITING_FREIGHT.equals(getTripState())) {
+2794:            boolean activeSessionVisualState = STATE_TRIP_IN_PROGRESS.equals(state)
+2795:                || STATE_RESULT_DETECTED.equals(state)
+2796:                || STATE_AWAITING_BONUS.equals(state);
+2814:                if (STATE_TRIP_IN_PROGRESS.equals(state)) {
+2830:            boolean structureDue = STATE_WAITING_FREIGHT.equals(state)
+2832:            boolean visualDue = STATE_WAITING_FREIGHT.equals(state)
+2835:            boolean manualFinishReady = !STATE_TRIP_IN_PROGRESS.equals(state)
+2838:            boolean tripFallbackOcrDue = STATE_TRIP_IN_PROGRESS.equals(state)
+2841:            boolean tripCandidateOcrDue = STATE_TRIP_IN_PROGRESS.equals(state)
+2846:                (STATE_TRIP_IN_PROGRESS.equals(state)
+2853:            // The selected row is OCRed from the frozen pre-touch snapshot afterwards.
+2880:            if (STATE_TRIP_IN_PROGRESS.equals(state) && !manualFinishCapturePending) {
+2894:            if (STATE_WAITING_FREIGHT.equals(state)) {
+2903:            } else if (STATE_TRIP_IN_PROGRESS.equals(state)) {
+2940:                    handleOcrResult(text, analysisScale, offsetX, offsetY, fullFrameForGeometry);
+2961:    private boolean isCurrentAnalysisOcr(long generation, String sessionId) {
+2966:        return STATE_TRIP_IN_PROGRESS.equals(state)
+2967:            || STATE_RESULT_DETECTED.equals(state)
+2968:            || STATE_AWAITING_BONUS.equals(state);
+2971:    private boolean isCurrentPreciseSelectionOcr(long generation, String sessionId) {
+2977:    private void recordFastFreightFrame(GtoFastVisualDetector.Frame frame, long sequence) {
+3022:    private float fastBaselineQuality(GtoFastVisualDetector.Frame frame) {
+3034:    private void armFastTouchPulseOnCaptureThread() {
+3035:        if (!STATE_WAITING_FREIGHT.equals(getTripState())) return;
+3037:        long markerSequence = selectionCoordinator.markTouch();
+3071:            .putString("pendingSelectionSource", "touch-marker")
+3076:    private void clearFastTouchPulse(boolean preserveFrozenSnapshot) {
+3082:        selectionCoordinator.finishCriticalWindow();
+3083:        if (!preserveFrozenSnapshot && !preciseSelectionOcrBusy && pendingSelectionTransaction == null) {
+3109:    private void cacheFastFreightPanel(Image image, GtoFastVisualDetector.Frame current, long now) {
+3135:            freightPageGeneration++;
+3148:        if (freightPageGeneration <= 0L) freightPageGeneration = 1L;
+3152:            scheduleFreightPageOcr(freightPageGeneration, panel, left, current.buttons, now);
+3156:    private void scheduleFreightPageOcr(
+3178:                if (!STATE_WAITING_FREIGHT.equals(getTripState()) || generation != freightPageGeneration) return;
+3195:                List<FreightOption> parsed = parseFreightOptions(lines, buttonCopy);
+3219:    private void onFreightFrameAvailable(ImageReader reader) {
+3222:            // Stay on the newest GTO frame during normal list browsing. Once the touch
+3223:            // marker reaches this same capture thread, preserve the short post-touch
+3225:            image = selectionCoordinator.isCriticalWindow()
+3229:            if (!gtoForeground || !STATE_WAITING_FREIGHT.equals(getTripState())) return;
+3231:            long sequence = selectionCoordinator.onFrameProcessed();
+3245:                // A touch can arrive before the very first structural pass. Because the
+3246:                // touch marker is serialized on this Handler, any pre-touch callbacks
+3264:                boolean postTouchFrame = fastTouchPulseActive && selectionCoordinator.isPostTouch(sequence);
+3271:                        // The touch was a page arrow/navigation. Release the critical
+3334:                    && selectionCoordinator.isPostTouch(sequence)) {
+3430:                selectionCoordinator.touchMarkerSequence(),
+3437:    private void replacePendingSelectionTransaction(FreightSelectionTransaction transaction) {
+3438:        if (pendingSelectionTransaction != null && pendingSelectionTransaction != transaction) {
+3439:            pendingSelectionTransaction.close();
+3441:        pendingSelectionTransaction = transaction;
+3445:        FreightSelectionTransaction transaction = pendingSelectionTransaction;
+3446:        pendingSelectionTransaction = null;
+3450:    private void armFastVisualSelection(
+3459:        // Prefer the clean pre-touch page snapshot. The pressed/transition frame is only
+3496:        String source = fastPendingFromTouchPulse ? "touch-marker+frame-lock" : "frame-lock";
+3500:            .putString("pendingSelectionSource",
+3501:                (fastPendingFromTouchPulse ? "touch-pulse-row-" : "frame-lock-row-") + (candidate.row + 1))
+3506:    private void finalizeFastVisualSelection() {
+3515:                fromPulse ? "touch-marker+frame-lock" : "frame-lock"
+3533:            .putLong("selectionTouchSequence", transaction.touchSequence)
+3538:        setTripState(STATE_CONFIRMING_FREIGHT, "Frete identificado. Validando os dados…");
+3542:    private void clearFastPendingSelection() {
+3548:        if (pendingSelectionTransaction != null) {
+3549:            pendingSelectionTransaction.close();
+3550:            pendingSelectionTransaction = null;
+3555:    private boolean shouldAnalyzeState(String state) {
+3556:        return STATE_TRIP_IN_PROGRESS.equals(state)
+3557:            || STATE_RESULT_DETECTED.equals(state)
+3558:            || STATE_AWAITING_BONUS.equals(state);
+3561:    private long analysisIntervalForState(String state) {
+3562:        if (STATE_WAITING_FREIGHT.equals(state)) return 95L;
+3563:        if (STATE_CONFIRMING_FREIGHT.equals(state)) return 80L;
+3564:        if (STATE_TRIP_IN_PROGRESS.equals(state)) {
+3567:        if (STATE_RESULT_DETECTED.equals(state) || STATE_AWAITING_BONUS.equals(state)) return 90L;
+3571:    private boolean handleActiveTripFreightListEvidence(
+3578:        boolean unresolvedResult = STATE_RESULT_DETECTED.equals(activeState) || STATE_AWAITING_BONUS.equals(activeState);
+3582:            // If a real touch was already observed and the row-specific pressed state was
+3585:            // consume the preserved pre-touch snapshot.
+3629:        if (STATE_IDLE.equals(activeState) || STATE_CANCELLED.equals(activeState)) {
+3651:            // This OEM refused the independent outside-touch sensor. A stable jobs list
+3665:        boolean touchEvidence = replacementFreightTouchPending || rowAlreadyPressed;
+3666:        return promoteReplacementFreightCandidateToWaiting(touchEvidence);
+3669:    private boolean isReplaceableActiveSessionState(String state) {
+3672:        // bypass operation-context validation; beginTrip(false) still refuses to
+3674:        return STATE_IDLE.equals(state)
+3675:            || STATE_CANCELLED.equals(state)
+3676:            || STATE_TRIP_IN_PROGRESS.equals(state)
+3677:            || STATE_RESULT_DETECTED.equals(state)
+3678:            || STATE_AWAITING_BONUS.equals(state);
+3681:    private boolean hasRecentNormalResultActionEvidence(long now) {
+3687:        long touchAt = Math.max(resultActionTouchAt, persistedTouchAt);
+3688:        if (touchAt <= 0L) return false;
+3699:    private void armOrRefreshReplacementFreightCandidate(
+3752:    private void captureReplacementFreightPanel(Image image, GtoFastVisualDetector.Frame frame) {
+3769:    private boolean promoteReplacementFreightCandidateToWaiting(boolean fromTouch) {
+3775:        // new freight page and are restored after beginTrip(false).
+3800:        boolean hadActiveSession = !STATE_IDLE.equals(replacedState) && !STATE_CANCELLED.equals(replacedState);
+3810:                .putString("lastCancellationReason", (STATE_RESULT_DETECTED.equals(replacedState) || STATE_AWAITING_BONUS.equals(replacedState))
+3813:                .putString("lastEvent", (STATE_RESULT_DETECTED.equals(replacedState) || STATE_AWAITING_BONUS.equals(replacedState))
+3823:        beginTrip(false);
+3825:        if (!STATE_WAITING_FREIGHT.equals(getTripState())) {
+3850:            long baselineSequence = selectionCoordinator.onFrameProcessed();
+3854:            freightPageGeneration++;
+3856:                freightPageGeneration, savedPanel, savedOffset, savedButtons, System.currentTimeMillis()
+3875:                    savedPressedRow, "replacement-touch+frame-lock"
+3879:                    .putString("pendingSelectionSource", "replacement-touch-row-" + (savedPressedRow + 1))
+3886:                (STATE_RESULT_DETECTED.equals(replacedState) || STATE_AWAITING_BONUS.equals(replacedState))
+3899:    private void clearReplacementFreightCandidate() {
+3922:    private void onFreightListVisibleAgain(long now) {
+3923:        if (projectionPermissionInFlight) return;
+3934:        // into the new list. The current projection remains active.
+3950:    private void markFreightListClosed(long now) {
+3951:        if (projectionPermissionInFlight || !freightListCycleSeen) return;
+3956:        if (STATE_WAITING_FREIGHT.equals(getTripState())) {
+3965:    private boolean restartWaitingFreightSelectionSession(String reason) {
+3966:        if (projectionPermissionInFlight) return false;
+3967:        if (!STATE_WAITING_FREIGHT.equals(getTripState())) return false;
+3994:        if (!persisted || !GtoAutoTripSync.beginSessionSnapshot(this, prefs, newSessionId)) {
+4001:            setTripState(STATE_IDLE, "Nova tentativa não pôde ser criada");
+4005:        setTripState(STATE_WAITING_FREIGHT, "Nova lista detectada · aguardando escolha do frete");
+4009:    private void updateRealtimeFreightStructure(Bitmap frame, long now) {
+4010:        if (frame == null || frame.isRecycled() || !STATE_WAITING_FREIGHT.equals(getTripState())) return;
+4020:                prefs.edit().putBoolean("touchCaptureNeeded", false).apply();
+4040:            .putBoolean("touchCaptureNeeded", true)
+4058:    private void armSelectionProbe(long touchAt) {
+4059:        if (!STATE_WAITING_FREIGHT.equals(getTripState())) return;
+4065:                if (touchAt - candidate.at > 320L) break;
+4066:                if (candidate.at <= touchAt + 40L) {
+4077:            selectionProbeStartedAt = touchAt;
+4099:    private void recordButtonFrame(Bitmap frame, List<Rect> buttons, long now) {
+4119:        // Primary FIX9 path: do not wait for Android to reveal touch coordinates.
+4127:    private void detectDirectButtonPress(ButtonFrameSample previous, ButtonFrameSample current) {
+4128:        if (!STATE_WAITING_FREIGHT.equals(getTripState())) return;
+4186:    private void evaluateSelectionProbe(Bitmap frame, List<Rect> buttons, long now) {
+4242:    private boolean finishSelectionProbeIfPossible(long now, boolean listDisappeared) {
+4252:            return STATE_TRIP_IN_PROGRESS.equals(getTripState()) || preciseSelectionOcrBusy;
+4262:    private void commitVisualSelectedRow(int row, float score, float margin) {
+4271:            .putBoolean("touchCaptureNeeded", false)
+4276:        setTripState(STATE_CONFIRMING_FREIGHT, "Frete selecionado. Confirmando informações…");
+4280:    private void clearSelectionProbe() {
+4296:    private void recycleFrozenSelectionPanel() {
+4304:    private void handlePreciseTouch(float x, float y, long eventTime) {
+4308:        if (STATE_WAITING_FREIGHT.equals(state)) {
+4325:            if (hit < 0) return; // Page arrows/other game controls pass through untouched.
+4333:                .putString("selectionSource", "precise-touch")
+4335:                .putBoolean("touchCaptureNeeded", false)
+4337:            setTripState(STATE_CONFIRMING_FREIGHT, "Frete selecionado. Confirmando informações…");
+4342:        if (STATE_RESULT_DETECTED.equals(state) || STATE_AWAITING_BONUS.equals(state)) {
+4347:                latchExactReceiveAndSend(now, "precise-touch");
+4351:                latchExactAdsTouch(now, "precise-touch");
+4368:        if (freightPageGeneration <= 0L || textGeneration != freightPageGeneration) return null;
+4377:    private void restoreWaitingAfterSelectionFailure(int rowIndex, String reason) {
+4381:            .putBoolean("touchCaptureNeeded", false)
+4385:        if (!projectionPermissionInFlight && freightListCycleSeen
+4391:        setTripState(STATE_WAITING_FREIGHT, "Não foi possível confirmar todos os dados. Abra a lista e selecione novamente.");
+4394:    private void runPreciseSelectedRowOcr(int rowIndex) {
+4405:    private void runPreciseSelectedRowOcr(FreightSelectionTransaction transaction) {
+4441:        if (!STATE_CONFIRMING_FREIGHT.equals(currentState) && !STATE_WAITING_FREIGHT.equals(currentState)) {
+4555:                List<FreightOption> parsed = parseFreightOptions(lines, Collections.singletonList(exactButton));
+4618:    private String inferOriginCompanyFromMlLine(Text.Line line) {
+4692:    private void refinePreciseRowFields(FreightOption option, List<OcrLine> lines, int top, int bottom) {
+4763:    private boolean hasCriticalFreightConflict(FreightOption exact, FreightOption stable) {
+4773:    private String freightConflictSummary(FreightOption exact, FreightOption stable) {
+4780:    private boolean isExactFreightDataValid(FreightOption option) {
+4796:    private void commitPreciseFreight(FreightOption selected) {
+4799:        if (!STATE_WAITING_FREIGHT.equals(state) && !STATE_CONFIRMING_FREIGHT.equals(state)) return;
+4816:            .putBoolean("touchCaptureNeeded", false)
+4818:            .remove("pendingSelectionSource")
+4821:            setTripState(STATE_WAITING_FREIGHT, "Frete detectado, mas a integridade dos dados não pôde ser bloqueada");
+4828:        setTripState(STATE_TRIP_IN_PROGRESS,
+4857:    private void handleOcrResult(Text text, float analysisScale, int analysisOffsetX, int analysisOffsetY, Bitmap fullFrame) {
+4885:            if (STATE_RESULT_DETECTED.equals(getTripState()) || STATE_AWAITING_BONUS.equals(getTripState())) {
+4891:                setTripState(STATE_REJECTED_BONUS, "Bônus de vídeo detectado; viagem bloqueada");
+4905:            if (STATE_RESULT_CONFIRMED.equals(stateAtResultCallback)
+4906:                || STATE_REJECTED_BONUS.equals(stateAtResultCallback)) {
+4935:                    .putBoolean("touchCaptureNeeded", false)
+4950:                .putBoolean("touchCaptureNeeded", true)
+4962:            if (STATE_TRIP_IN_PROGRESS.equals(getTripState())) {
+4963:                setTripState(STATE_RESULT_DETECTED, "Entrega concluída detectada: " + detectedResultValue);
+4977:        if (STATE_TRIP_IN_PROGRESS.equals(getTripState()) && !manualFinishCapturePending) {
+5003:        if (STATE_TRIP_IN_PROGRESS.equals(getTripState()) && manualFinishCapturePending) {
+5013:        if ((STATE_RESULT_DETECTED.equals(stateAfterResult) || STATE_AWAITING_BONUS.equals(stateAfterResult))
+5022:                setTripState(STATE_REJECTED_BONUS, "Fluxo de anúncio/bônus detectado após a entrega; viagem bloqueada");
+5053:                if (now - resultExitSeenAt >= 1800L && STATE_RESULT_DETECTED.equals(stateAfterResult)) {
+5056:                    setTripState(STATE_AWAITING_BONUS, "Validando retorno do GTO após a conclusão");
+5061:        boolean waitingForFreight = STATE_WAITING_FREIGHT.equals(getTripState());
+5063:        int freightPage = waitingForFreight ? parseFreightPageNumber(lines) : -1;
+5065:            ? parseFreightOptions(lines, visualButtons)
+5075:                pendingSelectionSource = "";
+5076:                prefs.edit().remove("pendingFreight").remove("pendingSelectionSource").apply();
+5088:            // Do not overwrite the pre-touch baseline while we are inside the
+5105:                .putLong("freightStableAt", freightHistoryUpdatedAt)
+5120:                .putBoolean("touchCaptureNeeded", true)
+5129:        if (STATE_WAITING_FREIGHT.equals(getTripState())
+5147:    private List<FreightOption> parseFreightOptions(List<OcrLine> lines, List<Rect> visualButtons) {
+5267:            // from OCR and gives us an exact row target even when Android hides touch
+5378:    private int freightOcrLeftForCurrentLayout(int width) {
+5391:    private int freightPanelLeftForButtons(int width, List<Rect> buttons) {
+5404:    private List<Rect> detectAcceptButtonRects(Bitmap bitmap) {
+5482:    private List<Rect> detectAcceptButtonRectsInBand(Bitmap bitmap, int left, int right) {
+5537:    private void addBitmapButtonRun(List<Rect> result, int left, int right, int runStart, int lastActive, int minHeight) {
+5547:    private boolean plausibleAcceptStack(List<Rect> buttons) {
+5562:    private float bitmapButtonBandScore(Bitmap bitmap, List<Rect> buttons) {
+5569:    private boolean isGtoOrange(int pixel) {
+5582:    private int parseFreightPageNumber(List<OcrLine> lines) {
+5596:    private List<FreightOption> stabilizeFreightOptions(int page, List<FreightOption> parsed) {
+5599:        boolean reset = freightHistory.isEmpty() || freightHistoryPage != page;
+5600:        if (!reset) {
+5601:            List<FreightOption> previous = freightHistory.get(freightHistory.size() - 1);
+5603:                reset = true;
+5605:                reset = true;
+5608:        if (reset) {
+5609:            freightHistory.clear();
+5610:            freightHistoryPage = page;
+5615:        freightHistory.add(frameCopy);
+5616:        while (freightHistory.size() > FREIGHT_HISTORY_LIMIT) freightHistory.remove(0);
+5617:        freightHistoryUpdatedAt = System.currentTimeMillis();
+5623:            for (List<FreightOption> frame : freightHistory) {
+5659:    private float freightNumericOverlap(List<FreightOption> a, List<FreightOption> b) {
+5747:    private float voteEvidence(VoteResult vote, String currentValue) {
+5756:    private String cleanOcrLabel(String value) {
+5769:    private int routeSeparatorIndex(String text) {
+5780:    private int routeSeparatorLength(String text, int index) {
+5787:    private boolean looksLikePlaceName(String value) {
+5804:    private boolean looksLikeEntityName(String value) {
+5810:    private float textQuality(String value) {
+5826:    private float freightFieldPresenceConfidence(FreightOption option) {
+5836:    private String canonicalKm(String value) {
+5841:    private String canonicalMoney(String value) {
+5846:    private boolean isFreightDataReliable(FreightOption option) {
+5864:    private boolean hasPartialResultSemanticEvidence(String normalizedAll) {
+5904:    private void handleOutsideTouch(float rawX, float rawY, float alternateX, float alternateY) {
+5928:        if (STATE_WAITING_FREIGHT.equals(state) && System.currentTimeMillis() - lastFreightListSeenAt <= 900L) {
+5931:            // the five fixed GTO Accept buttons. Page arrows and other touches do not
+5938:        // the already-open GTO list. Preserve that touch and correlate it with the exact
+5945:                .putString("pendingSelectionSource", "bootstrap-touch")
+5951:        if (STATE_RESULT_DETECTED.equals(state) || STATE_AWAITING_BONUS.equals(state)) {
+5953:            // result screen we therefore treat the outside touch only as evidence that
+5982:                Rect touchTarget = new Rect(option.acceptRect);
+5983:                touchTarget.inset(-horizontal, -vertical);
+5984:                if (!touchTarget.contains(Math.round(rawX), Math.round(rawY))) continue;
+5993:            // Fallback for OEMs that expose usable outside-touch coordinates. Anchor
+6014:    private boolean confirmFreightAfterListExit() {
+6036:            source = pendingSelectionSource.isEmpty() ? "pending" : pendingSelectionSource;
+6072:            .remove("pendingSelectionSource")
+6076:            setTripState(STATE_WAITING_FREIGHT, "Frete detectado, mas a integridade dos dados não pôde ser bloqueada");
+6082:        pendingSelectionSource = "";
+6084:        setTripState(STATE_TRIP_IN_PROGRESS, "Frete selecionado automaticamente: " + summary + " [" + source + "]");
+6094:    private boolean isReliableOutsideCoordinate(float x, float y) {
+6124:    private void updateButtonBaselines(List<FreightOption> options, Bitmap bitmap, float scale) {
+6133:    private void carryButtonBaselines(List<FreightOption> parsedOptions) {
+6153:    private void analyzeVisualSelectionFrame(Bitmap bitmap) {
+6201:                pendingSelectionSource = visualSelectionSource;
+6204:                    .putString("pendingSelectionSource", visualSelectionSource)
+6211:    private int[] buttonSignature(Bitmap bitmap, Rect screenRect, float scale) {
+6247:    private float signatureDistance(int[] baseline, int[] current) {
+6254:    private float orangeRatio(Bitmap bitmap, Rect screenRect, float scale) {
+6278:    private String extractKmDigits(String value) {
+6286:    private String extractMoneyDigits(String value) {
+6294:    private String digitsOnly(String value) {
+6298:    private void learnCompanyCities(List<FreightOption> options) {
+6323:    private String resolveKnownOrigin(String originCompany) {
+6331:    private void persistArrivalCityFromSelectedFreight() {
+6387:    private boolean isTapNearRect(float rawX, float rawY, Rect rect, boolean expandButton) {
+6398:    private boolean containsPostResultAdEvidence(String normalized) {
+6411:    private boolean looksLikeGameplay(String normalized) {
+6421:    private void persistResultSnapshot(Bitmap fullFrame) {
+6484:    private void deleteResultSnapshot() {
+6519:    private boolean recoverResultValueFromSnapshotAsync() {
+6592:    private String extractResultValueFromRawOcr(String raw) {
+6607:    private void confirmNormalResultAutomatically() {
+6609:        if (STATE_RESULT_CONFIRMED.equals(currentState)) return;
+6610:        if (!STATE_RESULT_DETECTED.equals(currentState) && !STATE_AWAITING_BONUS.equals(currentState)) return;
+6661:        setTripState(STATE_RESULT_CONFIRMED, "Entrega finalizada e recebimento normal confirmado: " + detectedResultValue);
+6671:    private String recoverResultValueFromPersistedOcr() {
+6724:    private void flushAutomaticTripQueue() {
+6728:    private boolean containsBonusVideo(String normalized) {
+6734:    private void setTripState(String state, String event) {
+6747:    private String getTripState() {
+6748:        return prefs.getString("tripState", STATE_IDLE);
+6751:    private String waitingDiagnostics() {
+6753:        int touches = prefs.getInt("outsideTouchCount", outsideTouchCount);
+6756:        String savedProjection = prefs.getString("projectionStatus", projectionStatus);
+6757:        String projectionError = prefs.getString("projectionError", "");
+6761:            + "\nToques externos: " + touches
+6763:        String pending = prefs.getString("pendingSelectionSource", "");
+6769:        if (!projectionError.isEmpty()) line += "\nErro: " + truncate(projectionError, 74);
+6773:    private String statusLabel(String state) {
+6774:        if (STATE_WAITING_FREIGHT.equals(state)) return "Escolha seu frete";
+6775:        if (STATE_CONFIRMING_FREIGHT.equals(state)) return "Confirmando frete";
+6776:        if (STATE_TRIP_IN_PROGRESS.equals(state)) return "Viagem em andamento";
+6777:        if (STATE_RESULT_DETECTED.equals(state)) return "Entrega concluída";
+6778:        if (STATE_AWAITING_BONUS.equals(state)) return "Validando o recebimento";
+6782:    private String freightOptionsToJson(List<FreightOption> options) {
+6807:    private String joinCardText(List<OcrLine> lines) {
+6816:    private String normalize(String text) {
+6826:    private String truncate(String value, int max) {
+6841:    private int dp(int value) {
+6845:    private int clamp(int value, int min, int max) {
+6849:    private void showToast(String message) {
+6853:    private void stopProjection() {
+6854:        boolean wasActive = projectionActive || mediaProjection != null || virtualDisplay != null;
+6857:        projectionGeneration++;
+6858:        projectionActive = false;
+6861:        if (wasActive) projectionStatus = "STOPPED";
+6863:            .putBoolean("projectionActive", false)
+6864:            .putString("projectionStatus", projectionStatus)
+6865:            .putBoolean("touchCaptureNeeded", false)
+6871:    private void releaseCaptureResources(boolean stopMediaProjection) {
+6905:        // requests a fresh projection authorization because projection tokens are not
+6914:        mainHandler.removeCallbacks(foregroundPoll);
+6931:        if (pendingSelectionTransaction != null) {
+6932:            pendingSelectionTransaction.close();
+6933:            pendingSelectionTransaction = null;
+6935:        selectionCoordinator.reset();
+6937:            .putBoolean("projectionActive", false)
+6939:            .putBoolean("touchCaptureNeeded", false)
+6940:            .putBoolean("projectionPermissionInFlight", false)
+6954:    private static class OcrLine {
+6970:    private static final class SequencedFastFrame {
+6980:    private static final class FreightSelectionTransaction {
+6986:        final long touchSequence;
+6990:        private boolean closed = false;
+6998:            long touchSequence,
+7007:            this.touchSequence = touchSequence;
+7020:    private static class ButtonFrameSample {
+7036:    private static class FreightMatch {
+7046:    private static class FreightOption {
+7077:    private static class VoteResult {
+7089:    private static class ResultScreen {

@@ -1,0 +1,44 @@
+i  emulators: Starting emulators: firestore
+i  emulators: Detected demo project ID "demo-no-project", emulated services will use a demo configuration and attempts to access non-emulated services for this project will fail.
+i  firestore: downloading cloud-firestore-emulator-v1.21.0.jar...
+
+i  firestore: Firestore Emulator logging to firestore-debug.log
+✔  firestore: Firestore Emulator was started in standard edition.
+✔  firestore: Firestore Emulator UI websocket is running on 9150.
+i  Running script: npx tsx v6_phase_1_6_test.ts
+== Piso Anti-inflação & Índice Final ==
+MaxConstancy (piso=16): 16
+MaxTrips (piso=31): 50
+MaxEarnings (piso=3100): 5000
+Scores Driver 1 (Denominador não-zero): 18
+Scores Driver 2: 88
+
+== Empate Completo 1,1,3 ==
+dr1 rank: 1 | dr2 rank: 1 | dr3 rank: 3
+
+== Motorista Inativo ==
+Inativo isEligible: false
+Inativo globalRank (deve ser null): null
+
+== Evento antigo ignorado (Revisão Monotônica) ==
+Earnings atualizados para UpdateTime 2: 2000
+Earnings após UpdateTime 1 (deve ignorar e manter igual): 2000
+
+== Mudança de MetricDate ==
+Trips em Julho (movido para fora): 0
+Trips em Junho (entrou): 1
+
+== Motorista Ativo Sem Viagens ==
+Rank do driver sem viagens: 2 Index: 0
+
+== Rules: Projection simulator_members ==
+-> Membro ETS2 com acesso liberado
+-> Outro simulador ou sem membership bloqueado corretamente
+
+== Reconstrução com 1.200 motoristas ==
+Motoristas rankeados em 2026-01: 1200/1200
+✔  Script exited successfully (code 0)
+i  emulators: Shutting down emulators.
+i  firestore: Stopping Firestore Emulator
+i  hub: Stopping emulator hub
+i  logging: Stopping Logging Emulator

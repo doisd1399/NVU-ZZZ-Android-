@@ -1,0 +1,44 @@
+NVU R3.28 VALIDATION REPORT
+===========================
+Release: R3.28
+Web: 2.3.9
+Android: 1.0.45 (versionCode 45)
+Date: 2026-08-14
+
+ROOT CAUSE FROM DEVICE EVIDENCE
+- Native status was WAITING_FREIGHT while screen analysis was paused/outside GTO.
+- Capture diagnostic was stuck at 1220x2712 / 0 of 3 stable frames while GTO was landscape.
+- MediaProjection was being requested before the simulator had fully become the visible landscape task.
+- Result: actual freight pixels were not promoted to the live detector; list/selection notices could not fire.
+
+R3.28 FIX
+- Open GTO first, request capture consent only after confirmed GTO foreground.
+- Landscape, isolated permission activity for whole-display capture.
+- Rotation-aware initial capture size.
+- Bounded Android 14+ fallback if captured-content resize callback never arrives.
+- Expected IDLE->WAITING_FREIGHT launch preparation no longer flagged as state corruption.
+- Senior Panel entry always visible inside admin-only layout; server-backed Senior gate preserved.
+
+VALIDATION
+- npm run verify:release: PASS
+- PASS/OK/check lines in executed release log: 558
+- Senior navigation executed separately: 10/10
+- Final R3.28 verify:release pipeline now includes Senior navigation as a mandatory gate
+- R3.28 practical-flow: 17/17
+- R3.27 runtime-flow: 31/31
+- R3.26 deterministic-flow: 21/21
+- R3.25 detection-flow: 16/16
+- Native flow: 49/49
+- Automatic sync: 74/74
+- Senior navigation: 10/10
+- Selection integrity: 20/20
+- Release audit: 22/22
+- Java syntax: PASS (15 sources)
+- Exact reported freight screenshot fixture: SHA-256 833dc0a28595ab1a5438ce6ea0b69786384c3c272efd0aeaa2ad96cb7b39440f
+- Exact fixture dimensions: 1536x691
+- Exact fixture freight count: 5
+- Row press regression: rows 1..5 each identified by production detector logic.
+
+FINAL HARDWARE NOTE
+The Android/OEM MediaProjection dialog and UsageStats delivery can only be physically homologated
+on the target device. PREPARAR-ANDROID-WINDOWS.bat also runs a real Java compile gate before allowing publication.

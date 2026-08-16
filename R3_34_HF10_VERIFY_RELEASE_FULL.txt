@@ -1,0 +1,911 @@
+
+> nvu-operacional@2.3.9 verify:release
+> npm run verify:project && npm run verify:cap-remote && npm run check:android-java-syntax && npm run validate:senior-navigation && npm run validate:gto-native && npm run validate:gto-auto-sync && npm run audit:gto-r2 && npm run audit:gto-r3.3 && npm run audit:gto-r3.5 && npm run audit:gto-r3.6 && npm run audit:gto-r3.7 && npm run audit:gto-r3.13 && npm run test:gto-r3.13-print && npm run audit:gto-r3.17-selection && npm run audit:gto-r3.19-end-to-end && npm run audit:gto-r3.20 && npm run test:gto-r3.21-capture && npm run test:gto-r3.22-selection && npm run test:gto-r3.23-integrity && npm run test:gto-r3.24-bootstrap-origin && npm run test:gto-r3.25-detection-flow && npm run test:gto-r3.26-deterministic-flow && npm run test:gto-r3.27-runtime-flow && npm run test:gto-r3.28-practical-flow && npm run test:gto-r3.29-strict-screen && npm run test:gto-r3.30-selected-freight && npm run test:gto-r3.31-continuity && npm run test:gto-r3.32-card-continuity && npm run test:gto-r3.33-audit-flow && npm run test:gto-r3.34-money-integrity && npm run test:gto-r3.34-pc-hotfix && npm run test:gto-r3.34-hf10-projection
+
+
+> nvu-operacional@2.3.9 verify:project
+> node scripts/preflight.mjs --full
+
+[AVISO] node_modules ainda não existe. Execute npm ci antes do build.
+[OK] Pré-verificação do projeto concluída.
+
+> nvu-operacional@2.3.9 verify:cap-remote
+> node scripts/verify-capacitor-remote.mjs
+
+✓ Capacitor Android configurado para runtime remoto: https://stirring-pavlova-ca6808.netlify.app
+
+> nvu-operacional@2.3.9 check:android-java-syntax
+> node scripts/check-android-java-syntax.mjs
+
+JavaSyntaxCheck: PASS (18 sources)
+
+> nvu-operacional@2.3.9 validate:senior-navigation
+> node scripts/validate-senior-navigation.mjs
+
+OK   Login has no automatic navigation to Senior Panel
+OK   Hydrated senior session lands on profile selector
+OK   Senior role participates in profile-selector handoff
+OK   Admin profile selection targets fleet
+OK   Driver profile selection targets driver profile
+OK   Profile selection clears stale senior UI session
+OK   Senior authorization no longer overwrites an explicit active role
+OK   Senior Panel navigation exists as explicit AdminLayout action
+OK   Senior Panel button is always visible inside the admin-only layout and remains inside the secure route gate
+OK   Senior Panel label is explicit
+
+10/10 checks passed.
+
+> nvu-operacional@2.3.9 validate:gto-native
+> node scripts/validate-gto-native-flow.mjs
+
+OK   legacy isolated permission activity remains non-exported fallback
+OK   legacy permission task stays excluded from recents
+OK   isolated permission host stays hard landscape
+OK   initial permission is not owned by Capacitor/NVU activity
+OK   permission host requests whole display on Android14+
+OK   web launch opens GTO before initial projection consent
+OK   in-GTO permission recovery never opens MainActivity
+OK   MainActivity has no MediaProjection lifecycle responsibility
+OK   service uses projection permission grace
+OK   leaving GTO pauses screen analysis immediately without a trip transition
+OK   returning to GTO resumes the same trip state
+OK   known third-party foreground cannot be overridden by freight-like pixels
+OK   bubble taps are debounced
+OK   interactive bubble never watches outside touches
+OK   independent 1px pulse sensor watches outside touches
+OK   pulse sensor is an independent outside-touch observer
+OK   touch marker is serialized on capture handler
+OK   sensor removal does not clear selection engine
+OK   frame correlation uses monotonic sequence coordinator
+OK   WAITING_FREIGHT preserves ordered selection frames
+OK   non-waiting capture keeps latest-frame backpressure
+OK   selection snapshot is immutable before state transition
+OK   transaction owns copied bitmap and geometry
+OK   pulse sensor is hidden with overlays
+OK   projection uses default display capture
+OK   projection handles captured-content resize
+OK   trip result OCR uses lightweight visual gate
+OK   trip result OCR keeps a slow fallback
+OK   active trip ignores freight-like pixels unless replacement is explicit
+OK   no audio capture permission/code
+OK   plugin capture request only defers consent to confirmed GTO
+OK   no accessibility service remains
+OK   fast freight path orders all WAITING frames independent of OEM outside-touch delivery
+OK   fast freight detector is OCR-free
+OK   touch-window detector uses relaxed post-touch scoring
+OK   touch-before-first-list never guesses a row from one frame
+OK   temporarily dark pressed button is handled before list validity
+OK   pre-touch baseline rejects pressed-frame contamination
+OK   ultra-fast taps have retrospective frame recovery
+OK   pending selection is not cleared by pageChanged
+OK   selected OCR prefers clean pre-touch snapshot
+OK   freight page snapshot is populated in fast path
+OK   freight page text is pre-read before selection
+OK   stale page OCR cannot overwrite current page
+OK   different freight pages cannot reuse old snapshot
+OK   origin company has geometric OCR fallback
+OK   cancel button is trip-only
+OK   in-progress trip survives temporary exit/process restart while completed unsynced trip is recoverable
+OK   result refresh is fast
+
+49/49 checks passed.
+
+> nvu-operacional@2.3.9 validate:gto-auto-sync
+> node scripts/validate-gto-auto-sync.mjs
+
+OK   Firebase BoM configured
+OK   Firebase Auth native dependency configured
+OK   Firebase Functions native dependency configured
+OK   trip session UUID created at beginTrip
+OK   trip sync starts only after normal result confirmation
+OK   durable queue uses separate SharedPreferences
+OK   retry metadata is durable and backoff is capped
+OK   shared-device queue is gated by current Firebase uid
+OK   callable region is us-central1 on Android
+OK   Android calls registerGtoTrip
+OK   canonical backend export is modular
+OK   backend region matches Android
+OK   backend requires authenticated callable context
+OK   backend validates authenticated driver ownership
+OK   backend validates assigned job ownership
+OK   backend validates company and contract context
+OK   backend requires recordable operation
+OK   backend normalizes localized km/currency
+OK   backend uses deterministic session idempotency
+OK   backend writes historico_viagens in transaction
+OK   backend recalculates operation progress after registration
+OK   backend moves completed contract to awaiting_completion
+OK   successful Android sync removes queue only after FIX18 ACK
+OK   server failure never discards completed payload
+OK   failed sync is preserved for retry
+OK   process restart recovers completed unsynced trip
+OK   observer retries pending queue
+OK   plugin exposes sync state
+OK   plugin exposes integrity state
+OK   selection detector implementation remains wired
+OK   Android/server contract contains sessionId
+OK   Android/server contract contains driverId
+OK   Android/server contract contains companyId
+OK   Android/server contract contains jobId
+OK   Android/server contract contains contractId
+OK   Android/server contract contains cargo
+OK   Android/server contract contains originCompany
+OK   Android/server contract contains destination
+OK   Android/server contract contains distanceKm
+OK   Android/server contract contains finalValue
+OK   Android/server contract contains completionStatus
+OK   Android/server contract contains completedAtClient
+OK   FIX18 contract version is shared
+OK   operation context is snapshotted before detection
+OK   selected freight is locked in immutable snapshot
+OK   critical completion uses synchronous persistence
+OK   completed payload is sealed with SHA-256
+OK   corrupt queue is quarantined
+OK   FIX17 pending queue migration retained
+OK   backend ACK validates exact session/version
+OK   backend fingerprints idempotent payload
+OK   backend rejects vehicle drift
+OK   backend rejects trailer drift
+OK   backend requires operation documents
+OK   backend validates FIX18 completion timestamp
+OK   fresh-session reset protects completed unsynced trip
+OK   cancelled/stale session snapshots are discarded
+OK   automatic trip keeps history field empresaId
+OK   automatic trip keeps history field empresaNome
+OK   automatic trip keeps history field simuladorNome
+OK   automatic trip keeps history field motoristaId
+OK   automatic trip keeps history field motoristaNome
+OK   automatic trip keeps history field contratoId
+OK   automatic trip keeps history field contratoNumero
+OK   automatic trip keeps history field veiculoId
+OK   automatic trip keeps history field veiculoNome
+OK   automatic trip keeps history field reboqueId
+OK   automatic trip keeps history field reboqueNome
+OK   automatic trip keeps history field origem
+OK   automatic trip keeps history field destino
+OK   automatic trip keeps history field valor
+OK   automatic trip keeps history field status
+OK   automatic trip keeps history field jobId
+OK   automatic trip keeps history field contractId
+
+74/74 checks passed.
+
+> nvu-operacional@2.3.9 audit:gto-r2
+> node scripts/audit-gto-r2-lifecycle.mjs
+
+OK   temporary GTO exit pauses analysis and preserves the exact trip state
+OK   active session has bounded stale TTL
+OK   process restart recovers active trip snapshot
+OK   half-finished freight confirmation falls back safely after process death
+OK   recovered trip exposes screen authorization action inside NVU menu
+OK   new trip waits for previous completed delivery ACK
+OK   new trip is blocked after operation completion
+OK   backend ACK persists job progress/status
+OK   Global Truck alias aligned in backend
+OK   delayed jobs accepted by current GTO launcher
+OK   job status/progress sent to native observer
+OK   native plugin persists job status/progress
+OK   menu overlay failures are diagnosable
+OK   status overlay failures are diagnosable
+OK   logout clears native GTO session
+OK   logout does not start an idle GTO service just to stop it
+OK   logout signs out native Firebase auth
+OK   pending queue retries when NVU activity opens
+OK   future Android bundle source accepts delayed jobs
+OK   future Android bundle source carries job completion data
+OK   future Android bundle source invokes native logout cleanup
+OK   Capacitor package excludes server runtime assets
+OK   future Capacitor sync removes server runtime assets
+OK   Android versionCode advanced from 1
+OK   machine-specific android/local.properties excluded
+
+25/25 R2 lifecycle checks passed.
+
+> nvu-operacional@2.3.9 audit:gto-r3.3
+> node scripts/audit-gto-r3-3-freight-rearm.mjs
+
+OK   working freight detector preserves OCR-free selection contract
+OK   working selection coordinator remains byte-identical
+OK   replacement freight candidate is armed only inside the guarded list-observation path
+OK   touch pulse sensor observes a replacement candidate without bypassing state policy
+OK   touch marker promotion is guarded by the explicit active-trip replacement arm
+OK   single permissive frame cannot cancel a real route on arbitrary touch
+OK   pending fast touch still requires list evidence and guarded promotion
+OK   pre-touch freight page is frozen before state replacement
+OK   candidate survives short list-close race until touch marker arrives
+OK   page navigation refreshes replacement baseline instead of mixing pages
+OK   pressed row can be recovered before stale route promotion
+OK   old unfinished session is explicitly discarded
+OK   new session is created before selected freight is committed
+OK   pre-touch panel and button geometry are restored into new session
+OK   selection coordinator receives restored baseline sequence
+OK   new page OCR is scheduled after replacement session is armed
+OK   active route ignores list-like pixels unless replacement is explicitly armed
+OK   completed delivery remains outside replacement cancellation path
+OK   automatic result flow remains present
+OK   R3.2 semantic-only fallback remains present
+OK   Android version remains at or above R3.3 baseline
+INFO freight detector sha256 12bc84c18d710d34ac66c5de665018beb1c6ef78868fb8783a945c156ed53451
+INFO selection coordinator sha256 d84fe0848f5a054225cf939786156c07a291a4eb74a362ca9f72878d920b0ddd
+INFO backend gtoTrips sha256 534190b12f2b0be71fc498ba42903ce3eb77b58bb1c372bc1e5ccd6b872ea3e4
+
+21/21 R3.3 freight re-arm checks passed.
+
+> nvu-operacional@2.3.9 audit:gto-r3.5
+> node scripts/audit-gto-r3-5-result-sync-recovery.mjs
+
+OK   R3.5+ versionCode >=25
+OK   R3.5+ versionName >=1.0.25
+OK   result action survives normal GTO loading or is durable without timeout
+OK   result states arm independent touch pulse sensor
+OK   result action marker is persisted
+OK   persisted result action survives process restart
+OK   generic result action does not claim ADS/Receive coordinates
+OK   explicit ADS still blocks normal result evidence
+OK   explicit ad semantic evidence remains authoritative
+OK   slow result transition can still confirm after gameplay returns
+OK   R3.5 compatibility no longer requires a time-only completion path
+OK   unknown post-result transition stays neutral instead of becoming an implicit ADS verdict
+OK   freight list is probed in RESULT_DETECTED
+OK   freight list is probed in AWAITING_BONUS
+OK   freight list after unresolved result preserves the previous delivery
+OK   unresolved result is discarded only by explicit driver recovery action
+OK   new freight snapshot is promoted only through the guarded replacement path
+OK   fast tap after stale result does not discard action-backed completed delivery
+OK   duplicate result confirmation is guarded
+OK   completed trip still enters durable pending queue
+OK   Firebase callable has application watchdog
+OK   watchdog releases IN_FLIGHT lock
+OK   watchdog preserves queue and schedules retry
+OK   watchdog converts endless SYNCING to visible PENDING
+OK   missing native auth notifies active service UI
+OK   driver UID mismatch notifies active service UI
+OK   pending UI keeps driver message simple and preserves actual backend/auth error for diagnostics
+OK   result action metadata is cleared before next trip
+OK   fast detector remains present and OCR-free
+OK   selection coordinator remains sequence based
+OK   scenario: Receive + 4.5s logo + gameplay confirms
+OK   scenario: ADS semantic evidence is rejected
+OK   scenario: unresolved result without action + jobs list stays preserved
+OK   scenario: unresolved result changes session only after explicit discard
+OK   scenario: action-backed result + jobs list preserves completed trip with no timeout
+
+35/35 R3.5 result/sync recovery checks passed.
+
+> nvu-operacional@2.3.9 audit:gto-r3.6
+> node scripts/audit-gto-r3-6-receive-latch.mjs
+
+INFO freight detector sha256 12bc84c18d710d34ac66c5de665018beb1c6ef78868fb8783a945c156ed53451
+INFO selection coordinator sha256 d84fe0848f5a054225cf939786156c07a291a4eb74a362ca9f72878d920b0ddd
+OK   R3.6+ versionCode >= 26
+OK   R3.6+ versionName >= 1.0.26
+OK   Receive action has no temporal confirmation constant
+OK   result-screen action can be marked without last-seen expiry
+OK   outside-touch coordinates attempt exact result-button resolution
+OK   Receive and ADS are classified separately
+OK   ambiguous result coordinates fail closed
+OK   exact Receive is durably latched
+OK   exact Receive immediately confirms and queues
+OK   exact ADS never latches normal Receive
+OK   generic redacted touch remains durable pending action
+OK   pending/Receive action evidence has no age comparison
+OK   time-only HUD return can no longer confirm a trip
+OK   ADS semantic evidence remains authoritative
+OK   result value is restored before durable completion
+OK   missing restored result value fails closed
+OK   late OCR callback cannot overwrite confirmed completion
+OK   exact Receive survives service/process restart
+OK   Receive latch metadata clears before a new trip
+OK   result action still persists timestamp for diagnostics
+OK   completed trip still enters durable PENDING queue
+OK   Firebase watchdog remains active
+OK   fast freight detector remains OCR-free
+OK   selection coordinator remains sequence based
+OK   scenario: 15s on result then exact Receive confirms immediately
+OK   scenario: 2min loading after exact Receive cannot invalidate trip
+OK   scenario: redacted touch + delayed gameplay still confirms without timeout
+OK   scenario: redacted touch + delayed jobs list preserves completed trip
+OK   scenario: exact ADS does not register normal trip
+OK   scenario: explicit ad evidence overrides pending action
+OK   scenario: no result action + jobs list preserves unfinished result
+OK   scenario: no action and no transition never auto-confirms
+
+32/32 R3.6 Receive-latch checks passed.
+
+> nvu-operacional@2.3.9 audit:gto-r3.7
+> node scripts/audit-gto-r3-7-full-stability.mjs
+
+OK   release version remains at or above R3.7 baseline
+OK   production APK uses explicit HTTPS Netlify runtime
+OK   minSdk remains Android 7 / API 24
+OK   target/compile SDK remain API 36
+OK   legacy API24-25 overlay path retained
+OK   API26+ application overlay path retained
+OK   usage events support pre-29 foreground events
+OK   usage events support API29+ activity resumed
+OK   media projection default-display path retained on Android14+
+OK   foreground service types declared
+OK   GTO runtime prefs excluded from legacy backup
+OK   GTO queue excluded from legacy backup
+OK   GTO runtime prefs excluded from Android12+ cloud backup
+OK   GTO runtime prefs excluded from Android12+ device transfer
+OK   manifest binds both backup rule generations
+OK   projection callbacks are generation-bound
+OK   stale projection onStop cannot release new capture
+OK   manual projection stop invalidates callbacks first
+OK   system projection stop requests explicit reauthorization
+OK   projection reauthorization is visible to driver
+OK   touch sensor cannot remain active without projection
+OK   permission activity reports missing MediaProjectionManager
+OK   permission activity reports consent launch failure
+OK   runtime overlay revocation is detected
+OK   runtime usage-access revocation is detected
+OK   runtime permission failure hides stale overlays
+OK   runtime permission failure is exposed via plugin
+OK   runtime permission failure is visible in web diagnostics
+OK   projection failures are exposed in web diagnostics
+OK   menu overlay failures are visible in web diagnostics
+OK   status overlay failures are visible in web diagnostics
+OK   touch sensor fallback is visible in web diagnostics
+OK   freight conflicts are visible instead of silently accepted
+OK   sync errors are visible in observer diagnostics
+OK   integrity errors are visible in observer diagnostics
+OK   transient system UI foreground is tracked
+OK   transient system UI cannot clear GTO ownership
+OK   detached bubble self-healing remains enabled
+OK   bubble drag failures are no longer silent
+OK   bubble addView failures remain diagnosed
+OK   bubble ACTION_UP cannot dereference failed drag LayoutParams
+OK   failed bubble drag schedules self-heal
+OK   freight detector supports the current wider adaptive horizontal bands
+OK   freight frame validation matches current adaptive detector min height
+OK   freight frame validation matches current adaptive detector max height
+OK   freight frame validation matches current adaptive detector gaps
+OK   single freight scale envelope is aligned with current GTO layout
+OK   adaptive OCR panel follows detected button column
+OK   freight conflict is fail-closed instead of guessing
+OK   page generation isolation remains present
+OK   exact Receive latch has no timeout
+OK   exact ADS remains isolated from Receive
+OK   late OCR cannot downgrade Receive latch
+OK   persisted capture OCR can recover and revalidate final result value
+OK   completion state advances only after synchronous persistence succeeds
+OK   failed local completion persistence retains Receive state
+OK   Firebase sync watchdog remains active
+OK   Firebase timeout returns queue to pending retry
+OK   shared-device UID mismatch is surfaced
+OK   completed queue is removed only after backend ACK
+OK   cold-start observer confirmation waits beyond 320ms
+OK   observer recovery polls health on slower devices
+OK   MainActivity onStart visibility is public for Capacitor 8
+
+63/63 R3.7 full stability checks passed.
+
+> nvu-operacional@2.3.9 audit:gto-r3.13
+> node scripts/audit-gto-r3-13-modes-print.mjs
+
+OK   Current Android release is 1.0.45 / 45 when Android project is present
+OK   GTO mode dialog exposes print and automatic choices
+OK   mode selector is GTO-only in Dashboard
+OK   mode selector is GTO-only in Profile
+OK   print choice opens manual trip page with persistent query mode
+OK   automatic choice retains native launchGtoWork flow
+OK   direct GTO trip route offers both modes
+OK   GTO print mode exposes the manual form
+OK   GTO print keeps origin/destination editable even for detailed contracts
+OK   GTO print OCR still auto-fills earnings
+OK   receipt analysis uses one broad pass and narrow value fallback
+OK   normal Dobrar valor button alone is not treated as watched-ad proof
+OK   strong doubled/ad confirmation patterns are present
+OK   GTO print waits for OCR before submit
+OK   GTO print validates locally before receipt upload
+OK   unreadable GTO print fails closed
+OK   confirmed rewarded-ad/doubled print is blocked
+OK   accepted print stores explicit audit mode
+OK   non-GTO flow remains manual and unchanged in entry behavior
+OK   automatic backend contract remains untouched by mode selector
+
+20/20 R3.13 GTO mode/print checks passed.
+
+> nvu-operacional@2.3.9 test:gto-r3.13-print
+> node scripts/test-gto-r3-13-print-evidence.mjs
+
+OK   normal result with option: false
+OK   plain ad button: false
+OK   doubled confirmation: true
+OK   watched video confirmation: true
+OK   watched ad reversed: true
+OK   reward received: true
+OK   bonus applied: true
+OK   unrelated gameplay: false
+OK   source token valor-dobrado
+OK   source token midia-assistida
+OK   source token recompensa-recebida
+OK   source token dobro-confirmado-com-anuncio
+
+12/12 print evidence cases passed.
+
+> nvu-operacional@2.3.9 audit:gto-r3.17-selection
+> node scripts/audit-gto-r3-17-selection-integrity.mjs
+
+PASS R3.31 Android version
+PASS single-frame row guessing removed from runtime
+PASS nearest-row freight resolver removed
+PASS precise touch uses exact bounding boxes
+PASS no widened freight touch hitbox helper remains in selection
+PASS pre-touch baseline cannot fall back to arbitrary latest frame
+PASS touch coordinates are only advisory and must agree when usable
+PASS touch-correlated row path remains available
+PASS OEM visual fallback still requires isolated press + list closure
+PASS list closure remains a confirmation gate
+PASS selected transaction freezes panel and row geometry
+PASS precise OCR is generation/session protected
+PASS full FreightOption snapshot source is used for durable lock
+PASS snapshot stores all model identity fields
+PASS snapshot fingerprint is SHA-256
+PASS locked snapshot cannot be replaced with different freight
+PASS snapshot removed only after successful ACK path
+PASS queue payload carries locked freight fingerprint
+PASS completion still requires exact Receive action/verification
+PASS completed trip is sealed before network send
+
+20/20 R3.17 selection-integrity checks passed.
+
+> nvu-operacional@2.3.9 audit:gto-r3.19-end-to-end
+> node scripts/audit-gto-r3-19-end-to-end.mjs
+
+PASS selection position 1/5 maps to exact row
+PASS selection position 2/5 maps to exact row
+PASS selection position 3/5 maps to exact row
+PASS selection position 4/5 maps to exact row
+PASS selection position 5/5 maps to exact row
+PASS touch gap does not select a neighboring row
+PASS overlapping bounding boxes fail closed
+PASS nearest-row resolver is absent
+PASS OEM-safe visual selection requires isolated row change plus list closure
+PASS replacement flow cannot promote row without touch
+PASS touch marker is sequenced on capture coordinator
+PASS post-touch candidate requires baseline
+PASS coordinate disagreement rejects touch candidate
+PASS direct touch requires exact unique bbox
+PASS single-frame pre-touch fallback is absent
+PASS page change invalidates stale freight text
+PASS fingerprint is SHA-256
+PASS different freights have different fingerprints
+PASS snapshot includes full freight identity fields
+PASS snapshot lock refuses missing selectedFreight
+PASS missing durable session snapshot fails closed
+PASS session snapshot is write-once
+PASS durable payload forces canonical origin from detected source company
+PASS backend persists canonical origin field
+PASS backend uses originCompany as canonical route origin by explicit rule
+PASS backend accepts destination company separately
+PASS backend verifies freight fingerprint against supplied freight fields
+PASS state transitions are explicitly guarded
+PASS Receive latch is durably persisted before completion
+PASS completion cannot send before sealed payload
+PASS queue survives send failure
+PASS snapshot is deleted only after sync ACK
+PASS duplicate GTO Java sources removed from project root
+PASS simulated end-to-end payload matches selected freight 100%
+PASS simulated flow reaches every required stage
+
+35/35 end-to-end integrity checks passed.
+
+> nvu-operacional@2.3.9 audit:gto-r3.20
+> node scripts/audit-gto-r3-20-apk-web-parity.mjs
+
+PASS state IDLE is declared in Web/native canonical set
+PASS state WAITING_FREIGHT is declared in Web/native canonical set
+PASS state CONFIRMING_FREIGHT is declared in Web/native canonical set
+PASS state TRIP_IN_PROGRESS is declared in Web/native canonical set
+PASS state RESULT_DETECTED is declared in Web/native canonical set
+PASS state AWAITING_BONUS_VALIDATION is declared in Web/native canonical set
+PASS state RESULT_CONFIRMED is declared in Web/native canonical set
+PASS state REJECTED_BONUS is declared in Web/native canonical set
+PASS state CANCELLED is declared in Web/native canonical set
+PASS Web exposes canonical state reader
+PASS server canonical state callable is exported
+PASS server validates authenticated driver ownership
+PASS server has one canonical transition graph
+PASS server rejects impossible transitions
+PASS new WAITING session retires prior active session
+PASS active pointer avoids composite Firestore query/index dependency
+PASS Firestore exposes read-only canonical state to owner
+PASS APK publishes every accepted state transition
+PASS APK retries canonical state publication after transient failure
+PASS CONFIRMING_FREIGHT is isolated from reopened-list replacement
+PASS explicit replacement still retires old durable freight snapshot only through guarded promotion
+PASS selection is still fail-closed
+PASS snapshot identity remains server-verifiable
+PASS no stale root-level GTO Java implementation
+PASS scenario normal has no invalid transition — IDLE -> WAITING_FREIGHT -> CONFIRMING_FREIGHT -> TRIP_IN_PROGRESS -> RESULT_DETECTED -> AWAITING_BONUS_VALIDATION -> RESULT_CONFIRMED
+PASS scenario cancel-reselect has no invalid transition — IDLE -> WAITING_FREIGHT -> CONFIRMING_FREIGHT -> TRIP_IN_PROGRESS -> WAITING_FREIGHT -> CONFIRMING_FREIGHT -> TRIP_IN_PROGRESS
+PASS scenario select-no-start-reselect has no invalid transition — IDLE -> WAITING_FREIGHT -> CONFIRMING_FREIGHT -> TRIP_IN_PROGRESS -> WAITING_FREIGHT
+PASS scenario restart-in-progress has no invalid transition — IDLE -> WAITING_FREIGHT -> CONFIRMING_FREIGHT -> TRIP_IN_PROGRESS -> TRIP_IN_PROGRESS
+PASS scenario old-inconsistent-recovered has no invalid transition — TRIP_IN_PROGRESS -> WAITING_FREIGHT -> CONFIRMING_FREIGHT -> TRIP_IN_PROGRESS
+PASS scenario abandoned-never-send has no invalid transition — IDLE -> WAITING_FREIGHT -> CONFIRMING_FREIGHT -> TRIP_IN_PROGRESS -> CANCELLED
+PASS state contract field sessionId exists across APK/backend
+PASS state contract field driverId exists across APK/backend
+PASS state contract field companyId exists across APK/backend
+PASS state contract field jobId exists across APK/backend
+PASS state contract field selectedRow exists across APK/backend
+PASS state source is explicitly canonical Firestore session, not Web localStorage
+
+36/36 APK×Web parity checks passed.
+
+> nvu-operacional@2.3.9 test:gto-r3.21-capture
+> node scripts/test-gto-r3-21-capture-stability.mjs
+
+PASS gate requires three stable frames
+PASS gate requires a settling interval as well as frame count
+PASS gate requires fresh GTO foreground evidence with OEM visual bridge
+PASS all frame analysis is blocked before the stability gate
+PASS freight touch sensor is blocked until final geometry is ready
+PASS resize invalidates geometry-bound analysis before rebuilding the reader
+PASS stable-ready edge resets baseline before the next analyzed frame
+PASS geometry invalidation does not delete locked freight or durable completion data
+PASS Web launch arms a new GTO barrier while projection consent stays service-gated
+PASS runtime diagnostics expose readiness separately from projection activity
+PASS resize failure is fail-closed and requires reauthorization
+PASS capture stability gate compiles — GtoCaptureStabilityGateTest: PASS
+PASS capture stability runtime scenarios pass — GtoCaptureStabilityGateTest: PASS
+
+13/13 R3.21 capture-stability checks passed.
+
+> nvu-operacional@2.3.9 test:gto-r3.22-selection
+> node scripts/test-gto-r3-22-menu-selection.mjs
+
+PASS open NVU menu no longer blocks a GTO freight touch
+PASS touches provably inside the NVU menu are ignored
+PASS exact outside coordinate is mapped only to one frozen Aceitar row
+PASS coordinate candidate still requires list closure before finalization
+PASS redacted coordinates retain pressed-frame fallback
+PASS button stack geometry rejects inconsistent heights while allowing only a bounded press-transition subset
+PASS selection regression fixtures compile — GtoFreightSelectionRegressionTest: PASS
+PASS real freight page passes and reported gameplay false positive fails — GtoFreightSelectionRegressionTest: PASS
+
+8/8 R3.22 menu-selection checks passed.
+
+> nvu-operacional@2.3.9 test:gto-r3.23-integrity
+> node scripts/test-gto-r3-23-data-integrity.mjs
+
+PASS canonical freight text remains literal while secondary row OCR cannot overwrite it
+PASS single plausible OCR snapshots are not accepted as freight fallbacks
+PASS fast page OCR uses the same stabilization evidence as full OCR
+PASS legacy company-city continuity is retired and selected source company becomes Origem
+PASS selected freight JSON matches the durable sync contract without breaking Web aliases
+PASS selection failure is visible in overlay, menu and foreground notification
+PASS selection failure diagnostics are mounted in the active GTO dashboard
+PASS NVU overlays are moved outside the detected freight panel
+PASS page and selected-row OCR are serialized for low-memory devices
+PASS final result amount requires immutable multi-pass consensus
+PASS freight-data-integrity fixtures compile — GtoFreightDataIntegrityTest: PASS
+PASS freight-data-integrity scenarios pass — GtoFreightDataIntegrityTest: PASS
+PASS screen-size-selection fixtures compile — GtoFreightSelectionRegressionTest: PASS
+PASS screen-size-selection scenarios pass — GtoFreightSelectionRegressionTest: PASS
+PASS screen-size-result fixtures compile — GtoResultVisualGateScreenMatrixTest: PASS
+PASS screen-size-result scenarios pass — GtoResultVisualGateScreenMatrixTest: PASS
+
+16/16 R3.23 data-integrity checks passed.
+
+> nvu-operacional@2.3.9 test:gto-r3.24-bootstrap-origin
+> node scripts/test-gto-r3-24-bootstrap-origin.mjs
+
+PASS fresh automatic bootstrap does not discard a fast first Aceitar tap
+PASS bootstrap touch is armed once with the real coordinates
+PASS coordinate and pressed-frame row disagreement fails closed
+PASS active-route replacement still needs two frames or exact row evidence
+PASS Web sends contract mode in both native observer contexts
+PASS native bridge preserves missing legacy mode instead of guessing a business mode
+PASS automatic freight uses detected source company as canonical Origem in every contract mode
+PASS previous-destination origin continuity is removed from native flow
+PASS backend derives authoritative mode from Firestore contract
+PASS backend requires Origem to equal the detected source company
+PASS R3.23 sealed pending payloads remain hash-compatible after upgrade
+PASS exact destination anti-mutation guard remains enabled
+PASS bootstrap/origin policy fixtures compile — GtoR324BootstrapOriginPolicyTest: PASS
+PASS bootstrap/origin policy scenarios pass — GtoR324BootstrapOriginPolicyTest: PASS
+
+14/14 R3.24 bootstrap/origin checks passed.
+
+> nvu-operacional@2.3.9 test:gto-r3.25-detection-flow
+> node scripts/test-gto-r3-25-detection-flow.mjs
+
+PASS capture gate can recover from stale OEM UsageStats using real freight pixels
+PASS live freight frames refresh visual foreground evidence before capture-ready check
+PASS fast freight path restores list lifecycle reopen/close edges
+PASS OEM no-touch selection uses isolated row visuals but still needs list exit and precise OCR
+PASS driver receives explicit list-detected and selected-freight messages
+PASS menu status refreshes when freight runtime count changes
+PASS backend request type includes contractMode and still validates server contract mode
+PASS automatic completion remains sealed and queued before network send
+PASS exact freight anti-mutation agreement remains enabled
+PASS Functions GTO source type-checks
+PASS real reported screenshot fixtures compile — GtoRealFreightScreenshotTest: PASS
+PASS real reported screenshot scenarios pass — GtoRealFreightScreenshotTest: PASS
+PASS OEM visual foreground policy fixtures compile — GtoVisualForegroundPolicyTest: PASS
+PASS OEM visual foreground policy scenarios pass — GtoVisualForegroundPolicyTest: PASS
+PASS 1-6/visual selection regression fixtures compile — GtoFreightSelectionRegressionTest: PASS
+PASS 1-6/visual selection regression scenarios pass — GtoFreightSelectionRegressionTest: PASS
+
+16/16 R3.25 detection-flow checks passed.
+
+> nvu-operacional@2.3.9 test:gto-r3.26-deterministic-flow
+> node scripts/test-gto-r3-26-deterministic-flow.mjs
+
+PASS CONFIRMING_FREIGHT is isolated from live/reopened-list replacement
+PASS leaving GTO pauses analysis without changing canonical trip state
+PASS returning to GTO resumes the exact same trip state
+PASS known non-GTO foreground app cannot be overridden by freight-like pixels
+PASS in-flight OCR cannot mutate state while GTO analysis is paused
+PASS confirmation watchdog freezes outside GTO and is rearmed on resume
+PASS unknown screens are diagnostic-only and do not force result transitions
+PASS unarmed freight-like pixels during trip are neutral and preserve current freight
+PASS active trip replacement requires an explicit driver arm and a real new selection
+PASS floating menu names the immutable selected freight as current trip
+PASS pressed N-to-N-1 frame preserves the real freight count and clean pre-touch snapshot
+PASS reopened-list count is stable during an N-to-N-1 pressed-button frame
+PASS driver notices are acknowledged only after overlay attachment succeeds
+PASS freight confirmation has a bounded watchdog and no silent permanent CONFIRMING state
+PASS frame failures keep class plus concrete error message
+PASS pause/reopen diagnostics are exported to the web panel
+PASS all native trip transitions pass through the canonical deterministic policy
+PASS current GTO page geometry accepts one through six visible freights and fails closed above it
+PASS canonical state sync ignores callbacks from an older state/session
+PASS deterministic state policy fixtures compile — GtoDeterministicFlowPolicyTest: PASS
+PASS deterministic state policy scenarios pass — GtoDeterministicFlowPolicyTest: PASS
+
+21/21 R3.26 deterministic-flow checks passed.
+
+> nvu-operacional@2.3.9 test:gto-r3.27-runtime-flow
+> node scripts/test-gto-r3-27-runtime-flow.mjs
+
+PASS GTO launch prepares WAITING_FREIGHT before the first game frame
+PASS opening GTO fails closed if the native journey could not be prepared
+PASS openGto owns the SharedPreferences scope used by launch preparation
+PASS active journey is preserved when GTO is reopened
+PASS stale OEM UsageStats can be recovered by real freight pixels after launch preparation
+PASS launch visual bridge never overrides a known third-party foreground app
+PASS WAITING_FREIGHT consumes every selection frame in order
+PASS middle-row N-to-N-1 press evidence is preserved instead of collapsing to zero buttons
+PASS freight selection still needs list exit plus precise row OCR
+PASS fast selection forces current-page OCR from the frozen pre-touch panel before row agreement
+PASS confirmed freight becomes immutable current trip and is shown to the driver
+PASS leaving GTO pauses analysis without mutating trip state
+PASS unknown screens stay neutral
+PASS live Android state is the UI authority instead of a lagging Firestore mirror
+PASS stale driver-stage text cannot override a newer native trip state
+PASS paused UI reports PAUSADA_FORA_DO_GTO while preserving canonical state
+PASS real result is the only path that arms Receive
+PASS Receive is durably latched before automatic completion
+PASS OEM fallback Receive latch cannot be downgraded by a late result OCR callback
+PASS completion is persisted before RESULT_CONFIRMED and before queueing
+PASS automatic sync seals and durably queues payload before Firebase send
+PASS sync retry remains enabled without deleting the journey on network failure
+PASS frame-processing failures expose concrete diagnostic details
+PASS real freight list pixels fixtures compile — GtoRealFreightScreenshotTest: PASS
+PASS real freight list pixels scenarios pass — GtoRealFreightScreenshotTest: PASS
+PASS real freight press selection fixtures compile — GtoRealFreightPressSelectionTest: PASS
+PASS real freight press selection scenarios pass — GtoRealFreightPressSelectionTest: PASS
+PASS full deterministic journey fixtures compile — GtoFullJourneyPolicyTest: PASS
+PASS full deterministic journey scenarios pass — GtoFullJourneyPolicyTest: PASS
+PASS result visual matrix fixtures compile — GtoResultVisualGateScreenMatrixTest: PASS
+PASS result visual matrix scenarios pass — GtoResultVisualGateScreenMatrixTest: PASS
+
+31/31 R3.27 runtime-flow checks passed.
+
+> nvu-operacional@2.3.9 test:gto-r3.28-practical-flow
+> node scripts/test-gto-r3-28-practical-flow.mjs
+
+PASS web work launcher opens GTO before asking for screen capture
+PASS observer setup button also opens simulator before capture consent
+PASS native launch prepares WAITING_FREIGHT without pre-opening consent
+PASS initial capture consent is triggered only after real GTO foreground
+PASS GTO consent uses isolated transparent landscape host without foregrounding NVU
+PASS capture starts from rotation-aware real display metrics
+PASS Android 14+ orientation callback has a bounded real-display resize fallback
+PASS expected IDLE to WAITING_FREIGHT launch while paused is not reported as integrity failure
+PASS admin users can see the secure Senior Panel entry before senior claim
+PASS selected freight remains immutable and visible as current trip
+PASS Receive is persisted before automatic queue and Firebase send
+PASS reported R3.27-HF2 freight screen fixtures compile — GtoR328ReportedFreightScreenTest: PASS
+PASS reported R3.27-HF2 freight screen scenarios pass — GtoR328ReportedFreightScreenTest: PASS
+PASS full deterministic journey fixtures compile — GtoFullJourneyPolicyTest: PASS
+PASS full deterministic journey scenarios pass — GtoFullJourneyPolicyTest: PASS
+PASS result visual matrix fixtures compile — GtoResultVisualGateScreenMatrixTest: PASS
+PASS result visual matrix scenarios pass — GtoResultVisualGateScreenMatrixTest: PASS
+
+17/17 R3.28 practical-flow checks passed.
+
+> nvu-operacional@2.3.9 test:gto-r3.29-strict-screen
+> node scripts/test-gto-r3-29-strict-screen.mjs
+
+PASS freight list requires a bounded top-panel first row
+PASS freight list requires real Aceitar orange fill
+PASS freight list rejects inconsistent button widths
+PASS freight list uses narrow repeated-card vertical cadence
+PASS bitmap/OCR fallback has the same strict refined list gate
+PASS non-list frames clear runtime freight count instead of preserving stale UI
+PASS selection OCR busy watchdog allows slow devices without silent lock
+PASS selected freight still requires list exit and precise OCR
+PASS result completion remains gated and durable
+PASS real/neutral R3.29 screen classifier fixtures compile — GtoR329StrictFreightScreenTest: PASS
+PASS real/neutral R3.29 screen classifier scenarios pass — GtoR329StrictFreightScreenTest: PASS
+PASS 1-6 freight geometry and selection fixtures compile — GtoFreightSelectionRegressionTest: PASS
+PASS 1-6 freight geometry and selection scenarios pass — GtoFreightSelectionRegressionTest: PASS
+PASS full deterministic journey fixtures compile — GtoFullJourneyPolicyTest: PASS
+PASS full deterministic journey scenarios pass — GtoFullJourneyPolicyTest: PASS
+
+15/15 R3.29 strict-screen checks passed.
+
+> nvu-operacional@2.3.9 test:gto-r3.30-selected-freight
+> node scripts/test-gto-r3-30-selected-freight.mjs
+
+PASS selection forces canonical page consensus before row OCR
+PASS secondary crop cannot destructively shorten parsed company route
+PASS wrapped destination company continuation is preserved
+PASS canonical multi-read page row is persisted verbatim
+PASS secondary OCR is advisory except explicit numeric conflict
+PASS secondary text differences are diagnostic and do not overwrite canonical text
+PASS old all-fields secondary agreement is no longer a commit gate
+PASS selection still fails closed if canonical row lacks reliable consensus
+PASS selected freight still advances only through commitPreciseFreight
+PASS canonical selected-row policy fixtures compile — GtoFreightSelectionPolicyTest: PASS
+PASS canonical selected-row policy scenarios pass — GtoFreightSelectionPolicyTest: PASS
+PASS real list geometry remains strict fixtures compile — GtoR329StrictFreightScreenTest: PASS
+PASS real list geometry remains strict scenarios pass — GtoR329StrictFreightScreenTest: PASS
+PASS 1-6 visual row selection remains exact fixtures compile — GtoFreightSelectionRegressionTest: PASS
+PASS 1-6 visual row selection remains exact scenarios pass — GtoFreightSelectionRegressionTest: PASS
+PASS current reported R3.29 screenshots fixtures compile — GtoR330CurrentScreensTest: PASS
+PASS current reported R3.29 screenshots scenarios pass — GtoR330CurrentScreensTest: PASS
+
+17/17 R3.30 selected-freight checks passed.
+
+> nvu-operacional@2.3.9 test:gto-r3.31-continuity
+> node scripts/test-gto-r3-31-continuity.mjs
+
+PASS R3.31 Android version
+PASS active trip freight detector is explicitly gated
+PASS unarmed trip force-clears stale freight-list UI
+PASS legacy replacement path is explicit-only but no longer exposed in normal UI
+PASS post-ACK flow automatically prepares next freight
+PASS driver is explicitly told only ACK-confirmed send succeeded
+PASS app return refreshes only transient visual context
+PASS post-sync state change while outside GTO is expected
+PASS extreme top HUD cannot be a one-row list
+PASS new real screenshots are packaged as regressions
+PASS R3.31 state policy fixtures compile — GtoR331ContinuityPolicyTest: PASS
+PASS R3.31 state policy scenarios pass — GtoR331ContinuityPolicyTest: PASS
+PASS strict classifier including R3.31 screenshots fixtures compile — GtoR329StrictFreightScreenTest: PASS
+PASS strict classifier including R3.31 screenshots scenarios pass — GtoR329StrictFreightScreenTest: PASS
+
+14/14 R3.31 continuity checks passed.
+
+> nvu-operacional@2.3.9 test:gto-r3.32-card-continuity
+> node scripts/test-gto-r3-32-card-continuity.mjs
+
+PASS R3.32+ Android version
+PASS freight list requires card body + text + green information
+PASS return checks actual MediaProjection resources before requesting consent
+PASS initial delayed consent is not misreported as reauthorization
+PASS touch sensor is rearmed immediately after GTO return
+PASS completed payload can release known non-final next trip only after durable queue seal
+PASS old queued ACK still updates operation progress without mutating new trip
+PASS R3.32 continuity policy fixtures compile — GtoR332CardContinuityPolicyTest: PASS
+PASS R3.32 continuity policy scenarios pass — GtoR332CardContinuityPolicyTest: PASS
+PASS R3.32 real freight card signature fixtures compile — GtoR332FreightCardSignatureTest: PASS
+PASS R3.32 real freight card signature scenarios pass — GtoR332FreightCardSignatureTest: PASS
+
+11/11 R3.32 card/continuity checks passed.
+
+> nvu-operacional@2.3.9 test:gto-r3.33-audit-flow
+> node scripts/test-gto-r3-33-audit-flow.mjs
+
+PASS R3.33+ Android version
+PASS operation button replaces operational-panel button
+PASS operation summary uses real operation/vehicle/trailer fields
+PASS trip menu removes redundant status and replacement button
+PASS manual completion confirmation is absent from normal UI
+PASS result driver instruction is concise
+PASS receive starts automatic-send message
+PASS ACK emits success message
+PASS pending sync preserves delivery without false success
+PASS late previous-session ACK is isolated
+PASS durable freight repairs stale waiting
+PASS return resumes capture/touch
+PASS strict card evidence retained
+PASS NVU menu cannot obscure result OCR
+PASS real result fixtures packaged
+PASS R3.33 state invariant fixtures compile — GtoR333FlowInvariantTest: PASS
+PASS R3.33 state invariant scenarios pass — GtoR333FlowInvariantTest: PASS
+PASS R3.33 real result gate fixtures compile — GtoR333RealResultGateTest: PASS
+PASS R3.33 real result gate scenarios pass — GtoR333RealResultGateTest: PASS
+
+19/19 R3.33 audit-flow checks passed.
+
+> nvu-operacional@2.3.9 test:gto-r3.34-money-integrity
+> node scripts/test-gto-r3-34-money-helper.mjs && node scripts/test-gto-r3-34-money-integrity.mjs
+
+GtoMoney backend helper: PASS
+PASS R3.34 HF10 Android version
+PASS result consensus uses explicit cents
+PASS legacy ambiguous result evidence is invalidated
+PASS offered freight value uses the same locale-safe money parser
+PASS local queue blocks monetary incompatibility
+PASS backend blocks monetary incompatibility
+PASS backend marks corrected money schema
+PASS backend parser extracted to pure money helper
+PASS money regression fixtures compile — GtoMoneyValueRegressionTest: PASS
+PASS money regression scenarios pass — GtoMoneyValueRegressionTest: PASS
+
+10/10 R3.34 money-integrity checks passed.
+
+> nvu-operacional@2.3.9 test:gto-r3.34-pc-hotfix
+> node scripts/test-gto-r3-34-pc-hotfix.mjs
+
+PASS hotfix remains based on R3.34 Android identity
+PASS Windows Gradle Java compile is pinned to UTF-8
+PASS native money display is grouped pt-BR with cents
+PASS approved destination spellings have conservative first priority
+PASS selected-row OCR can repair only stronger one-edit city evidence
+PASS unresolved one-letter destination conflict fails closed
+PASS web seeds approved spellings and excludes OCR history
+PASS native bridge stores expected/trusted city context
+PASS previous-destination origin continuity is removed
+PASS source company is the canonical Origem end to end
+PASS history labels the value as Origem
+PASS automatic mode explicitly rearms the floating button
+PASS openGto does not destroy the freshly rearmed bubble twice
+PASS GTO foreground attaches bubble before recorder permission
+PASS projection consent stays over confirmed landscape GTO
+PASS freight money ingestion preserves locale semantics
+PASS transient OEM/system overlays keep the main bubble
+PASS capture resize has bounded self-recovery before reauthorization
+PASS projection grant is validated before token use
+PASS early projection stop is explicit and diagnosable
+PASS compiled Firebase function JavaScript is syntactically valid
+PASS compiled Firebase function mirrors canonical company origin
+PASS city resolver fixtures compile — GtoCityTextResolverTest: PASS
+PASS city resolver scenarios pass — GtoCityTextResolverTest: PASS
+
+24/24 R3.34 PC hotfix checks passed.
+
+> nvu-operacional@2.3.9 test:gto-r3.34-hf10-projection
+> node scripts/test-gto-r3-34-hf10-projection-runtime.mjs
+
+PASS HF10 Android identity
+PASS permission host is landscape
+PASS root cause removed: finishOnTaskLaunch is absent
+PASS permission host uses ordinary result-capable launch mode
+PASS permission host remains non-exported and transient
+PASS consent result is dispatched through the foreground service
+PASS recreated host never opens a second consent
+PASS host without result clears stuck in-flight state
+PASS service restart clears non-persistent permission latch
+PASS permission result watchdog prevents infinite stuck state
+PASS real bound grant overrides stale in-flight UI
+PASS Android 14+ projection FGS promotion occurs before getMediaProjection
+PASS ACTION_START_PROJECTION itself requests mediaProjection FGS type
+PASS permission flow survives a reclaimed observer process
+PASS permission host never converts slow startup into a false denial
+PASS projection surface uses maximum display metrics on modern Android
+PASS grant is registered before first VirtualDisplay
+PASS accepted grant creates its single VirtualDisplay immediately
+PASS silent ImageReader recovery preserves the same MediaProjection
+PASS silent-frame recovery never calls createVirtualDisplay
+PASS first captured frame is explicitly recorded
+PASS duplicate authorize stays blocked while grant is pending
+PASS terminal MediaProjection onStop is the path that re-enables consent
+PASS scenario: RESULT_OK recreates service and immediately starts capture
+PASS scenario: recreated-service capture validates first frame
+PASS scenario: exactly one authorization starts
+PASS scenario: accepted Android result latches grant
+PASS scenario: GTO surface starts without second authorization
+PASS scenario: first frame validates functional capture
+PASS scenario: silent-surface recovery does not lose grant
+PASS scenario: only terminal stop permits reauthorization
+PASS HF10 exact reported freight screenshot compile — GtoR334Hf9FreightScreenTest: PASS
+PASS HF10 exact reported freight screenshot scenarios — GtoR334Hf9FreightScreenTest: PASS
+
+33/33 HF10 projection/runtime checks passed.

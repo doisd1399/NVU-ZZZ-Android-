@@ -1,0 +1,305 @@
+Activity Resolver Table:
+  Schemes:
+      genericidp:
+        a386536 com.nvu.operacional/com.google.firebase.auth.internal.GenericIdpActivity filter 69dbc37
+          Action: "android.intent.action.VIEW"
+          Category: "android.intent.category.DEFAULT"
+          Category: "android.intent.category.BROWSABLE"
+          Scheme: "genericidp"
+          Authority: "firebase.auth": -1
+          Path: "PatternMatcher{LITERAL: /}"
+      recaptcha:
+        a0c15a4 com.nvu.operacional/com.google.firebase.auth.internal.RecaptchaActivity filter 6955f0d
+          Action: "android.intent.action.VIEW"
+          Category: "android.intent.category.DEFAULT"
+          Category: "android.intent.category.BROWSABLE"
+          Scheme: "recaptcha"
+          Authority: "firebase.auth": -1
+          Path: "PatternMatcher{LITERAL: /}"
+
+  Non-Data Actions:
+      android.intent.action.MAIN:
+        3afd1f8 com.nvu.operacional/.MainActivity filter 1a626d1
+          Action: "android.intent.action.MAIN"
+          Category: "android.intent.category.LAUNCHER"
+
+Receiver Resolver Table:
+  Non-Data Actions:
+      androidx.profileinstaller.action.SAVE_PROFILE:
+        9c6e810 com.nvu.operacional/androidx.profileinstaller.ProfileInstallReceiver filter 2e1fb2f
+          Action: "androidx.profileinstaller.action.SAVE_PROFILE"
+      androidx.profileinstaller.action.INSTALL_PROFILE:
+        9c6e810 com.nvu.operacional/androidx.profileinstaller.ProfileInstallReceiver filter c5df09
+          Action: "androidx.profileinstaller.action.INSTALL_PROFILE"
+      com.google.android.c2dm.intent.RECEIVE:
+        19d9ec2 com.nvu.operacional/com.google.firebase.iid.FirebaseInstanceIdReceiver filter 287e4d3
+          Action: "com.google.android.c2dm.intent.RECEIVE"
+      androidx.profileinstaller.action.SKIP_FILE:
+        9c6e810 com.nvu.operacional/androidx.profileinstaller.ProfileInstallReceiver filter 82ae50e
+          Action: "androidx.profileinstaller.action.SKIP_FILE"
+      androidx.profileinstaller.action.BENCHMARK_OPERATION:
+        9c6e810 com.nvu.operacional/androidx.profileinstaller.ProfileInstallReceiver filter a1a753c
+          Action: "androidx.profileinstaller.action.BENCHMARK_OPERATION"
+
+Service Resolver Table:
+  Non-Data Actions:
+      com.google.firebase.MESSAGING_EVENT:
+        56462c5 com.nvu.operacional/com.capacitorjs.plugins.pushnotifications.MessagingService filter b34441a
+          Action: "com.google.firebase.MESSAGING_EVENT"
+        81d1b4b com.nvu.operacional/com.google.firebase.messaging.FirebaseMessagingService filter 9b7a928
+          Action: "com.google.firebase.MESSAGING_EVENT"
+          mPriority=-500, mOrder=0, mHasStaticPartialTypes=false, mHasDynamicPartialTypes=false
+
+Domain verification status:
+
+Permissions:
+  Permission [com.nvu.operacional.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION] (ffa25b5):
+    sourcePackage=com.nvu.operacional
+    uid=10532 gids=[] type=0 prot=signature
+    perm=PermissionInfo{3fd644a com.nvu.operacional.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION}
+    flags=0x0
+
+Registered ContentProviders:
+  com.nvu.operacional/androidx.core.content.FileProvider:
+    Provider{2ae6fbb com.nvu.operacional/androidx.core.content.FileProvider}
+  com.nvu.operacional/com.google.mlkit.common.internal.MlKitInitProvider:
+    Provider{ff2bcd8 com.nvu.operacional/com.google.mlkit.common.internal.MlKitInitProvider}
+  com.nvu.operacional/com.google.firebase.provider.FirebaseInitProvider:
+    Provider{6f46831 com.nvu.operacional/com.google.firebase.provider.FirebaseInitProvider}
+  com.nvu.operacional/androidx.startup.InitializationProvider:
+    Provider{4b57b16 com.nvu.operacional/androidx.startup.InitializationProvider}
+
+ContentProvider Authorities:
+  [com.nvu.operacional.androidx-startup]:
+    Provider{4b57b16 com.nvu.operacional/androidx.startup.InitializationProvider}
+      applicationInfo=ApplicationInfo{5ca4c97 com.nvu.operacional}
+  [com.nvu.operacional.mlkitinitprovider]:
+    Provider{ff2bcd8 com.nvu.operacional/com.google.mlkit.common.internal.MlKitInitProvider}
+      applicationInfo=ApplicationInfo{e42ce84 com.nvu.operacional}
+  [com.nvu.operacional.firebaseinitprovider]:
+    Provider{6f46831 com.nvu.operacional/com.google.firebase.provider.FirebaseInitProvider}
+      applicationInfo=ApplicationInfo{b76566d com.nvu.operacional}
+  [com.nvu.operacional.fileprovider]:
+    Provider{2ae6fbb com.nvu.operacional/androidx.core.content.FileProvider}
+      applicationInfo=ApplicationInfo{50632a2 com.nvu.operacional}
+
+Key Set Manager:
+  [com.nvu.operacional]
+      Signing KeySets: 304
+
+Packages:
+  Package [com.nvu.operacional] (ba74b46):
+    appId=10532
+    pkg=Package{25d1b33 com.nvu.operacional}
+    codePath=/data/app/~~9zSqI4kpWDVvKXVWSB7o5A==/com.nvu.operacional-7iSngKQAuATGmMA_M4XvFA==
+    resourcePath=/data/app/~~9zSqI4kpWDVvKXVWSB7o5A==/com.nvu.operacional-7iSngKQAuATGmMA_M4XvFA==
+    legacyNativeLibraryDir=/data/app/~~9zSqI4kpWDVvKXVWSB7o5A==/com.nvu.operacional-7iSngKQAuATGmMA_M4XvFA==/lib
+    extractNativeLibs=false
+    primaryCpuAbi=arm64-v8a
+    secondaryCpuAbi=null
+    cpuAbiOverride=null
+    versionCode=37 minSdk=24 targetSdk=36
+    minExtensionVersions=[]
+    versionName=1.0.37
+    hiddenApiEnforcementPolicy=2
+    usesNonSdkApi=false
+    splits=[base]
+    apkSigningVersion=2
+    flags=[ DEBUGGABLE HAS_CODE ALLOW_CLEAR_USER_DATA ALLOW_BACKUP ]
+    privateFlags=[ PRIVATE_FLAG_ACTIVITIES_RESIZE_MODE_RESIZEABLE_VIA_SDK_VERSION ALLOW_AUDIO_PLAYBACK_CAPTURE PARTIALLY_DIRECT_BOOT_AWARE PRIVATE_FLAG_ALLOW_NATIVE_HEAP_POINTER_TAGGING ]
+    forceQueryable=false
+    pageSizeCompat=0
+    queriesPackages=[com.stargamesapps.gto]
+    scannedAsStoppedSystemApp=false
+    supportsScreens=[small, medium, large, xlarge, resizeable, anyDensity]
+    timeStamp=2026-08-13 02:08:06
+    lastUpdateTime=2026-08-13 02:08:06
+    installerPackageName=null
+    installerPackageUid=-1
+    initiatingPackageName=com.android.shell
+    originatingPackageName=null
+    packageSource=1
+    appMetadataFilePath=null
+    appMetadataSource=0
+    signatures=PackageSignatures{c604ef0 version:2, signatures:[454dd0bd], past signatures:[]}
+    installPermissionsFixed=false
+    pkgFlags=[ DEBUGGABLE HAS_CODE ALLOW_CLEAR_USER_DATA ALLOW_BACKUP ]
+    privatePkgFlags=[ PRIVATE_FLAG_ACTIVITIES_RESIZE_MODE_RESIZEABLE_VIA_SDK_VERSION ALLOW_AUDIO_PLAYBACK_CAPTURE PARTIALLY_DIRECT_BOOT_AWARE PRIVATE_FLAG_ALLOW_NATIVE_HEAP_POINTER_TAGGING ]
+    apexModuleName=null
+    declared permissions:
+      com.nvu.operacional.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION: prot=signature
+    requested permissions:
+      android.permission.POST_NOTIFICATIONS
+      com.google.android.c2dm.permission.RECEIVE
+      com.google.android.providers.gsf.permission.READ_GSERVICES
+      android.permission.SYSTEM_ALERT_WINDOW
+      android.permission.FOREGROUND_SERVICE
+      android.permission.FOREGROUND_SERVICE_SPECIAL_USE
+      android.permission.INTERNET
+      android.permission.PACKAGE_USAGE_STATS
+      android.permission.ACCESS_NETWORK_STATE
+      android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION
+      com.nvu.operacional.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION
+      android.permission.WAKE_LOCK
+    install permissions:
+      com.google.android.c2dm.permission.RECEIVE: granted=true
+      com.google.android.providers.gsf.permission.READ_GSERVICES: granted=true
+      android.permission.SYSTEM_ALERT_WINDOW: granted=false, flags=[ USER_SET]
+      android.permission.FOREGROUND_SERVICE: granted=true
+      android.permission.FOREGROUND_SERVICE_SPECIAL_USE: granted=true
+      android.permission.INTERNET: granted=true
+      android.permission.ACCESS_NETWORK_STATE: granted=true
+      android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION: granted=true
+      com.nvu.operacional.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION: granted=true
+      android.permission.WAKE_LOCK: granted=true
+    User 0: ceDataInode=255268 deDataInode=251898 installed=true hidden=false suspended=false distractionFlags=0 stopped=false notLaunched=false enabled=0 instant=false virtual=false quarantined=false
+      installReason=0
+      dataDir=/data/user/0/com.nvu.operacional
+      firstInstallTime=2026-08-13 02:08:06
+      uninstallReason=0
+      overlay paths:
+        /product/overlay/NavigationBarModeGestural/NavigationBarModeGesturalOverlay.apk
+        /data/resource-cache/com.android.systemui-neutral-1s4o.frro
+        /product/overlay/FontRookeryRegular/FontRookeryRegularOverlay.apk
+        /data/resource-cache/com.android.systemui-accent-jizB.frro
+        /data/resource-cache/com.android.systemui-dynamic-WVN9.frro
+      legacy overlay paths:
+        /product/overlay/NavigationBarModeGestural/NavigationBarModeGesturalOverlay.apk
+        /product/overlay/FontRookeryRegular/FontRookeryRegularOverlay.apk
+      gids=[3003]
+      runtime permissions:
+        android.permission.POST_NOTIFICATIONS: granted=true, flags=[ USER_SET|USER_SENSITIVE_WHEN_GRANTED|USER_SENSITIVE_WHEN_DENIED]
+
+Queries:
+  system apps queryable: false
+  queries via forceQueryable:
+  queries via package name:
+    com.nvu.operacional:
+      com.stargamesapps.gto
+  queries via component:
+    com.motorola.aicore:
+      com.nvu.operacional
+    com.google.android.as:
+      com.nvu.operacional
+    com.motorola.gamemode:
+      com.nvu.operacional
+    com.despezzas:
+      com.nvu.operacional
+    com.motorola.appforecast:
+      com.nvu.operacional
+    com.motorola.actions:
+      com.nvu.operacional
+    com.google.android.apps.messaging:
+      com.nvu.operacional
+    com.motorola.om:
+      com.nvu.operacional
+    com.motorola.mobiledesktop:
+      com.nvu.operacional
+    com.google.android.as.oss:
+      com.nvu.operacional
+    com.android.settings.intelligence:
+      com.nvu.operacional
+    com.taboola.mip:
+      com.nvu.operacional
+    com.inmobi.weather:
+      com.nvu.operacional
+    com.motorola.ccc.notification:
+      com.nvu.operacional
+    com.microsoft.office.outlook:
+      com.nvu.operacional
+    com.facebook.katana:
+      com.nvu.operacional
+    com.taxis99:
+      com.nvu.operacional
+    br.com.uol.ps.myaccount:
+      com.nvu.operacional
+    br.gov.caixa.tem:
+      com.nvu.operacional
+    com.whatsapp:
+      com.nvu.operacional
+    com.zhiliaoapp.musically:
+      com.nvu.operacional
+    br.com.ifood.driver.app:
+      com.nvu.operacional
+    com.google.android.play.games:
+      com.nvu.operacional
+    com.instapro.android:
+      com.nvu.operacional
+    ctrip.english:
+      com.nvu.operacional
+    com.gameloft.android.ANMP.GloftA9HM:
+      com.nvu.operacional
+    com.grand.launcher:
+      com.nvu.operacional
+    com.storymatrix.drama:
+      com.nvu.operacional
+    game.revani.racemaxpro:
+      com.nvu.operacional
+    games.mistfly.subdivision_2:
+      com.nvu.operacional
+    com.lemon.lvoverseas:
+      com.nvu.operacional
+    br.com.gabba.Caixa:
+      com.nvu.operacional
+    ru.zdevs.zarchiver:
+      com.nvu.operacional
+    com.dualcarbonstudios.trucksimulatorbigrig:
+      com.nvu.operacional
+    com.ovilex.trucksimulatorusaevo:
+      com.nvu.operacional
+    com.ea.game.nfs14_row:
+      com.nvu.operacional
+    videodownloader.downloader.videoplayer:
+      com.nvu.operacional
+    free.video.downloader.converter.music:
+      com.nvu.operacional
+    com.WandaSoftware.TruckersofEurope3:
+      com.nvu.operacional
+    com.zhiliaoapp.musically.go:
+      com.nvu.operacional
+    com.gt.rivals.car.racing.game:
+      com.nvu.operacional
+    br.com.foursys.boavistaconsumidor:
+      com.nvu.operacional
+    com.instagram.android:
+      com.nvu.operacional
+    com.facebook.lite:
+      com.nvu.operacional
+  queryable via interaction:
+    User 0:
+      [com.android.dynsystem,com.android.settings,com.android.keychain,com.android.location.fused,com.android.inputdevices,com.qualcomm.qti.xrvd.service,com.motorola.android.providers.settings,com.android.server.telecom,com.android.localtransport,com.android.DeviceAsWebcam,com.android.providers.settings,vendor.qti.frameworks.utils,android]:
+        com.nvu.operacional
+      [com.google.android.gsf,com.google.android.gms]:
+        com.nvu.operacional
+      com.motorola.motolights:
+        com.nvu.operacional
+      com.motorola.mobiledesktop:
+        com.nvu.operacional
+      com.google.android.googlequicksearchbox:
+        com.nvu.operacional
+      com.google.android.inputmethod.latin:
+        com.nvu.operacional
+      com.google.android.webview:
+        com.nvu.operacional
+      com.motorola.launcher3:
+        com.nvu.operacional
+      com.android.systemui:
+        com.nvu.operacional
+      com.google.android.ext.services:
+        com.nvu.operacional
+      com.google.android.permissioncontroller:
+        com.nvu.operacional
+      com.nvu.operacional:
+        [com.android.dynsystem,com.android.settings,com.android.keychain,com.android.location.fused,com.android.inputdevices,com.qualcomm.qti.xrvd.service,com.motorola.android.providers.settings,com.android.server.telecom,com.android.localtransport,com.android.DeviceAsWebcam,com.android.providers.settings,vendor.qti.frameworks.utils,android]
+        com.google.android.webview
+  queryable via uses-library:
+
+Dexopt state:
+  [com.nvu.operacional]
+    path: /data/app/~~9zSqI4kpWDVvKXVWSB7o5A==/com.nvu.operacional-7iSngKQAuATGmMA_M4XvFA==/base.apk
+      arm64: [status=run-from-apk] [reason=unknown] [primary-abi]
+        [location is error]
+
+Compiler stats:
+  [com.nvu.operacional]
+     base.apk - 648

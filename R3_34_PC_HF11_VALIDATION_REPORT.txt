@@ -1,0 +1,46 @@
+NVU R3.34-PC-HF11 — GOOGLE AUTH ANDROID VALIDATION
+Date: 2026-08-15
+Base: R3.34-PC-HF10
+Android: 1.0.63 / versionCode 63
+Package: com.nvu.operacional
+Web: 2.3.9 (unchanged)
+
+ROOT CONFIG DEFECT FOUND
+- @capacitor-firebase/authentication is configured with provider google.com.
+- android/variables.gradle in HF10 did not declare rgcfaIncludeGoogle=true.
+- android/variables.gradle in HF10 did not pin androidxCredentialsVersion=1.3.0.
+- Both are part of the Android Google Sign-In setup documented for this plugin family.
+
+HF11 PATCH
+- Added rgcfaIncludeGoogle = true.
+- Added androidxCredentialsVersion = '1.3.0'.
+- Bumped Android to 1.0.63 / versionCode 63.
+- Added test:android-google-auth to verify:release.
+- Updated signed GitHub release workflow to HF11 / code 63.
+- Corrected NVU_RELEASE_METADATA androidVersionCode from stale 60 to current 63.
+
+SCOPE PROOF
+- src/ tree hash identical to HF10: 23f619be0beb4486b2f9cfe891310f3b4e18fc552199e940804abaee83ada87e
+- functions/ tree hash identical to HF10: 51ec71bdaf3c9f166d26097e5492044220d07fb5439f3afc9821067bea8df656
+- android/app/src/main/java tree hash identical to HF10: 794535aa32c2184321bb1ce8a9379e6191e017bbace7f63093c3052558968b8f
+- AndroidManifest.xml identical to HF10.
+- capacitor.config.ts identical to HF10.
+- capacitor.remote.json identical to HF10.
+- android/app/google-services.json identical to HF10.
+
+STATIC / REGRESSION GATES EXECUTED
+PASS 8/8 Android Google-auth config checks.
+PASS 33/33 HF10 projection/runtime checks.
+PASS 10/10 R3.34 money-integrity checks.
+PASS 24/24 R3.34 PC hotfix checks.
+
+BUILD NOTE
+The sandbox npm client did not complete npm ci (npm itself reported "Exit handler never called!").
+Therefore no claim is made that this sandbox produced a final signed APK.
+The included GitHub Actions workflow is the authoritative full build/signing gate and must finish green before the APK is installed as a release candidate.
+
+DEPLOY SCOPE
+HF11 changes native Android/build configuration only. Netlify, Google AI Studio and Firebase Functions do not need a new deploy for this patch.
+
+PHYSICAL ACCEPTANCE
+The Android 14 handset that previously failed must be used for the final acceptance test. The Google account chooser must open and login must complete before HF11 is promoted as the new stable production baseline.

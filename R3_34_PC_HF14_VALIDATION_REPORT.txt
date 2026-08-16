@@ -1,0 +1,100 @@
+NVU R3.34-PC-HF14 — RELATÓRIO DE AUDITORIA E VALIDAÇÃO
+Android: 1.0.66 / versionCode 66
+Base auditada: R3.34-PC-HF13
+Data: 2026-08-15
+
+ESCOPO
+- Bug 1: destinationCompany/"empresa de destino" estava sendo solicitado ao motorista mesmo não sendo campo obrigatório do fluxo.
+- Bug 2: o card aberto pela bolha NVU podia fechar sozinho logo após o toque.
+- Preservados: MediaProjection, seleção por toque/snapshot, origem, resultado, Receber, fila durável, fingerprint, ACK e sincronização automática.
+
+CAUSA RAIZ 1 — EMPRESA DE DESTINO
+A falha não era apenas de interface. destinationCompany estava marcado como obrigatório em múltiplas camadas:
+1) GtoFreightReviewPolicy.firstRequiredField() retornava DESTINATION_COMPANY quando vazio.
+2) GtoObserverService.isExactFreightDataValid() e isFreightDataReliable() recusavam o frete sem destinationCompany e exigiam >=2 votos OCR para esse campo.
+3) GtoAutoTripSync.validateFreight() recusava o lock/snapshot local se destinationCompany estivesse vazio.
+4) functions/src/gtoTrips.ts chamava assertBoundedText(destinationCompany), rejeitando no backend payload vazio.
+
+CORREÇÃO 1
+- destinationCompany passa a ser METADADO OPCIONAL.
+- Se estiver legível, continua preservado em selectedFreight, snapshot, fingerprint e payload.
+- Se estiver ausente, não gera REVIEW_REQUIRED, não cria formulário e não bloqueia o lock local.
+- Origem, destino, carga, distância e valor continuam com as validações existentes.
+- Estado persistido da HF13 que esteja parado em DESTINATION_COMPANY é migrado para o próximo campo realmente necessário ou concluído automaticamente, sem trocar a linha selecionada.
+- Firebase registerGtoTrip foi ajustada para validar destinationCompany somente quando ele existir.
+
+IMPORTANTE PARA SINCRONIZAÇÃO
+O backend publicado antes da HF14 ainda pode exigir destinationCompany. Portanto, para garantir que uma viagem sem esse metadado seja enviada automaticamente, publicar a alteração mínima da Function registerGtoTrip é necessário. Netlify e Google AI Studio não precisam de alteração.
+
+CAUSA RAIZ 2 — CARD NVU FECHANDO SOZINHO
+Foram encontrados dois caminhos capazes de produzir o sintoma:
+1) foregroundPoll chamava suspendInteractiveOverlaysKeepBubble() durante oscilações de foreground/SystemUI; esse método executava closeMenu(). Uma oscilação interna podia portanto desfazer um toque válido do motorista.
+2) cacheFastFreightPanel() podia postar keepOverlaysClearOfFreightPanel() a partir de um frame da lista. O callback executava depois da seleção e ainda podia fechar o menu para "proteger" uma lista que já não era mais uma superfície interativa.
+
+CORREÇÃO 2
+- foregroundPoll agora suspende apenas overlays passivos/detecção e preserva o card explicitamente aberto pelo usuário.
+- O fluxo de autorização MediaProjection continua podendo fechar o card explicitamente quando necessário.
+- keepOverlaysClearOfFreightPanel() agora só atua em WAITING_FREIGHT ou em CONFIRMING_FREIGHT enquanto ainda não existe revisão de uma linha confirmada.
+- Depois que a identidade da linha está confirmada/revisão está ativa, callback atrasado da lista é ignorado e não pode executar closeMenu().
+- O debounce e a lógica click-vs-drag existentes foram preservados.
+
+ALTERAÇÕES PRINCIPAIS
+- android/app/src/main/java/com/nvu/operacional/GtoFreightReviewPolicy.java
+- android/app/src/main/java/com/nvu/operacional/GtoObserverService.java
+- android/app/src/main/java/com/nvu/operacional/GtoAutoTripSync.java
+- functions/src/gtoTrips.ts
+- functions/lib/gtoTrips.js
+- scripts/test-gto-r3-34-hf14-review-overlay.mjs
+- scripts/java-tests/com/nvu/operacional/GtoR334Hf14DestinationOptionalPolicyTest.java
+- android/app/build.gradle
+- .github/workflows/build-android-release.yml
+
+TESTES
+npm run verify:release: PASS
+HF14 review/overlay: 14/14 PASS
+HF13 capture/origin: 16/16 PASS
+HF12 intelligent flow: 20/20 PASS
+HF10 projection/runtime: 33/33 PASS
+R3.34 PC hotfix: 24/24 PASS
+R3.34 money integrity: 10/10 PASS
+R3.33: 19/19 PASS
+R3.32: 11/11 PASS
+R3.31: 14/14 PASS
+R3.30: 17/17 PASS
+R3.29: 15/15 PASS
+R3.28: 17/17 PASS
+R3.27: 31/31 PASS
+R3.26: 21/21 PASS
+R3.25: 16/16 PASS
+R3.24: 14/14 PASS
+R3.23: 16/16 PASS
+Java syntax gate: PASS (25 fontes Android)
+functions/lib/gtoTrips.js node --check: PASS
+
+COMPILAÇÃO ANDROID REAL NESTE AMBIENTE
+NÃO VALIDADA por limitação externa de rede.
+Comando tentado:
+  android/gradlew :app:compileDebugJavaWithJavac --no-daemon
+Falha antes da compilação do projeto:
+  java.net.UnknownHostException: services.gradle.org
+O Gradle Wrapper tentou baixar gradle-8.14.3-all.zip e o sandbox não possui resolução/acesso a esse host.
+
+O PREPARAR-ANDROID-WINDOWS.bat continua bloqueando a preparação no PC se :app:compileDebugJavaWithJavac falhar.
+O workflow GitHub HF14 também executa npm ci, build das Functions, verify:release, sync Capacitor e build Gradle antes de assinar o APK.
+
+DEPLOY NECESSÁRIO
+1) Firebase Function registerGtoTrip:
+   firebase deploy --only functions:registerGtoTrip
+2) Netlify: sem alteração necessária.
+3) Google AI Studio: sem alteração necessária.
+
+RISCO RESTANTE
+- O comportamento visual final do WindowManager/UsageStats varia por fabricante Android. A causa de código responsável pelo fechamento automático foi removida e coberta por regressão, mas o teste físico no aparelho continua obrigatório.
+- Sem publicar a Function HF14, um backend antigo pode rejeitar uma viagem cujo destinationCompany esteja vazio.
+
+CRITÉRIO DE TESTE FÍSICO
+- selecionar frete sem destinationCompany legível: não deve pedir empresa de destino;
+- abrir a bolha após seleção: card deve permanecer aberto;
+- confirmar que origem/destino/carga/km/valor permanecem corretos;
+- concluir, tocar Receber e confirmar envio/ACK;
+- repetir múltiplas viagens na mesma sessão.

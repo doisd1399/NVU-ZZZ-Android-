@@ -1,0 +1,53 @@
+NVU R3.25 — RELATÓRIO DE CERTIFICAÇÃO
+=====================================
+
+Causa raiz reproduzida com a captura real do usuário:
+- produção detecta a captura 1536x691 como lista válida com 5 fretes;
+- bloqueio estava no gate de foreground/captura, antes do detector;
+- UsageStats OEM deixou de ser hard gate quando pixels estritos da lista já provam o GTO;
+- ciclo fechar/reabrir lista foi religado no fast path;
+- fallback visual de seleção cobre OEM que não entrega ACTION_OUTSIDE sem remover os
+  gates de segurança de fechamento da lista + OCR exato.
+
+CERTIFICAÇÃO COMPLETA R3.25
+- native flow: 47/47
+- auto sync: 74/74
+- R3.6 receive latch: 32/32
+- R3.7 stability: 63/63
+- R3.13 modes: 20/20
+- R3.13 print: 12/12
+- R3.17 selection integrity: 20/20
+- R3.19 end-to-end: 34/34
+- R3.20 APK/Web parity: 36/36
+- R3.21 capture stability: 13/13
+- R3.22 menu selection: 8/8
+- R3.23 data integrity: 16/16
+- R3.24 bootstrap/origin: 14/14
+- R3.25 critical detection flow: 16/16
+TOTAL: 405/405 checks
+
+TESTE R3.25 ESPECÍFICO
+- captura real do usuário: PASS
+- 1 frete: PASS
+- 2 fretes: PASS
+- 3 fretes: PASS
+- 4 fretes: PASS
+- 5 fretes: PASS
+- múltiplas resoluções/aspectos: PASS
+- OEM UsageStats completamente stale: PASS
+- touch ACTION_OUTSIDE ausente + mudança visual isolada: PASS
+- lista precisa fechar antes da confirmação visual: PASS
+- reopen de lista: PASS
+- Itapetuna != Itapetona: PASS / rejeita mutação
+- Firebase Functions request contract com contractMode: PASS
+- Functions GTO source type-check: PASS
+- payload final selado antes do envio: PASS
+- retry durável/ACK antes da remoção da fila: PASS
+
+LIMITAÇÃO DO AMBIENTE DE CERTIFICAÇÃO
+O ambiente de geração deste ZIP não possui acesso de rede para baixar a distribuição
+Gradle/Android SDK e por isso não produz o APK binário aqui. O código Java Android é
+compilado pelos testes de sintaxe/fixtures, e o projeto inclui os BATs para o build real
+com Android Studio/JDK 21 no Windows. O usuário já confirmou que esse ambiente Windows
+consegue executar o Gradle da base R3.24; a R3.25 mantém a mesma toolchain e sobe apenas
+para versionName 1.0.42 / versionCode 42.

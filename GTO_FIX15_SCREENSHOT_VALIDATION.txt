@@ -1,0 +1,14 @@
+FIX15 visual freight-list detector — offline validation against supplied screenshots
+
+1000214266.jpg  -> 5 fretes -> PASS
+1000214354.png  -> 5 fretes -> PASS
+1000214360.png  -> 5 fretes -> PASS
+1000214363.png  -> 3 fretes -> PASS
+1000214421.png  -> 4 fretes -> PASS
+1000214422.png  -> 4 fretes -> PASS
+1000214445.png  -> 5 fretes -> PASS
+1000214829.png  -> 5 fretes -> PASS
+1000214362.png  -> gameplay / não é lista -> REJECTED -> PASS
+1000214328.png  -> gameplay / não é lista -> REJECTED -> PASS
+1000214364.png  -> gameplay / não é lista -> REJECTED -> PASS
+1000214857.png  -> gameplay / não é lista -> REJECTED -> PASS

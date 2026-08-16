@@ -1,0 +1,55 @@
+NVU R3.34-PC-HF14 — PROCESSO PELO PC
+Android: 1.0.66 / versionCode 66
+
+OBJETIVO HF14
+- Preservar Google Auth HF11, MediaProjection, fila durável, ACK e Firestore.
+- Evoluir somente o observador GTO Android para estado + contexto + múltiplas evidências.
+- Não alterar Netlify/Google AI Studio.
+- Firebase Functions precisa ser atualizada nesta revisão porque destinationCompany passou a ser opcional no contrato de envio.
+
+PREPARAÇÃO RECOMENDADA
+1. Extraia o ZIP em uma pasta curta, por exemplo:
+   C:\NVU\R3.34-PC-HF14
+
+2. Abra CMD nessa pasta e execute:
+   PREPARAR-ANDROID-WINDOWS.bat
+
+O preparador executa:
+- npm ci
+- lint
+- build das Functions somente para validação local
+- npm run verify:release
+- npm run build
+- prepare:cap-assets
+- npx cap sync android
+- verify:cap-assets
+- Gradle :app:compileDebugJavaWithJavac com Java 21
+
+BUILD RELEASE LOCAL (sem assinatura configurada no projeto)
+   cd android
+   gradlew.bat clean assembleRelease --no-daemon
+
+IDENTIDADE ESPERADA
+   applicationId: com.nvu.operacional
+   EXPECTED_VERSION_CODE: "66"
+   EXPECTED_VERSION_NAME: "1.0.66"
+
+ARTEFATO ASSINADO PELO WORKFLOW GITHUB
+   NVU-R3.34-PC-HF14-release.apk
+
+INSTALAÇÃO ADB
+   "%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe" devices
+   "%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe" install -r "C:\CAMINHO\NVU-R3.34-PC-HF14-release.apk"
+
+ANTES DO APK: DEPLOY MÍNIMO NECESSÁRIO
+   firebase deploy --only functions:registerGtoTrip
+
+TESTE FÍSICO CRÍTICO
+- autorizar captura uma vez;
+- testar listas de 1 a 5+ fretes e cada linha;
+- confirmar que toque em N nunca seleciona M;
+- testar notificação antes/durante/depois do toque;
+- sair do GTO, abrir outro app e voltar;
+- testar campo ilegível/revisão manual sem reselecionar;
+- testar resultado, Receber e tentativa duplicada;
+- repetir em aparelho mais lento.

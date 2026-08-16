@@ -1,0 +1,77 @@
+NVU R3.34-PC-HF17 — RELATÓRIO DE VALIDAÇÃO
+Data: 2026-08-15
+Android: 1.0.69
+versionCode: 69
+Base: R3.34-PC-HF16
+
+ESCOPO
+- Android nativo apenas.
+- Web/src/public/app/resources: inalterados vs HF16.
+- Firebase Functions: inalteradas vs HF16.
+- MediaProjection, seleção por toque, cancelamento/reseleção, fila durável, ACK e sincronização automática: preservados.
+
+CORREÇÃO HF17
+1. BOLHA SOB O CARD
+- Quando o card abre, o WindowManager mede o tamanho real do painel.
+- Se a bolha NVU estiver fisicamente sobreposta/embaixo do card, ela é movida para fora do painel.
+- O lado é escolhido pela quantidade de espaço útil disponível: esquerda ou direita.
+- A nova posição é persistida em bubbleX/bubbleY.
+- Se o card for reposicionado por proteção da lista/resultado ou mudar de tamanho após refresh, a verificação de sobreposição é executada novamente.
+
+2. TOQUE FORA MINIMIZA O CARD
+- O card usa FLAG_NOT_TOUCH_MODAL + FLAG_WATCH_OUTSIDE_TOUCH.
+- ACTION_OUTSIDE minimiza somente menuView.
+- A bolha permanece anexada.
+- MediaProjection não é encerrada.
+- Estado do frete/viagem não é modificado.
+- O toque continua chegando ao GTO porque o overlay permanece NOT_TOUCH_MODAL.
+
+3. CORRIDA BOLHA x ACTION_OUTSIDE
+- Um toque na própria bolha também é externo ao card.
+- Android pode entregar ACTION_OUTSIDE ao card antes de ACTION_UP na bolha.
+- HF17 registra lastMenuOutsideTouchAt para impedir que o mesmo gesto feche e reabra imediatamente o card.
+
+ARQUIVOS FUNCIONAIS ALTERADOS
+- android/app/src/main/java/com/nvu/operacional/GtoObserverService.java
+- android/app/src/main/java/com/nvu/operacional/GtoOverlayLayoutPolicy.java (novo)
+- android/app/build.gradle (versão)
+
+TESTES
+- check:android-java-syntax: PASS (27 fontes)
+- verify:release completo: PASS
+- HF13: 16/16 PASS
+- HF14: 14/14 PASS
+- HF15: 13/13 PASS
+- HF16: 12/12 PASS
+- HF17 overlay/dismiss: 12/12 PASS
+
+HF17 TESTA ESPECIFICAMENTE
+- FLAG_WATCH_OUTSIDE_TOUCH presente junto com NOT_TOUCH_MODAL.
+- Toque externo fecha somente o card.
+- closeMenu não remove a bolha e não chama stopProjection.
+- Mesmo gesto na bolha não pode fechar e reabrir o card.
+- Bolha só é reposicionada quando existe sobreposição real.
+- Card próximo à esquerda -> bolha vai para direita.
+- Card próximo à direita -> bolha vai para esquerda.
+- Havendo espaço nos dois lados -> escolhe o lado com mais sobra.
+- Refresh do card revalida possível sobreposição.
+
+COMPILAÇÃO ANDROID REAL
+NÃO VALIDADA NESTE SANDBOX.
+Tentativa executada:
+  ./gradlew :app:compileDebugJavaWithJavac --no-daemon
+Bloqueio externo:
+  java.net.UnknownHostException: services.gradle.org
+O wrapper não conseguiu baixar gradle-8.14.3-all.zip e, portanto, o Javac/Gradle do projeto não chegou a executar.
+
+GATE NO PC
+Executar PREPARAR-ANDROID-WINDOWS.bat. Ele exige a compilação Java Android real antes de liberar o preparo do APK.
+
+TESTE FÍSICO RECOMENDADO
+1. Abrir card com bolha em posição que ficaria coberta pelo painel.
+2. Confirmar que a bolha aparece ao lado do card, no lado com maior espaço.
+3. Tocar dentro do card: card permanece aberto e ação interna funciona.
+4. Tocar no cenário GTO fora do card: card minimiza, bolha permanece.
+5. Tocar na bolha com card aberto: card minimiza e não reabre pelo mesmo gesto.
+6. Reabrir card várias vezes durante frete ativo.
+7. Confirmar que detecção, cancelamento/reseleção, resultado, Receber e envio automático continuam operando.

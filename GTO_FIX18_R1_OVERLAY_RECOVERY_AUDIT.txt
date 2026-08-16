@@ -1,0 +1,27 @@
+NVU GTO FIX18-R1 — OVERLAY/RECOVERY AUDIT
+==========================================
+Result: 16/16 checks passed
+
+PASS | Capacitor source delivery defaults to local assets
+PASS | packaged Android config has no remote server.url
+PASS | Android sync script forces local mode
+PASS | service publishes heartbeat
+PASS | visible NVU activity restores previously enabled observer
+PASS | frontend also requests safe recovery
+PASS | plugin confirms service start instead of blind success
+PASS | overlay add failure is persisted
+PASS | overlay creation is retried with throttle
+PASS | overlay success clears diagnostic failure
+PASS | legacy Global Truck alias recognized in source
+PASS | bundled Android frontend also recognizes legacy alias
+PASS | bundled Android frontend has observer recovery
+PASS | bundled Android wording matches automatic registration flow
+PASS | private signing key is not shipped
+PASS | root node_modules excluded from delivery
+
+Notes:
+- The native freight-selection and completion algorithms were intentionally left unchanged.
+- Android packaged assets are local; Netlify remote mode remains an explicit development option only.
+- The existing packaged RecordTrip bundle was patched because npm registry access was unavailable in this execution environment.
+- A normal npm run cap:sync:android on the development machine will rebuild these assets from the corrected source.
+- Release signing keys are intentionally excluded from shared source archives.

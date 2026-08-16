@@ -1,0 +1,98 @@
+NVU R3.34-PC-HF20 — AUDITORIA DO BOTÃO FLUTUANTE E CARD
+Android 1.0.72 / versionCode 72
+Base: HF19
+
+ESCOPO
+Auditoria focada em abertura/fechamento do card, posição da bolha, posição do card, toque externo, áreas seguras, interferência com lista/resultado e experiência de uso. Fluxo de frete/sincronização não foi reescrito.
+
+CAUSAS / INCONSISTÊNCIAS CONFIRMADAS NA HF19
+1. Card e bolha não formavam um componente visual único.
+   openMenu() usava offsets fixos (-270dp, +64dp e x=8 em estado de resultado). O card podia abrir distante da bolha e apenas depois mover a bolha se houvesse sobreposição.
+
+2. Detecção de resultado ainda carregava dependência visual antiga.
+   Se o card cruzasse a antiga região central do resultado, resultProbeOccludedByNvuMenu podia impedir o OCR fallback naquele frame. Isso era incompatível com a regra atual simples: Concluído + valor.
+
+3. Movimentos automáticos da bolha podiam sobrescrever bubbleX/bubbleY persistidos.
+   O sistema podia alterar permanentemente a posição escolhida pelo motorista mesmo quando o movimento tinha sido causado apenas por proteção de overlay.
+
+4. A bolha não respeitava integralmente WindowInsets.
+   Criação e drag podiam alcançar status bar/cutout/navigation bar, enquanto o card já trabalhava com área segura.
+
+5. Proteção da lista usava 56dp para a bolha e não a largura real (botão + indicador de saúde), permitindo aproximação excessiva da área dos fretes.
+
+CORREÇÕES HF20
+- GtoOverlayLayoutPolicy agora possui política determinística de par bolha+card.
+- Bolha é a âncora visual.
+- Card escolhe esquerda/direita com base no espaço real.
+- Se ambos os lados não couberem na posição atual, a bolha sofre apenas o deslocamento mínimo necessário para o par caber.
+- Card fica verticalmente centralizado em relação à bolha e limitado pela área segura.
+- Se uma faixa segura excepcionalmente estreita não comportar o par horizontal, o card preserva largura e a bolha usa fallback acima/abaixo, sem sobreposição.
+- Ao minimizar, deslocamento automático do card é desfeito e a bolha retorna à posição anterior do motorista.
+- Ao arrastar a bolha, o card fecha sem restaurar o auto-dock; o novo ponto do arraste vira a preferência explícita.
+- Apenas arraste explícito persiste bubbleX/bubbleY. Movimentos automáticos não persistem.
+- Debounce do toque da bolha reduzido de 360ms para 180ms para melhorar resposta, mantendo guard separado contra o mesmo ACTION_OUTSIDE.
+- Criação e drag da bolha respeitam top/bottom system insets.
+- Proteção de lista usa a largura real da bolha, incluindo indicador branco.
+- Resultado sem dependência do posicionamento do card: OCR semântico continua com card aberto; resultado já detectado não reposiciona card.
+- Lista real continua prioritária. Se não houver largura segura para um card legível sem cobrir Aceitar, apenas o card é minimizado; bolha/captura/estado permanecem.
+
+COMPORTAMENTO ESPERADO
+ABRIR:
+- toque único na bolha abre card;
+- card aparece imediatamente junto à bolha;
+- lado é escolhido automaticamente;
+- nenhum estado de viagem muda.
+
+FECHAR/MINIMIZAR:
+- toque fora: minimiza somente card;
+- toque na bolha com card aberto: minimiza card;
+- arraste da bolha: minimiza card e inicia reposicionamento;
+- troca real para outro app pode minimizar card após confirmação, preservando bolha/estado;
+- notificação/SystemUI transitória não deve fechar card.
+
+RESULTADO:
+- card aberto não suspende OCR de Concluído + valor;
+- card não é movido automaticamente quando resultado é reconhecido;
+- Receive/ACK permanecem independentes do overlay.
+
+TESTES
+- JavaSyntaxCheck: PASS (28 fontes).
+- HF15 overlay/stage: 13/13 PASS.
+- HF17 overlay dismiss/layout: 12/12 PASS.
+- HF18 freight evidence: 16/16 PASS.
+- HF19 overlay visual: 24/24 PASS.
+- HF20 overlay anchor: 19/19 PASS.
+- R3.33 audit flow atualizado para política semântica: 19/19 PASS.
+- Blocos posteriores de money integrity, PC hotfix, projection, captura/origem, revisão, fluxo simples e sincronização permaneceram verdes.
+- verify:release monolítico foi executado; o executor excedeu o limite de tempo já no bloco final HF20. Os blocos finais foram executados separadamente e passaram. Nenhuma falha funcional ficou aberta nos testes executados.
+
+COMPILAÇÃO ANDROID REAL
+NÃO VALIDADA NESTE AMBIENTE.
+Tentativa:
+  ./gradlew :app:compileDebugJavaWithJavac --offline
+Resultado:
+  UnknownHostException: services.gradle.org
+O wrapper não possui a distribuição Gradle local e tenta baixá-la antes do Javac. PREPARAR-ANDROID-WINDOWS.bat mantém a compilação Java real como gate obrigatório no PC.
+
+ARQUIVOS FUNCIONAIS ALTERADOS EM RELAÇÃO À HF19
+- android/app/src/main/java/com/nvu/operacional/GtoObserverService.java
+- android/app/src/main/java/com/nvu/operacional/GtoOverlayLayoutPolicy.java
+- android/app/build.gradle (identidade 72 / 1.0.72)
+- testes/scripts/workflow/preparador de release.
+
+NÃO ALTERADO
+- src/
+- public/
+- app/
+- functions/
+- capacitor.config.ts
+- vite.config.ts
+- server.ts
+- netlify.toml
+- package-lock.json
+
+RISCOS RESTANTES / TESTE FÍSICO
+- ACTION_OUTSIDE depende do comportamento do WindowManager/OEM; a implementação usa a combinação Android padrão FLAG_NOT_TOUCH_MODAL + FLAG_WATCH_OUTSIDE_TOUCH.
+- Validar em pelo menos um aparelho com notch/barra gestual e um aparelho de baixo desempenho.
+- Validar visualmente a transição quando a bolha está exatamente no centro e o sistema precisa fazer um pequeno auto-dock.
+- Validar lista de fretes com card aberto: se a área segura for insuficiente, o card deve minimizar sem apagar seleção/captura.

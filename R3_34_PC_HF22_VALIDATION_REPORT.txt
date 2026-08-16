@@ -1,0 +1,101 @@
+NVU R3.34-PC-HF22 — RELATÓRIO DE VALIDAÇÃO
+Android 1.0.74 / versionCode 74
+
+OBJETIVO
+Aplicar melhorias de baixo risco sobre a HF21 para tornar o observador mais claro, diagnosticável e previsível sem reescrever ou enfraquecer seleção por toque, snapshot/fingerprint, fila durável, Firebase/ACK ou sincronização automática.
+
+ALTERAÇÕES APLICADAS
+1. Mensagens ao motorista com prioridade explícita:
+   - INFO, SUCCESS, ACTION e CRITICAL.
+   - Mensagem importante não é apagada prematuramente por evento de menor prioridade.
+   - A proteção de tempo mínimo de leitura continua ativa.
+
+2. Diagnóstico circular local do observador:
+   - Guarda somente os 50 eventos mais recentes.
+   - Registra transições relevantes, identidade da seleção, saúde da captura, revisão, substituição de frete e sincronização.
+   - Falha do logger é no-op: diagnóstico não participa das decisões do fluxo.
+
+3. Snapshot local de incidente:
+   - Em falhas relevantes grava estado, sessão, linha selecionada, identidade, campo pendente, dados do frete, valor de resultado, status de sync e saúde da captura.
+   - Não altera a máquina de estados nem o payload de viagem.
+
+4. Estado individual de campos:
+   - cargo/origem/destino/distância/valor = CONFIRMED ou PENDING.
+   - destinationCompany = OPTIONAL.
+   - Uso diagnóstico/UX; não recria o antigo consenso global.
+
+5. Fluxo de substituição/cancelamento:
+   - Reaparecer a lista não descarta sozinho a viagem atual.
+   - freightReplacementStatus=PENDING somente arma a substituição.
+   - O frete anterior só é descartado quando uma nova seleção realmente é confirmada.
+
+6. Feedback de sincronização:
+   - Card de Operação mostra estado simples do observador e sync.
+   - Envio pendente é exibido ao motorista sem apagar a fila durável.
+   - Sincronizada é registrada após ACK.
+
+7. Captura/saúde:
+   - Eventos de saúde e incidentes passaram a ser registrados para auditoria física.
+   - A bolinha branca continua baseada na saúde real da captura/análise; não foi transformada em animação para evitar novo risco de WindowManager.
+
+8. OCR durante viagem:
+   - Mantida a política segura da HF21: OCR semântico esparso usando frame mais recente e fallback de 1,8 s.
+   - Não foi reduzido agressivamente nesta HF porque isso poderia atrasar o reconhecimento de “Concluído + valor”.
+
+9. Workflow de release:
+   - Corrigido bug silencioso herdado: workflow dizia esperar versionCode 73, mas ainda fazia grep por 72 e usava concurrency de HF19.
+   - HF22 alinhada para versionCode 74 / versionName 1.0.74.
+
+PRESERVADO SEM REESCRITA
+- MediaProjection e captura.
+- Identidade/seleção por toque.
+- Snapshot congelado da linha selecionada.
+- Fingerprint.
+- Fila local durável.
+- Receive latch/idempotência.
+- Firebase/Firestore.
+- ACK e sincronização automática.
+- Web/Netlify/Functions/app web.
+
+ALTERAÇÕES DELIBERADAMENTE NÃO FEITAS POR RISCO
+- Animação/pulso complexo na bolinha de saúde.
+- Nova estratégia agressiva de frequência OCR abaixo do fallback atual.
+- Mudança no contrato de Functions/Firebase.
+- Reescrita da máquina de estados.
+
+VALIDAÇÃO
+Novos testes HF22: 21/21 PASS.
+HF21: 13/13 PASS.
+HF20: 19/19 PASS.
+HF19: 24/24 PASS.
+HF18: 16/16 PASS.
+HF17: 12/12 PASS.
+HF16: 12/12 PASS.
+HF15: 13/13 PASS.
+HF14: 14/14 PASS.
+HF13: 16/16 PASS.
+HF12: 20/20 PASS.
+PC hotfix: 24/24 PASS.
+Money integrity: 10/10 PASS.
+R3.33: 19/19 PASS.
+validate:gto-native: 49/49 PASS.
+validate:gto-auto-sync: 74/74 PASS.
+Java syntax: 31 fontes PASS.
+
+A execução monolítica verify:release excedeu o limite do executor no bloco final, sem falha funcional. Os blocos restantes foram executados separadamente e ficaram verdes. Portanto a validação funcional é equivalente segmentada, não uma execução monolítica concluída dentro do limite de tempo.
+
+COMPILAÇÃO ANDROID REAL
+NÃO VALIDADA NESTE AMBIENTE.
+O comando ./gradlew :app:compileDebugJavaWithJavac --no-daemon parou antes do Javac porque o wrapper não conseguiu resolver services.gradle.org (java.net.UnknownHostException). O PREPARAR-ANDROID-WINDOWS.bat mantém a compilação Java/Gradle real como gate obrigatório no PC antes da geração do APK.
+
+COMPARAÇÃO COM HF21
+Hashes confirmados como idênticos para:
+- src/
+- public/
+- functions/
+- app/
+- package-lock.json
+Logo, Web, Netlify, Functions e app web permanecem inalterados.
+
+VEREDITO
+HF22 é uma evolução de baixo risco focada em UX/observabilidade. As mudanças críticas do fluxo continuam apoiadas nas proteções já estabilizadas da HF21. A versão deve seguir para compilação real no Windows e teste físico, especialmente mensagens prioritárias, diagnóstico de incidente, substituição de frete, status de sync e múltiplas viagens.

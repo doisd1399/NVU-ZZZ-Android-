@@ -1,0 +1,54 @@
+NVU R3.26 — RELATÓRIO DE VALIDAÇÃO
+===================================
+
+ESCOPO
+- Fluxo determinístico lista -> seleção -> viagem -> resultado -> Receive -> fila -> Firebase.
+- Pausa imediata da leitura ao sair do GTO e retomada no mesmo estado.
+- Telas desconhecidas neutras.
+- Lista reaberta durante viagem sem perda do frete atual.
+- Troca de frete apenas quando explicitamente armada pelo motorista.
+- Contagem estável durante pressão do botão Aceitar (N -> N-1 transitório).
+- Integridade literal do frete e do valor final.
+- Proteção contra callbacks atrasados de sincronização canônica.
+
+RESULTADO FINAL DA SUÍTE verify:release
+- Native flow: 49/49
+- Auto sync: 74/74
+- R2 lifecycle: 25/25
+- R3.3 freight re-arm: 21/21
+- R3.5 result/sync recovery: 35/35
+- R3.6 Receive latch: 32/32
+- R3.7 full stability: 63/63
+- R3.13 mode/print: 20/20
+- R3.13 print evidence: 12/12
+- R3.17 selection integrity: 20/20
+- End-to-end integrity: 34/34
+- APK x Web parity: 36/36
+- R3.21 capture stability: 13/13
+- R3.22 menu selection: 8/8
+- R3.23 data integrity: 16/16
+- R3.24 bootstrap/origin: 14/14
+- R3.25 detection flow: 16/16
+- R3.26 deterministic flow: 21/21
+
+TOTAL: 509/509 verificações aprovadas.
+JavaSyntaxCheck: PASS (15 fontes).
+
+EVIDÊNCIA REAL DE LISTA
+A captura real 1536x691 enviada no teste anterior permanece como fixture:
+  scripts/fixtures/gto-real-freight-list-5.png
+Ela é validada como uma lista com 5 fretes. O conjunto também cobre 1..6 linhas
+visíveis e múltiplas resoluções.
+
+LIMITAÇÃO DO AMBIENTE DE ENTREGA
+O ambiente usado nesta auditoria não possui o Android SDK completo para gerar o
+binário Gradle final. Por isso o APK deve ser compilado no Windows com o Android
+Studio/SDK do motorista. O pacote inclui duas barreiras para evitar um APK errado:
+
+1) PREPARAR-ANDROID-WINDOWS.bat instala dependências limpas, executa lint, build das
+   Firebase Functions, toda a certificação, build Web e cap sync.
+2) GERAR-APK-DEBUG-WINDOWS.bat recusa a compilação se os assets Android não forem
+   exatamente os do build Web 2.3.7/R3.26 sincronizado.
+
+A validação acima certifica as regras e caminhos de código cobertos pela suíte; a
+confirmação final em hardware continua dependendo do teste físico no dispositivo/GTO.

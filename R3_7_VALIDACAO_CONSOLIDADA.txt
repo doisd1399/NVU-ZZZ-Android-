@@ -1,0 +1,22 @@
+NVU GTO R3.7 / Android 1.0.27
+
+VALIDACOES:
+- Native GTO: 47/47
+- Android/Firebase auto-sync: 74/74
+- FIX18: 26/26
+- Lifecycle R2: 25/25
+- Automatic completion R3: 25/25
+- Freight re-arm R3.3: 21/21
+- Device/layout compatibility R3.4: 42/42
+- Result/sync recovery R3.5: 34/34
+- Receive latch R3.6: 32/32
+- Full stability audit R3.7: 63/63
+- Senior navigation: 10/10
+TOTAL SUITES: 399/399
+
+SYNTHETIC DETECTOR GEOMETRY MATRIX:
+- 3888/3888 realistic combinations passed using actual GtoFastVisualDetector.java
+
+NOTES:
+- No backend change in functions/src/gtoTrips.ts.
+- Full Android Gradle/SDK release build must still be executed on the release workstation/Android Studio.

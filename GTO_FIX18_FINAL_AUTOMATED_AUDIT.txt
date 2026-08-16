@@ -1,0 +1,41 @@
+NVU GTO FIX18 — LOCAL CAPACITOR FINAL AUTOMATED AUDIT
+======================================================
+Result: 23/26 checks passed
+
+PASS | FIX17 fast detector contract preserved or controlled adaptive successor | fa4f6647b2efdfc1967f90e03d7bc4d273a0995d930209068741f82830c296ce
+PASS | FIX17 selection coordinator binary-equivalent | d84fe0848f5a054225cf939786156c07a291a4eb74a362ca9f72878d920b0ddd
+PASS | FIX18 immutable context snapshot present
+PASS | FIX18 freight lock present on both selection commits
+FAIL | FIX18 completion uses synchronous persistence
+PASS | FIX18 queue envelope/checksum present
+PASS | FIX18 quarantine preserves malformed queue data
+PASS | FIX17 pending queue migration retained
+PASS | local dequeue requires validated FIX18 ACK
+PASS | fresh-session reset protects unsealed completed delivery
+PASS | abandoned session snapshots are cleaned explicitly
+PASS | plugin exposes FIX18 integrity and sync status
+PASS | web bridge exposes FIX18 status
+PASS | canonical backend is modular gtoTrips export
+PASS | server idempotency validates payload fingerprint
+PASS | server validates vehicle/trailer operation drift
+PASS | server validates FIX18 timestamp
+PASS | server returns FIX18 exact-session ACK
+PASS | server and Android use us-central1
+PASS | Firebase predeploy builds Functions
+PASS | delivery package contains no root node_modules
+PASS | delivery package contains no Functions node_modules
+PASS | no duplicated application root package detected
+FAIL | native GTO regression validator | exit=1
+FAIL | FIX18 Android/backend contract validator | exit=1
+PASS | project preflight | exit=0
+
+Command summary:
+FAIL | /opt/nvm/versions/node/v22.16.0/bin/node scripts/validate-gto-native-flow.mjs | exit=1
+FAIL | /opt/nvm/versions/node/v22.16.0/bin/node scripts/validate-gto-auto-sync.mjs | exit=1
+PASS | /opt/nvm/versions/node/v22.16.0/bin/node scripts/preflight.mjs --full | exit=0
+
+Environment note:
+- node_modules is intentionally excluded from the delivery ZIP.
+- Run npm install/npm ci before build or Capacitor sync.
+- Firebase Functions in this local package mirror the canonical AI Studio backend to prevent contract drift.
+- Publish Firebase from the AI Studio/Netlify package as the official source.

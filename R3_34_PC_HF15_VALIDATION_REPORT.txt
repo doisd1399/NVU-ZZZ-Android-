@@ -1,0 +1,58 @@
+NVU R3.34-PC-HF15 — RELATÓRIO DE AUDITORIA E VALIDAÇÃO
+Android: 1.0.67 / versionCode 67
+Base: HF14
+
+ESCOPO
+Correção nativa Android/Capacitor para dois problemas físicos confirmados:
+1) card NVU fecha sozinho após selecionar o frete;
+2) mensagem "Frete identificado. Tudo preparado, podemos partir!" pode não permanecer visível.
+
+CAUSA RAIZ 1 — CARD NVU FECHANDO SOZINHO
+A MediaProjection captura também o próprio overlay NVU. O pré-filtro OCR-free do resultado usa regiões centrais escuras + botões neutros como evidência. Na captura física fornecida pelo usuário, com o card NVU aberto sobre a cabine do GTO, as mesmas métricas da HF14 medem aproximadamente:
+- dialogDark: 0,7315
+- dialogRightDark: 0,6667
+- receiveNeutral: 0,9333
+- adsGold: 0,0667
+
+Com a política HF14, isso é suficiente para GtoResultEvidencePolicy.isPlausibleResult() retornar TRUE, mesmo sem existir tela de resultado. Em seguida GtoObserverService recolhia/fechava o menu para "liberar" a região do resultado. Portanto o próprio card fabricava a evidência que fazia o sistema fechá-lo.
+
+CORREÇÃO HF15
+- Antes de executar GtoResultVisualGate, o serviço verifica se o próprio menu NVU intersecta a ROI do resultado.
+- Frame coberto pelo próprio menu não entra como evidência de resultado e também não entra no OCR fallback daquele ciclo.
+- keepOverlaysClearOfResultRegion() não chama mais closeMenu(). O card é reposicionado para uma coluna lateral segura; se não houver espaço legível, permanece aberto e é mascarado da decisão visual.
+- Durante TRIP_IN_PROGRESS/revisão, o card abre inicialmente na lateral esquerda, fora da ROI central de resultado.
+- A proteção da lista de fretes também deixou de fechar automaticamente um card aberto; apenas reposiciona.
+
+CAUSA RAIZ 2 — MENSAGEM DE ETAPA DESAPARECENDO
+showStatusChip() agendava mainHandler.postDelayed(this::hideStatusChip) para cada mensagem sem cancelar o callback de mensagens anteriores. Um callback antigo podia executar durante uma mensagem nova e removê-la. Além disso, suspendPassiveDetectionOverlaysKeepBubbleAndMenu() escondia o chip em oscilações de foreground, mesmo depois de announceDriverStage já registrar a etapa como exibida.
+
+CORREÇÃO HF15
+- Cada nova mensagem cancela explicitamente o hide pendente anterior.
+- O hide agendado é vinculado à View específica que o criou; não pode remover uma mensagem mais nova.
+- Mensagens de etapa são prioritárias sobre chips diagnósticos.
+- Oscilações passivas de foreground preservam a mensagem de etapa.
+- Mensagens de etapa não dependem de bubbleParams e são exibidas sempre no topo central.
+- A mensagem de seleção continua exatamente: "Frete identificado. Tudo preparado, podemos partir!"
+
+REGRESSÕES
+- JavaSyntaxCheck: PASS (25 fontes Android)
+- verify:release: PASS completo
+- R3.33 audit-flow: 19/19 PASS após atualizar a regressão para a política mais forte de mascaramento/reposicionamento em vez de fechamento.
+- HF14 review/overlay: 14/14 PASS
+- HF15 overlay/stage: 13/13 PASS
+- O teste HF15 inclui os ratios medidos da captura física e comprova que a imagem realmente acionava o pré-filtro antigo de resultado.
+
+INVARIANTES PRESERVADOS
+- seleção por toque/snapshot/fingerprint;
+- destinationCompany continua opcional e não bloqueia a viagem;
+- fila durável, ACK, Firebase/Firestore e sincronização automática preservados;
+- MediaProjection/capture-health da HF13/HF14 preservados;
+- Web/Netlify/Google AI Studio não foram alterados;
+- Functions não receberam nova alteração na HF15 (permanece a compatibilidade opcional de destinationCompany introduzida na HF14).
+
+COMPILAÇÃO ANDROID REAL NESTE AMBIENTE
+NÃO EXECUTADA ATÉ O JAVAC, porque o Gradle Wrapper tentou baixar gradle-8.14.3-all.zip e o ambiente retornou java.net.UnknownHostException: services.gradle.org.
+O PREPARAR-ANDROID-WINDOWS.bat do pacote continua exigindo :app:compileDebugJavaWithJavac no PC antes do build.
+
+STATUS
+A causa raiz do fechamento foi reproduzida diretamente a partir da captura física fornecida e corrigida no ponto que gerava a auto-interferência. A suíte disponível passou. O teste físico do APK gerado no dispositivo continua sendo o gate final de produção.

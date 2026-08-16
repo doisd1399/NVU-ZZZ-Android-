@@ -1,0 +1,16 @@
+NVU Android — assinatura de release
+
+A chave .jks que estava dentro do projeto foi removida desta cópia por segurança.
+Use a chave oficial somente localmente no computador de publicação e não envie o arquivo .jks para Git, Google AI Studio ou ZIPs de compartilhamento.
+
+Esta correção não altera a identidade do aplicativo (applicationId com.nvu.operacional).
+A release foi incrementada para versionName 1.0.57 e versionCode 57.
+
+Para publicar, abra o projeto android no Android Studio e use:
+Build > Generate Signed Bundle / APK
+
+Selecione a chave oficial que já assina o aplicativo em produção. Uma chave nova
+criaria outra identidade de atualização e não substituiria a instalação atual.
+
+O pacote não inclui chave, senha nem APK/AAB previamente assinado. Isso é
+intencional: o artefato de publicação deve ser gerado no ambiente autorizado.

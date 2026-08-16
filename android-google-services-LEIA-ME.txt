@@ -1,0 +1,5 @@
+O arquivo real google-services.json não estava no ZIP enviado.
+Copie o arquivo do seu projeto Android/Firebase já funcional para:
+android/app/google-services.json
+Não renomeie e não use um arquivo de outro package. O package deste projeto é:
+com.nvu.operacional

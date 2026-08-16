@@ -1,0 +1,53 @@
+NVU R3.34-PC-HF6 — PROCESSO PELO PC
+Base aprovada: R3.34
+Android: 1.0.58 / versionCode 58
+
+CORREÇÃO PRINCIPAL HF5
+- Não usa espera fixa de 15 segundos para a gravação.
+- A autorização só abre quando o GTO já foi confirmado em primeiro plano e a tela real está horizontal/estável.
+- A MainActivity também é colocada em horizontal ANTES de abrir o consentimento Android.
+- Depois que o usuário aceita, o token MediaProjection é vinculado ao foreground service, mas o VirtualDisplay NÃO é criado dentro da NVU.
+- A NVU retorna ao GTO e só cria a primeira/única superfície de captura após confirmar novamente:
+  1) pacote real do GTO em primeiro plano;
+  2) largura > altura;
+  3) geometria repetida por múltiplas verificações e tempo mínimo de estabilização.
+- Enquanto essa segunda fase está pendente, o fluxo bloqueia uma segunda solicitação de autorização.
+- Se o Android encerrar a MediaProjection antes/depois da superfície, o estado é invalidado e nova autorização é solicitada somente quando realmente necessária.
+
+PUBLICAÇÃO
+- Se HF2/HF3 já foram publicados corretamente no Netlify e Firebase Functions, HF5 NÃO exige novo deploy de Functions nem Netlify: as mudanças HF5 de produção são Android nativo.
+- Se você ainda está na R3.34 original/HF1 no servidor, publique primeiro as alterações anteriores conforme o pacote HF2/HF3.
+
+PREPARAR NO WINDOWS
+1. Extraia para uma pasta curta, por exemplo:
+   C:\NVU\R3.34-PC-HF6
+
+2. Execute:
+   PREPARAR-ANDROID-WINDOWS.bat
+
+O preparador instala dependências, roda TypeScript, Functions build, verify:release (inclui o gate HF5), build Web, Capacitor sync e compilação Java real com JDK 21.
+
+GERAR RELEASE PELO GITHUB ACTIONS
+O workflow já espera:
+   EXPECTED_APPLICATION_ID: com.nvu.operacional
+   EXPECTED_VERSION_CODE: "57"
+   EXPECTED_VERSION_NAME: "1.0.58"
+
+Artifact esperado:
+   NVU-R3.34-PC-HF6-release.apk
+
+INSTALAR POR ADB
+   "%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe" devices
+   "%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe" install -r "C:\CAMINHO\NVU-R3.34-PC-HF6-release.apk"
+
+TESTE FÍSICO OBRIGATÓRIO
+1. Abra NVU e inicie Modo automático.
+2. Ative/rearme o botão flutuante.
+3. Abra GTO e mantenha-o em horizontal.
+4. Aguarde a autorização Android; ela não deve ser aberta em retrato.
+5. Aceite uma única vez.
+6. O GTO deve voltar ao primeiro plano e a NVU deve concluir a captura sem pedir autorização novamente.
+7. Abra a lista de fretes e confirme que a detecção começa normalmente.
+8. Feche e reabra o painel NVU; enquanto a autorização já estiver vinculada/estabilizando, não deve aparecer uma nova solicitação real de MediaProjection.
+9. Teste painel de notificações e retorno ao GTO; a viagem/estado deve permanecer preservada.
+10. Se houver outro gravador/espelhamento ativo, desligue-o e repita; Android pode encerrar uma sessão MediaProjection quando outra sessão assume a captura.

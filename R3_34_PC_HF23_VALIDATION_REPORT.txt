@@ -1,0 +1,69 @@
+NVU R3.34-PC-HF23 — RELATÓRIO DE CERTIFICAÇÃO
+Android 1.0.75 / versionCode 75
+Base: HF22
+Data: 2026-08-16
+
+ESCOPO
+Correção exclusiva dos 4 bloqueadores encontrados na auditoria de produção da HF22, preservando seleção por toque, snapshot, MediaProjection, overlay, fila durável, fingerprint, Firebase e ACK.
+
+1) DESTINO — SEM AUTOCORREÇÃO SILENCIOSA
+Causa: GtoCityTextResolver podia substituir OCR por nomes conhecidos via normalização/edit-distance.
+Correção: o texto OCR do destino permanece literal. Lista de cidades/expectedDestination passa a ser apenas evidência diagnóstica e nunca reescreve option.destination.
+Evidência: GtoCityTextResolverTest PASS + HF23 production probe PASS.
+
+2) ORIGEM — ROI CONTAMINADA POR Km/R$/ACEITAR
+Causa: a regra antiga não filtrava corretamente textos compactos como 600Km e podia devolver "600Km Fábrica de Tijolo" ou "600Km" como origem.
+Correção: GtoOriginGeometryPolicy agora rejeita explicitamente Km (compacto ou espaçado), R$/valor, Aceitar e linhas puramente numéricas antes de montar a faixa de rota.
+Evidência: probe com CARGA TIJOLO / 600Km / Fábrica de Tijolo / Dalavan / Área Rural / R$ 11.600 retorna exatamente "Fábrica de Tijolo".
+
+3) RESTART DURANTE REVIEW_REQUIRED
+Causa: qualquer CONFIRMING_FREIGHT era convertido em WAITING_FREIGHT após morte do processo, mesmo quando selectionIdentityStatus=CONFIRMED e faltava somente um campo.
+Correção: GtoSessionRecoveryPolicy restaura CONFIRMING_FREIGHT quando identidade está CONFIRMED + selectionConfirmationStatus=REVIEW_REQUIRED + reviewRequiredField persistido. Candidato ainda não confirmado continua voltando com segurança para WAITING_FREIGHT.
+Evidência: R2 lifecycle 26/26 + HF23 probe PASS.
+
+4) TIMEOUT DE 12 HORAS
+Causa: ACTIVE_SESSION_STALE_MS podia impedir recuperação de um snapshot durável válido somente por idade.
+Correção: 12h virou limiar de diagnóstico LONG_RUNNING_SESSION. A decisão de preservar depende da existência do snapshot durável, não da idade.
+Evidência: sessão simulada com 72h e snapshot válido permanece recuperável; snapshot ausente continua não recuperável.
+
+TESTE COMPLETO DE 5 FRETES
+Foi criado GtoHf23ProductionFlowProbe usando as políticas Java reais do projeto.
+Para 5 fretes distintos, o teste percorre:
+IDLE -> WAITING_FREIGHT -> toque exato na linha N -> CONFIRMING_FREIGHT -> validação dos campos -> TRIP_IN_PROGRESS -> consenso do valor final -> RESULT_DETECTED -> Receber/RESULT_CONFIRMED -> fingerprint único -> ACK/preparo da próxima viagem.
+
+Os 5 casos também passam por:
+- ROI de origem com Km/R$/Aceitar presentes no mesmo crop;
+- destino literal, inclusive grafias próximas de nomes conhecidos;
+- identidade N -> N, nunca M;
+- fingerprint único por viagem;
+- envio automático modelado uma única vez por fingerprint.
+Resultado: 5/5 viagens PASS.
+
+CERTIFICAÇÃO AUTOMATIZADA
+- check:android-java-syntax: PASS — 32 fontes
+- validate:gto-native: 49/49 PASS
+- validate:gto-auto-sync: 74/74 PASS
+- audit:gto-r2 lifecycle: 26/26 PASS
+- R3.34 PC hotfix: 24/24 PASS
+- HF18: 16/16 PASS
+- HF19: 24/24 PASS
+- HF20: 19/19 PASS
+- HF21: 13/13 PASS
+- HF22: 21/21 PASS
+- HF23 production certification: 10/10 PASS
+
+A execução monolítica de verify:release excedeu o limite do executor depois de já ter passado todos os blocos até HF17. Os blocos HF18-HF23 foram então executados separadamente e todos passaram. Nenhuma falha funcional permaneceu na cadeia equivalente.
+
+GRADLE/JAVAC REAL
+NÃO VALIDADO NESTE AMBIENTE por limitação externa.
+O wrapper tenta baixar gradle-8.14.3-all.zip e o ambiente retorna java.net.UnknownHostException: services.gradle.org antes de iniciar o compilador.
+O PREPARAR-ANDROID-WINDOWS.bat mantém :app:compileDebugJavaWithJavac como gate obrigatório no Windows.
+
+ESCOPO DE ALTERAÇÃO HF22 -> HF23
+Alterações funcionais: Android nativo (GtoObserverService, GtoCityTextResolver, GtoOriginGeometryPolicy, novo GtoSessionRecoveryPolicy).
+Alterações adicionais: testes, versionamento, workflow assinado e preparador Windows.
+Sem alterações em src/, public/, app/, functions/ ou package-lock.json.
+
+VEREDITO
+HF23 está APROVADA na certificação automatizada/simulada disponível, incluindo 5 viagens completas distintas e todos os gates funcionais relevantes.
+Antes de produção definitiva, ainda é obrigatório: (1) Gradle/Javac real PASS no Windows/GitHub e (2) teste físico no aparelho com MediaProjection/WindowManager/ML Kit reais.

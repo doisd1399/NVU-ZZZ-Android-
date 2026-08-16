@@ -1,0 +1,67 @@
+<?xml version='1.0' encoding='utf-8' standalone='yes' ?>
+<map>
+    <boolean name="resultTouchFallbackRequired" value="false" />
+    <int name="captureAndroidApi" value="36" />
+    <string name="companyName">DC Transportes</string>
+    <long name="tripStateChangedAt" value="1786598012036" />
+    <boolean name="gtoCanonicalStatePending" value="true" />
+    <int name="bubbleX" value="596" />
+    <boolean name="touchPulseSensorVisible" value="true" />
+    <long name="overlayLastAttemptAt" value="1786599445244" />
+    <int name="bubbleY" value="35" />
+    <int name="overlayFailureCount" value="0" />
+    <boolean name="touchCaptureNeeded" value="false" />
+    <int name="captureDensityDpi" value="450" />
+    <string name="driverStageCode">WAITING_FREIGHT</string>
+    <int name="freightCount" value="0" />
+    <string name="foregroundPackage">com.stargamesapps.gto</string>
+    <string name="jobId">gV6s1QCg6AJxzhzxHui2</string>
+    <int name="jobTotalDeliveries" value="10" />
+    <string name="companyId">PvXMFQeemQAwIsoPyDCH</string>
+    <string name="driverId">huUNVG8EDUPE8Xr2m8yhqg2hLv82</string>
+    <string name="projectionStatus">ACTIVE</string>
+    <string name="lastEvent">Toque detectado · correlacionando a sequência de quadros</string>
+    <string name="driverName">David Canto</string>
+    <boolean name="projectionPermissionInFlight" value="false" />
+    <boolean name="projectionActive" value="true" />
+    <string name="screenState">OTHER</string>
+    <string name="jobStatus">active</string>
+    <string name="vehicleName">Iveco S Way </string>
+    <int name="outsideTouchCount" value="0" />
+    <long name="freightFrameSequence" value="2259" />
+    <string name="driverStageShownKey">9050a78b-93b0-47e1-ad30-5ac01c20e719|WAITING_FREIGHT</string>
+    <long name="serviceStartedAt" value="1786599443490" />
+    <long name="observerTaskRemovedAt" value="1786599428185" />
+    <boolean name="enabled" value="true" />
+    <string name="gtoTripSessionId">9050a78b-93b0-47e1-ad30-5ac01c20e719</string>
+    <string name="contractName">BLS - 40</string>
+    <string name="trailerName">Rodocaçamba 6 eixos </string>
+    <string name="vehicleId">8ubiB8SeFgoNgUCtPkOv</string>
+    <long name="gtoTripSessionStartedAt" value="1786597820213" />
+    <boolean name="overlayVisible" value="true" />
+    <int name="captureHeight" value="1220" />
+    <long name="driverStageAt" value="1786597820267" />
+    <int name="jobProgress" value="4" />
+    <int name="captureWidth" value="2712" />
+    <string name="gtoCanonicalStateError">NOT_FOUND</string>
+    <string name="gtoCanonicalPendingFrom">CONFIRMING_FREIGHT</string>
+    <long name="freightTouchSequence" value="744" />
+    <long name="selectionTouchSequence" value="461" />
+    <long name="lastGtoBackgroundEventAt" value="1786599447471" />
+    <string name="tripState">WAITING_FREIGHT</string>
+    <long name="lastGtoForegroundEventAt" value="1786599447598" />
+    <long name="serviceHeartbeatAt" value="1786599545513" />
+    <string name="gtoCanonicalPendingState">WAITING_FREIGHT</string>
+    <string name="driverStageMessage">Etapa 1/4 · Escolha um frete no GTO. A NVU identifica e confere os dados automaticamente.</string>
+    <long name="freightStructureAt" value="1786599426413" />
+    <string name="pendingSelectionSource">touch-marker</string>
+    <string name="gtoTripSyncStatus">IN_PROGRESS</string>
+    <string name="gtoTripIntegrityStatus">CONTEXT_LOCKED</string>
+    <string name="contractId">X4l9uVt3e95EV24uks4n</string>
+    <long name="freightTouchPulseAt" value="1786599533824" />
+    <boolean name="resultTouchFallbackContinuityBroken" value="false" />
+    <string name="selectionSource">touch-marker+frame-lock</string>
+    <string name="trailerId">AsAFyEtfZFF35m1NffsO</string>
+    <boolean name="projectionReauthButtonVisible" value="false" />
+    <boolean name="gtoForeground" value="true" />
+</map>

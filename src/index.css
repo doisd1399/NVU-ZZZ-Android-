@@ -1,0 +1,179 @@
+@import "tailwindcss";
+
+@theme {
+  --color-blue-50: #f0f6fc;
+  --color-blue-100: #e2ecf8;
+  --color-blue-500: #1b6ec2;
+  --color-blue-600: #13559b;
+  --color-blue-700: #0d3c6d;
+  
+  --color-green-500: #10b981;
+  --color-green-600: #059669;
+  
+  --color-red-500: #e11d48;
+  --color-red-600: #be123c;
+
+  --color-orange-500: #d97706;
+  --color-orange-600: #b45309;
+}
+
+@custom-variant dark (&:is(.dark *));
+
+
+html,
+body,
+#root {
+  min-height: 100%;
+  min-height: 100dvh;
+  background: #f9fafb;
+}
+
+.dark html,
+.dark body,
+.dark #root,
+html.dark,
+html.dark body,
+html.dark #root {
+  background: #09090b;
+}
+
+#root {
+  isolation: isolate;
+  overflow-anchor: none;
+}
+
+/* Remove the legacy tap-compatibility delay on Android/WebView controls. */
+button,
+a,
+select,
+[role="button"] {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* The first authenticated deep link crosses session, authorization and lazy
+ * route boundaries. A single persistent overlay owns that whole sequence;
+ * intermediate indicators stay mounted for their logic but cannot paint a
+ * second brand underneath it. */
+html.nvu-initial-boot-active [data-nvu-route-loading-brand],
+html.nvu-initial-boot-active [data-nvu-layout-brand],
+html.nvu-initial-boot-active [data-nvu-role-transition] {
+  visibility: hidden !important;
+}
+
+/* The profile veil owns the loading identity while it is active. Hiding the
+ * page/header copies prevents a second NVU from showing through the softened
+ * background without shifting the underlying layout. */
+html.nvu-role-transition-active [data-nvu-background-brand] {
+  visibility: hidden !important;
+}
+
+/* On the first cold route load, the shell header can mount before its lazy
+ * content. Keep the centered NVU + progress bar as the single visible brand
+ * until that content is ready; visibility preserves the header layout. */
+html.nvu-route-loading-active [data-nvu-layout-brand] {
+  visibility: hidden !important;
+}
+
+/* Route changes are committed synchronously. Disabling the browser's default
+ * root snapshot cross-fade prevents the white/gray flash seen in Android and
+ * AI Studio Preview when large pages or images differ between routes. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none !important;
+  mix-blend-mode: normal;
+}
+
+@layer base {
+  body {
+    @apply bg-gray-50 text-gray-900 dark:bg-[#09090b] dark:text-[#fafafa] antialiased text-[15px];
+  }
+  
+  h1, h2, h3, h4, h5, h6 {
+    @apply tracking-tight font-semibold text-gray-900 dark:text-[#fafafa];
+  }
+
+  p, span, div {
+    @apply leading-relaxed;
+  }
+}
+
+@layer utilities {
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
+
+/* Performance utilities used by long operational lists. Chromium/WebView can
+ * skip layout and paint for off-screen cards while preserving their scroll
+ * footprint. Browsers without content-visibility simply ignore the property. */
+@layer utilities {
+  .nvu-content-auto {
+    content-visibility: auto;
+    contain-intrinsic-size: 112px;
+  }
+
+  .nvu-content-auto-lg {
+    content-visibility: auto;
+    contain-intrinsic-size: 320px;
+  }
+}
+
+@keyframes nvu-progress {
+  0% { transform: translateX(-120%); }
+  50% { transform: translateX(150%); }
+  100% { transform: translateX(320%); }
+}
+
+@keyframes nvu-navigation-progress {
+  0% { transform: scaleX(0.06); }
+  45% { transform: scaleX(0.58); }
+  75% { transform: scaleX(0.78); }
+  100% { transform: scaleX(0.91); }
+}
+
+/* Respect the OS accessibility setting and avoid expensive transition chains
+ * on devices whose user explicitly requested less motion. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Full-screen backdrop blur is expensive in Android WebViews and in the AI
+ * Studio mobile iframe because every frame must repaint the entire page below
+ * it. Keep the same transition veil with a stable translucent fill instead. */
+@media (max-width: 820px), (pointer: coarse) {
+  [data-nvu-role-transition] {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+    background-color: rgba(15, 23, 42, 0.42) !important;
+  }
+
+  .dark [data-nvu-role-transition],
+  html.dark [data-nvu-role-transition] {
+    background-color: rgba(0, 0, 0, 0.68) !important;
+  }
+}
+
+/* Modal backdrops keep their dark/translucent fill on mobile without forcing
+ * a full-screen live blur of the page underneath. This avoids frame drops when
+ * opening menus, notification panels and confirmation dialogs. */
+@media (max-width: 820px), (pointer: coarse) {
+  .fixed.inset-0.backdrop-blur-sm,
+  .fixed.inset-0.backdrop-blur-md,
+  .fixed.inset-0.backdrop-blur-xl,
+  .fixed.inset-0[class*="backdrop-blur-"] {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+}

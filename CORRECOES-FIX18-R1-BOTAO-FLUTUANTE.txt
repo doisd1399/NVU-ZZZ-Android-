@@ -1,0 +1,53 @@
+NVU GTO FIX18-R1 — CORREÇÕES DO BOTÃO FLUTUANTE
+================================================
+
+Aplicado nesta revisão:
+
+1. Capacitor Android local por padrão
+- capacitor.remote.json desativado.
+- android/app/src/main/assets/capacitor.config.json sem server.url.
+- npm run cap:sync:android força o modo local antes de build/sync.
+- O modo remoto Netlify permanece disponível apenas quando configurado explicitamente para desenvolvimento.
+
+2. Recuperação do observador GTO
+- MainActivity tenta restaurar o GtoObserverService quando a NVU volta ao primeiro plano e o motorista já havia ativado o recurso.
+- O frontend possui recuperação equivalente quando detecta enabled=true + running=false.
+- Não reinicia o serviço se as permissões de sobreposição/acesso de uso não estiverem concedidas.
+
+3. Confirmação real de inicialização
+- startObserver não retorna mais sucesso imediatamente após startForegroundService.
+- O plugin aguarda o heartbeat nativo do serviço antes de informar started=true.
+- Falhas de foreground service ficam registradas em startError.
+
+4. Diagnóstico e autorrecuperação do overlay
+- Erros de WindowManager.addView deixam de ser silenciosos.
+- overlayError, overlayErrorAt, overlayFailureCount e overlayVisible passam a ser persistidos.
+- Falha de criação do botão é registrada em lastEvent.
+- O serviço tenta recriar a bolha de forma controlada (throttle de 1,2 s) enquanto o GTO estiver em primeiro plano.
+- Quando a bolha volta a ser criada, o erro é limpo e o evento de restauração é registrado.
+
+5. Compatibilidade com cadastro do simulador
+- Aceita GTO, Global Truck Online e Global Truck, evitando ocultar o painel por cadastro legado.
+
+6. Bundle Android embarcado corrigido
+- Como o ambiente de auditoria não conseguiu acessar o registry npm, o bundle RecordTrip já existente no APK também foi corrigido diretamente para os pontos críticos acima.
+- No computador de desenvolvimento, npm run cap:sync:android recompila os assets normalmente a partir do código-fonte corrigido.
+
+7. Higiene de release
+- versionCode/versionName foram preservados; a numeração correta de produção deve ser definida no momento do release com base na versão já instalada/publicada.
+- Chave .jks removida do ZIP de compartilhamento e padrões *.jks/*.keystore ignorados.
+- A chave oficial deve permanecer somente no ambiente local de publicação.
+
+Validações executadas:
+- GTO native regression: 45/45.
+- Android/Firebase contract: 74/74.
+- FIX18 automated audit: 26/26.
+- Overlay/recovery audit: 17/17.
+- Bundle RecordTrip: sintaxe JavaScript validada por node --check.
+
+Não alterado intencionalmente:
+- detector visual rápido de seleção de frete;
+- correlacionamento do toque;
+- OCR de origem/destino/km/valor;
+- fluxo de confirmação/finalização;
+- contrato de registro automático no Firebase.

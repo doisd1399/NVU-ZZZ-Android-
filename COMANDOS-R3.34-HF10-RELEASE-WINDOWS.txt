@@ -1,0 +1,75 @@
+NVU R3.34-PC-HF10 — PROCESSO PELO PC
+Base aprovada: R3.34
+Android: 1.0.62 / versionCode 62
+
+CORREÇÃO PRINCIPAL HF10
+- Causa raiz corrigida no pós-consentimento do MediaProjection.
+- O fluxo antigo ainda dependia de o GtoObserverService permanecer vivo durante o diálogo do Android e, depois do RESULT_OK, vinculava a MediaProjection mas deixava a sessão sem VirtualDisplay enquanto aguardava outro ciclo de foreground/UsageStats do GTO.
+- Isso criava duas janelas críticas: se o processo/serviço fosse recriado durante o diálogo, o token aceito não tinha um observador vivo para consumi-lo; e, mesmo com o token vinculado, a sessão podia ser encerrada pelo Android/OEM antes de existir uma captura real.
+- HF10 segue a ordem oficial: RESULT_OK -> iniciar/promover foreground service com mediaProjection -> getMediaProjection -> registerCallback -> criar UMA VirtualDisplay imediatamente.
+- O RESULT_OK agora é enviado por ACTION_START_PROJECTION ao serviço, em vez de depender de uma referência static do serviço já existente. Se o processo tiver sido recriado, o serviço é iniciado e consome o token normalmente.
+- A VirtualDisplay é criada imediatamente ainda no host transparente horizontal, usando a geometria horizontal já verificada. O GTO continua atrás do host; a análise de frames permanece bloqueada até o GTO ser confirmado em primeiro plano.
+- O primeiro frame recebido é persistido como prova real de que a leitura está funcional. Só depois disso o estado informa fluxo de quadros validado.
+- Mudanças posteriores de orientação/tamanho usam resize/setSurface na mesma VirtualDisplay. Não é criada uma segunda VirtualDisplay com o mesmo token.
+- Uma nova autorização só é liberada após falha terminal real/onStop do MediaProjection, recusa do usuário ou falha explícita de inicialização.
+- Se outro gravador/espelhamento iniciar, a tela for bloqueada ou o usuário parar a projeção pelo Android, o sistema pode encerrar a MediaProjection; isso é uma regra do Android e exige nova autorização.
+
+ORDEM FUNCIONAL HF10
+GTO horizontal confirmado
+-> bolha NVU anexada
+-> Autorizar leitura
+-> Compartilhar tela
+-> ACTION_START_PROJECTION
+-> foreground service mediaProjection
+-> getMediaProjection
+-> registerCallback
+-> VirtualDisplay criada imediatamente
+-> primeiro frame validado
+-> retorno visual ao GTO
+-> estabilidade dos frames/GTO
+-> detecção de fretes
+-> frete selecionado
+-> viagem
+-> resultado
+-> Receber
+-> fila durável
+-> registerGtoTrip
+-> ACK
+
+PUBLICAÇÃO
+- HF10 altera somente Android nativo em relação à HF9.
+- src e functions permanecem iguais.
+- Se Web/Functions da HF2 ou posterior já estão publicados, NÃO publique Netlify ou Functions por causa da HF10.
+
+PREPARAR NO WINDOWS
+1. Extraia para uma pasta curta, por exemplo:
+   C:\NVU\R3.34-PC-HF10
+
+2. Execute:
+   PREPARAR-ANDROID-WINDOWS.bat
+
+O preparador instala dependências, roda a certificação funcional, build Web, Capacitor sync e compilação Java real com JDK 21.
+
+GERAR RELEASE PELO GITHUB ACTIONS
+O workflow espera:
+   EXPECTED_APPLICATION_ID: com.nvu.operacional
+   EXPECTED_VERSION_CODE: "62"
+   EXPECTED_VERSION_NAME: "1.0.62"
+
+Artifact esperado:
+   NVU-R3.34-PC-HF10-release.apk
+
+INSTALAR POR ADB
+   "%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe" devices
+   "%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe" install -r "C:\CAMINHO\NVU-R3.34-PC-HF10-release.apk"
+
+TESTE FÍSICO OBRIGATÓRIO
+1. Abra NVU e inicie Modo automático.
+2. Confirme a bolha NVU no GTO horizontal.
+3. Abra a bolha e toque uma única vez em Autorizar leitura da tela.
+4. Toque em Compartilhar tela.
+5. A autorização não deve reaparecer.
+6. Ao fechar o diálogo Android, a leitura deve entrar em captura ativa; o primeiro frame é a confirmação real.
+7. Abra a lista de fretes e confirme detecção automática.
+8. Selecione cada posição de frete em testes separados e confirme que a linha correta é bloqueada.
+9. Complete uma viagem de teste até a tela de resultado, Receber e ACK automático.

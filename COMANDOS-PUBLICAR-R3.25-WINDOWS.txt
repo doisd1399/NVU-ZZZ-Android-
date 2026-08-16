@@ -1,0 +1,63 @@
+NVU R3.25 — ORDEM DE PREPARAÇÃO, FUNCTIONS E APK
+================================================
+
+VERSÃO ANDROID
+- versionName: 1.0.42
+- versionCode: 42
+- package: com.nvu.operacional
+
+1) PREPARAR O PROJETO
+Na raiz extraída, execute:
+
+PREPARAR-ANDROID-WINDOWS.bat
+
+O preparador instala dependências, compila as Functions, roda a certificação R3.25,
+reconstrói o Web/fallback e sincroniza o Capacitor.
+
+2) FIREBASE FUNCTIONS
+Depois que o preparador terminar com [OK]:
+
+npx firebase login
+npx firebase deploy --only functions --project vtc-frota-log
+
+A Function precisa ser publicada se o backend em produção ainda não contém a correção
+R3.25 de contractMode.
+
+3) NETLIFY
+A correção crítica de detecção da R3.25 é NATIVA. O Netlify R3.24 já publicado em
+https://stirring-pavlova-ca6808.netlify.app é compatível e NÃO precisa ser republicado
+somente para esta correção.
+
+Se você quiser publicar também o Web reconstruído pelo PREPARAR:
+
+npx netlify-cli deploy --prod --dir=dist
+
+Use sempre o projeto existente stirring-pavlova-ca6808. Não crie outro site.
+
+4) GERAR APK DEBUG
+Execute na raiz:
+
+GERAR-APK-DEBUG-WINDOWS.bat
+
+Ou manualmente:
+
+cd android
+gradlew.bat clean assembleDebug
+
+APK:
+android\app\build\outputs\apk\debug\app-debug.apk
+
+5) INSTALAR NO CELULAR
+Com depuração USB ativa:
+
+adb devices
+adb install -r app\build\outputs\apk\debug\app-debug.apk
+
+Se aparecer INSTALL_FAILED_UPDATE_INCOMPATIBLE, a assinatura instalada é diferente.
+Se não precisar preservar os dados locais do APK antigo:
+
+adb uninstall com.nvu.operacional
+adb install app\build\outputs\apk\debug\app-debug.apk
+
+ATENÇÃO: adb uninstall apaga os dados locais do aplicativo antigo, mas não apaga dados
+já registrados no Firebase/servidor.

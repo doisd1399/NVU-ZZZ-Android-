@@ -1,0 +1,35 @@
+NVU R3.27 — VALIDACAO DO FLUXO GTO
+==================================
+
+Versoes: R3.27 / Web 2.3.8 / Android 1.0.44 / versionCode 44
+
+CERTIFICACAO OFFLINE/SOURCE
+npm run verify:release: PASS
+19 suites com contagem: 539/539 verificacoes aprovadas.
+
+VALIDACAO COM PIXELS REAIS DO GTO
+- fixture reportada: 1536x691
+- lista real: 5/5 fretes reconhecidos
+- variantes de 1,2,3,4,5 fretes: PASS
+- escalas 1024x461, 1280x576, 1536x691, 1920x864: PASS
+- pressao simulada com pixels reais nas linhas 1,2,3,4,5: linha correta identificada em todos os casos
+- lista inalterada: nenhuma selecao falsa
+
+FLUXO CERTIFICADO
+NVU abre GTO -> WAITING_FREIGHT antes do primeiro frame
+-> lista real qualifica foreground OEM apenas em janela restrita
+-> FREIGHT_LIST_DETECTED
+-> frame de Aceitar preservado em ordem
+-> linha exata congelada
+-> OCR independente da pagina + OCR da linha selecionada
+-> TRIP_IN_PROGRESS com selectedFreight imutavel
+-> somente resultado real arma Receber
+-> Receive persistido antes da conclusao
+-> resultado persistido antes de RESULT_CONFIRMED
+-> payload SHA-256/fila duravel antes da rede
+-> registerGtoTrip/Firebase
+-> fila removida somente apos ACK; falha de rede permanece pendente/retry.
+
+LIMITACAO HONESTA
+Este ambiente nao possui o Motorola fisico do motorista nem uma sessao executavel do Global Truck Online.
+A homologacao fisica final deve ser feita no aparelho depois de PREPARAR -> Functions -> Netlify --no-build -> APK.

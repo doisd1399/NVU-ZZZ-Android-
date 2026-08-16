@@ -1,0 +1,55 @@
+{
+  "project_info": {
+    "project_number": "451561168694",
+    "project_id": "vtc-frota-log",
+    "storage_bucket": "vtc-frota-log.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:451561168694:android:9e9b02e5b1791b62c45d97",
+        "android_client_info": {
+          "package_name": "com.nvu.operacional"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "451561168694-4ojdqok5v9sil8cu3q1smnecdjr8nltb.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.nvu.operacional",
+            "certificate_hash": "0b4355b115d8038bb6f10788493a71a02f8035c8"
+          }
+        },
+        {
+          "client_id": "451561168694-bb0lj765sg8nh06oq77flu1gb8l4hkve.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.nvu.operacional",
+            "certificate_hash": "a9f492b981d2e576c388b5f57b5daadfe994d087"
+          }
+        },
+        {
+          "client_id": "451561168694-9nldqgb2edr91j2flrl0m7305dd6gbj5.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDKqpb8oV_jvFdHA-c-x5gsu7B7rVIgRuw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "451561168694-9nldqgb2edr91j2flrl0m7305dd6gbj5.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

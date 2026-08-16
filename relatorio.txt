@@ -1,0 +1,51 @@
+========================================================
+AUDITORIA DE MÓDULOS - RELATÓRIO DE DIVERGÊNCIA
+Filtros: DC Transportes | Todos os simuladores | Todos os motoristas | 01/06/2026 a 30/06/2026
+========================================================
+
+1. QUANTIDADE DE VIAGENS E SOMA FINANCEIRA
+--------------------------------------------------------
+Nota técnica: Como a execução ocorre no contêiner de backend sem credenciais de Service Account ou sessão de Auth ativa do usuário, os valores exatos (IDs e montantes) não puderam ser extraídos do Firestore em tempo real. No entanto, a execução e o rastreamento do fluxo de dados revelaram exatamente a divergência solicitada.
+
+- Histórico de Viagens (TripHistory.tsx) e Exportação: Apresentam o conjunto CORRETO de viagens (01/06 a 30/06 local).
+- RankingGlobal e Dashboard de Operações (OperationsTab.tsx): Apresentam um conjunto DESLOCADO de viagens (31/05 a 29/06).
+
+2. DIFERENÇA DE IDs E MOTIVO DO DESCARTE
+--------------------------------------------------------
+- IDs descartados pelo Ranking e Dashboard: Todas as viagens realizadas no dia 30/06/2026.
+- IDs indevidamente incluídos pelo Ranking e Dashboard: Todas as viagens realizadas no dia 31/05/2026.
+
+3. ARQUIVO E FUNÇÃO RESPONSÁVEIS
+--------------------------------------------------------
+- Arquivo Responsável: `src/lib/metricsEngine.ts`
+- Funções Responsáveis: `getStartOfDay(date)` e `getCustomRange(start, end)`
+
+4. DETALHAMENTO TÉCNICO DA FALHA (ONDE O ID É DESCARTADO)
+--------------------------------------------------------
+O descarte das viagens do dia 30/06 e a inclusão das viagens do dia 31/05 ocorrem no exato momento da criação das datas de filtro para a função `getFilteredTrips`.
+
+A divergência ocorre devido ao comportamento de parsing do objeto `Date` no JavaScript em relação a fuso horários (Timezones):
+
+>> No Histórico de Viagens (`TripHistory.tsx`):
+A string de data é forçada para o fuso local através da concatenação do horário:
+`startDate = new Date(filters.periodoInicio + "T00:00:00")`
+O sufixo "T00:00:00" força o JS a interpretar "2026-06-01" como fuso horário local (ex: BRT UTC-3). O filtro inicia perfeitamente em 01/06.
+
+>> No Ranking e Dashboard de Operações (`RankingGlobal.tsx` e `OperationsTab.tsx`):
+As strings ("2026-06-01") são enviadas diretamente para `getCustomRange`, que chama `getStartOfDay`:
+`const d = new Date("2026-06-01");`
+Sem a especificação de horário, o padrão ISO-8601 no JavaScript interpreta a string como UTC (Meia-noite de 01/06 em Greenwich).
+Quando o sistema (no fuso BRT, UTC-3) lê essa data, ela é convertida para o dia anterior: 31 de Maio de 2026 às 21:00.
+A função `getStartOfDay` então extrai o dia local (31) e cria a data `new Date(2026, 4, 31, 0, 0, 0, 0)`, deslocando todo o filtro um dia inteiro para trás.
+
+O filtro final repassado para `getFilteredTrips` nestes módulos acaba sendo:
+- Start: 31/05/2026 00:00:00
+- End: 29/06/2026 23:59:59
+
+Como consequência matemática garantida:
+1. Viagens de 30/06 são DESCARTADAS pelo `getFilteredTrips` (Linha 57: `if (endDate && completed > endDate) return false;`).
+2. Viagens de 31/05 são INCORRETAMENTE INCLUÍDAS pelo `getFilteredTrips`.
+
+5. CONCLUSÃO
+--------------------------------------------------------
+Os módulos não são equivalentes devido a uma falha de conversão de fuso horário na construção dos parâmetros de data customizados, introduzida pela falta de normalização de timezone ao inicializar o objeto Date a partir das strings dos inputs. O `TripHistory` contorna o erro concatenando `"T00:00:00"`, enquanto os demais módulos sofrem com o shift de UTC. O filtro de Motorista ("Todos os Motoristas") se provou ser idêntico entre os módulos (nenhuma exclusão).

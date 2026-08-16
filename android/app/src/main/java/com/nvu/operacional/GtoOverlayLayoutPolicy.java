@@ -1,0 +1,176 @@
+package com.nvu.operacional;
+
+/**
+ * Deterministic layout rules for the NVU floating bubble and its card.
+ *
+ * HF20 UX rule: the bubble is the visual anchor. When the card opens it should sit
+ * immediately beside the bubble on the side that requires the least automatic movement
+ * while remaining inside the safe horizontal area. If both arrangements are possible
+ * without moving the bubble, the side with the most free room wins.
+ */
+final class GtoOverlayLayoutPolicy {
+    static final int SIDE_LEFT = -1;
+    static final int SIDE_RIGHT = 1;
+
+    private GtoOverlayLayoutPolicy() {}
+
+    static boolean overlaps(
+        int ax, int ay, int aw, int ah,
+        int bx, int by, int bw, int bh
+    ) {
+        if (aw <= 0 || ah <= 0 || bw <= 0 || bh <= 0) return false;
+        return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
+    }
+
+    static int chooseBubbleSide(
+        int menuLeft,
+        int menuRight,
+        int safeLeft,
+        int safeRight,
+        int bubbleWidth,
+        int gap
+    ) {
+        int leftSpace = Math.max(0, menuLeft - safeLeft - gap);
+        int rightSpace = Math.max(0, safeRight - menuRight - gap);
+        boolean leftFits = leftSpace >= bubbleWidth;
+        boolean rightFits = rightSpace >= bubbleWidth;
+
+        if (leftFits && rightFits) {
+            return rightSpace >= leftSpace ? SIDE_RIGHT : SIDE_LEFT;
+        }
+        if (rightFits) return SIDE_RIGHT;
+        if (leftFits) return SIDE_LEFT;
+        return rightSpace >= leftSpace ? SIDE_RIGHT : SIDE_LEFT;
+    }
+
+    static int bubbleX(
+        int side,
+        int menuLeft,
+        int menuRight,
+        int safeLeft,
+        int safeRight,
+        int bubbleWidth,
+        int gap
+    ) {
+        int target = side == SIDE_LEFT
+            ? menuLeft - gap - bubbleWidth
+            : menuRight + gap;
+        int maxX = Math.max(safeLeft, safeRight - bubbleWidth);
+        return clamp(target, safeLeft, maxX);
+    }
+
+    static boolean horizontalPairFits(
+        int safeLeft,
+        int safeRight,
+        int bubbleWidth,
+        int menuWidth,
+        int gap
+    ) {
+        return Math.max(0, safeRight - safeLeft) >= Math.max(0, bubbleWidth) + Math.max(0, menuWidth) + Math.max(0, gap);
+    }
+
+    /**
+     * Chooses the card side relative to the bubble. The preferred side is the one that
+     * requires the least automatic movement of the bubble to fit the complete pair.
+     */
+    static int chooseMenuSideForBubble(
+        int bubbleX,
+        int bubbleWidth,
+        int menuWidth,
+        int safeLeft,
+        int safeRight,
+        int gap
+    ) {
+        int bubbleLeft = bubbleX;
+        int bubbleRight = bubbleX + Math.max(0, bubbleWidth);
+        int leftSpace = Math.max(0, bubbleLeft - safeLeft - gap);
+        int rightSpace = Math.max(0, safeRight - bubbleRight - gap);
+        boolean leftFitsNow = leftSpace >= menuWidth;
+        boolean rightFitsNow = rightSpace >= menuWidth;
+
+        if (leftFitsNow && rightFitsNow) {
+            return rightSpace >= leftSpace ? SIDE_RIGHT : SIDE_LEFT;
+        }
+        if (rightFitsNow) return SIDE_RIGHT;
+        if (leftFitsNow) return SIDE_LEFT;
+
+        if (!horizontalPairFits(safeLeft, safeRight, bubbleWidth, menuWidth, gap)) {
+            return rightSpace >= leftSpace ? SIDE_RIGHT : SIDE_LEFT;
+        }
+
+        int leftBubble = bubbleXForMenuSide(
+            SIDE_LEFT, bubbleX, bubbleWidth, menuWidth, safeLeft, safeRight, gap
+        );
+        int rightBubble = bubbleXForMenuSide(
+            SIDE_RIGHT, bubbleX, bubbleWidth, menuWidth, safeLeft, safeRight, gap
+        );
+        int leftMove = Math.abs(leftBubble - bubbleX);
+        int rightMove = Math.abs(rightBubble - bubbleX);
+        if (leftMove == rightMove) return rightSpace >= leftSpace ? SIDE_RIGHT : SIDE_LEFT;
+        return rightMove < leftMove ? SIDE_RIGHT : SIDE_LEFT;
+    }
+
+    /**
+     * Returns the minimally shifted bubble X needed to make room for a card on the chosen
+     * side. If the full pair cannot fit, the bubble is only clamped to the safe area.
+     */
+    static int bubbleXForMenuSide(
+        int side,
+        int currentBubbleX,
+        int bubbleWidth,
+        int menuWidth,
+        int safeLeft,
+        int safeRight,
+        int gap
+    ) {
+        int maxBubbleX = Math.max(safeLeft, safeRight - Math.max(0, bubbleWidth));
+        if (!horizontalPairFits(safeLeft, safeRight, bubbleWidth, menuWidth, gap)) {
+            return clamp(currentBubbleX, safeLeft, maxBubbleX);
+        }
+        if (side == SIDE_LEFT) {
+            int minBubbleX = safeLeft + Math.max(0, menuWidth) + Math.max(0, gap);
+            return clamp(currentBubbleX, minBubbleX, maxBubbleX);
+        }
+        int maxForRightCard = safeRight - Math.max(0, menuWidth) - Math.max(0, gap) - Math.max(0, bubbleWidth);
+        return clamp(currentBubbleX, safeLeft, Math.max(safeLeft, maxForRightCard));
+    }
+
+    static int menuXBesideBubble(
+        int side,
+        int bubbleX,
+        int bubbleWidth,
+        int menuWidth,
+        int safeLeft,
+        int safeRight,
+        int gap
+    ) {
+        int target = side == SIDE_LEFT
+            ? bubbleX - Math.max(0, gap) - Math.max(0, menuWidth)
+            : bubbleX + Math.max(0, bubbleWidth) + Math.max(0, gap);
+        int maxMenuX = Math.max(safeLeft, safeRight - Math.max(0, menuWidth));
+        return clamp(target, safeLeft, maxMenuX);
+    }
+
+    static int centeredMenuYBesideBubble(
+        int bubbleY,
+        int bubbleHeight,
+        int menuHeight,
+        int safeTop,
+        int safeBottom
+    ) {
+        int preferred = bubbleY + Math.max(0, bubbleHeight) / 2 - Math.max(0, menuHeight) / 2;
+        return clampMenuY(preferred, menuHeight, safeTop, safeBottom);
+    }
+
+    static int clampMenuY(int preferredY, int menuHeight, int safeTop, int safeBottom) {
+        int top = Math.max(0, safeTop);
+        int bottom = Math.max(top, safeBottom);
+        int height = Math.max(0, menuHeight);
+        int maxY = Math.max(top, bottom - height);
+        return clamp(preferredY, top, maxY);
+    }
+
+    private static int clamp(int value, int min, int max) {
+        return Math.max(min, Math.min(max, value));
+    }
+}

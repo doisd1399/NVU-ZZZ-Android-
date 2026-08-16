@@ -1,0 +1,53 @@
+NVU R3.34-PC-HF11 — PROCESSO PELO PC
+Base aprovada: R3.34-PC-HF10
+Android: 1.0.63 / versionCode 63
+
+CORREÇÃO PRINCIPAL HF11
+- Correção restrita à configuração nativa do Google Sign-In Android.
+- `android/variables.gradle` passa a declarar `rgcfaIncludeGoogle = true`.
+- `androidxCredentialsVersion` fica fixado em `1.3.0`.
+- Essas duas configurações são exigidas pelo setup Android do `@capacitor-firebase/authentication` para o provedor Google/Credential Manager.
+- O gate `test:android-google-auth` bloqueia builds que percam o provedor Google, o pacote Firebase correto ou a versão de Credential Manager.
+- GTO, MediaProjection, detecção/seleção de fretes, resultado, fila, Firebase Functions e código Web permanecem iguais à HF10.
+
+PUBLICAÇÃO
+- HF11 altera somente Android/build nativo em relação à HF10.
+- `src` e `functions` permanecem byte a byte iguais à HF10.
+- NÃO é necessário publicar Netlify, Google AI Studio ou Firebase Functions por causa da HF11.
+
+PREPARAR NO WINDOWS
+1. Extraia para uma pasta curta, por exemplo:
+   C:\NVU\R3.34-PC-HF11
+
+2. Execute:
+   PREPARAR-ANDROID-WINDOWS.bat
+
+O preparador instala dependências, roda a certificação funcional, build Web, Capacitor sync e compilação Java real com JDK 21.
+
+GERAR RELEASE PELO GITHUB ACTIONS
+O workflow espera:
+   EXPECTED_APPLICATION_ID: com.nvu.operacional
+   EXPECTED_VERSION_CODE: "63"
+   EXPECTED_VERSION_NAME: "1.0.63"
+
+Artifact esperado:
+   NVU-R3.34-PC-HF11-release.apk
+
+INSTALAR POR ADB
+   "%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe" devices
+   "%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe" install -r "C:\CAMINHO\NVU-R3.34-PC-HF11-release.apk"
+
+TESTE FÍSICO OBRIGATÓRIO — LOGIN
+1. No aparelho que falhava, abra o NVU.
+2. Toque em Entrar com Google.
+3. O seletor de conta Google deve abrir.
+4. Selecione a mesma conta usada no aparelho que já funciona.
+5. Confirme entrada no perfil sem mensagem de atualização do Google Play Services.
+
+TESTE DE REGRESSÃO GTO
+1. Inicie Modo automático.
+2. Confirme a bolha NVU no GTO horizontal.
+3. Autorize leitura da tela uma vez.
+4. Abra a lista de fretes e confirme detecção automática.
+5. Selecione um frete e confirme a linha correta.
+6. Complete uma viagem até resultado, Receber e ACK automático.

@@ -1,0 +1,65 @@
+NVU R3.28 — ORDEM CORRETA DE PREPARAÇÃO E PUBLICAÇÃO
+====================================================
+
+VERSÕES
+R3.28 / Web 2.3.9 / Android 1.0.45 / versionCode 45
+
+1) EXTRAIA O ZIP EM UMA PASTA NOVA E ABRA O CMD NA RAIZ
+
+2) PREPARE, COMPILE E CERTIFIQUE
+PREPARAR-ANDROID-WINDOWS.bat
+
+O PREPARAR agora valida inclusive a compilação Java real do módulo Android com JDK 21.
+Só continue se aparecer:
+[OK] PROJETO PREPARADO COM SUCESSO
+
+3) FIREBASE FUNCTIONS
+As Functions permanecem compatíveis com a correção R3.28. Para manter o pacote inteiro alinhado:
+npx firebase login
+npx firebase deploy --only functions --project vtc-frota-log
+
+4) NETLIFY — PUBLIQUE EXATAMENTE O DIST JÁ CERTIFICADO
+Se a pasta ainda não estiver vinculada:
+npx netlify-cli link
+Escolha o projeto existente: stirring-pavlova-ca6808
+
+Publique SEM recompilar:
+npx netlify-cli deploy --prod --dir=dist --no-build
+
+URL esperada:
+https://stirring-pavlova-ca6808.netlify.app
+
+IMPORTANTE: depois do PREPARAR, NÃO execute npm run build, npx cap sync android
+ou PREPARAR novamente antes de gerar o APK. Isso preserva a paridade dist ↔ Android.
+
+5) GERE O APK
+GERAR-APK-DEBUG-WINDOWS.bat
+
+O script seleciona JDK 21, valida novamente a paridade Web↔Android e gera:
+android\app\build\outputs\apk\debug\app-debug.apk
+
+6) INSTALE VIA USB
+"%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe" devices
+"%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe" install -r android\app\build\outputs\apk\debug\app-debug.apk
+
+Se aparecer INSTALL_FAILED_UPDATE_INCOMPATIBLE e puder apagar dados locais:
+"%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe" uninstall com.nvu.operacional
+"%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe" install android\app\build\outputs\apk\debug\app-debug.apk
+
+ATENÇÃO: adb uninstall apaga dados locais. Não desinstale se existir viagem concluída ainda
+não sincronizada; nesse caso use APK assinado com a mesma keystore da instalação atual.
+
+TESTE FÍSICO R3.28
+1. Deixe a NVU ativa e toque Abrir Global Truck Online.
+2. O GTO deve aparecer primeiro.
+3. Só então deve aparecer a autorização Android para gravar/compartilhar a tela.
+4. Autorize a tela inteira.
+5. Abra a lista de fretes: deve aparecer "Lista de fretes detectada · X opções."
+6. Toque Aceitar em qualquer linha: após validação deve aparecer
+   "Frete identificado. Tudo preparado, podemos partir!"
+7. Botão flutuante: "Frete atual em andamento" + dados do frete congelado.
+8. Saia do GTO: leitura pausada, estado preservado. Volte: retoma o mesmo estado.
+9. Conclua a viagem e toque Receber: resultado deve ser persistido, enfileirado e enviado.
+
+ORDEM FINAL
+PREPARAR -> FUNCTIONS -> NETLIFY --no-build -> GERAR APK -> INSTALAR -> TESTE FÍSICO

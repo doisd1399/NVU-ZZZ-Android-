@@ -1,0 +1,41 @@
+<?xml version='1.0' encoding='utf-8' standalone='yes' ?>
+<map>
+    <boolean name="projectionActive" value="true" />
+    <string name="screenState">CAPTURE_READY</string>
+    <string name="jobStatus">active</string>
+    <string name="vehicleName">Iveco S Way </string>
+    <int name="captureAndroidApi" value="36" />
+    <string name="companyName">DC Transportes</string>
+    <long name="serviceStartedAt" value="1786600021501" />
+    <boolean name="enabled" value="true" />
+    <int name="bubbleX" value="637" />
+    <boolean name="touchPulseSensorVisible" value="false" />
+    <long name="overlayLastAttemptAt" value="1786600023227" />
+    <int name="bubbleY" value="133" />
+    <int name="overlayFailureCount" value="0" />
+    <boolean name="touchCaptureNeeded" value="false" />
+    <int name="captureDensityDpi" value="450" />
+    <string name="contractName">BLS - 40</string>
+    <string name="trailerName">Rodocaçamba 6 eixos </string>
+    <string name="vehicleId">8ubiB8SeFgoNgUCtPkOv</string>
+    <boolean name="overlayVisible" value="true" />
+    <int name="captureHeight" value="1220" />
+    <int name="jobProgress" value="4" />
+    <int name="captureWidth" value="2712" />
+    <string name="foregroundPackage">com.stargamesapps.gto</string>
+    <string name="jobId">gV6s1QCg6AJxzhzxHui2</string>
+    <int name="jobTotalDeliveries" value="10" />
+    <long name="lastGtoBackgroundEventAt" value="1786600025644" />
+    <string name="companyId">PvXMFQeemQAwIsoPyDCH</string>
+    <long name="lastGtoForegroundEventAt" value="1786600025786" />
+    <long name="serviceHeartbeatAt" value="1786600111771" />
+    <string name="driverId">huUNVG8EDUPE8Xr2m8yhqg2hLv82</string>
+    <string name="projectionStatus">ACTIVE</string>
+    <string name="lastEvent">Captura ajustada ao GTO: 2712x1220</string>
+    <string name="contractId">X4l9uVt3e95EV24uks4n</string>
+    <string name="driverName">David Canto</string>
+    <string name="trailerId">AsAFyEtfZFF35m1NffsO</string>
+    <boolean name="projectionReauthButtonVisible" value="false" />
+    <boolean name="projectionPermissionInFlight" value="false" />
+    <boolean name="gtoForeground" value="true" />
+</map>

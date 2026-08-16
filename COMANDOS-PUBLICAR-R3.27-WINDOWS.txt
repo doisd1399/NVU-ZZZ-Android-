@@ -1,0 +1,55 @@
+NVU R3.27 — ORDEM CORRETA DE PREPARAÇÃO E PUBLICAÇÃO
+====================================================
+
+VERSÕES
+R3.27 / Web 2.3.8 / Android 1.0.44 / versionCode 44
+
+1) EXTRAIA O ZIP EM UMA PASTA NOVA E ABRA O CMD NA RAIZ
+
+2) PREPARE, COMPILE E CERTIFIQUE
+PREPARAR-ANDROID-WINDOWS.bat
+
+Só continue se aparecer:
+[OK] PROJETO PREPARADO COM SUCESSO
+
+3) PUBLIQUE AS FIREBASE FUNCTIONS
+npx firebase login
+npx firebase deploy --only functions --project vtc-frota-log
+
+4) PUBLIQUE EXATAMENTE O DIST JÁ CERTIFICADO NO NETLIFY
+IMPORTANTE: NÃO permita um novo build depois do PREPARAR.
+
+Se a pasta ainda não estiver vinculada:
+npx netlify-cli link
+Escolha o projeto existente: stirring-pavlova-ca6808
+
+Depois publique SEM recompilar:
+npx netlify-cli deploy --prod --dir=dist --no-build
+
+URL esperada:
+https://stirring-pavlova-ca6808.netlify.app
+
+5) NÃO execute npm run build, cap sync ou PREPARAR novamente após o deploy.
+O dist e os assets Android precisam permanecer idênticos.
+
+6) GERE O APK
+GERAR-APK-DEBUG-WINDOWS.bat
+
+O script exige Java 21 e valida novamente a paridade Web↔Android.
+Saída:
+android\app\build\outputs\apk\debug\app-debug.apk
+
+7) INSTALE VIA USB
+"%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe" devices
+"%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe" install -r android\app\build\outputs\apk\debug\app-debug.apk
+
+Se aparecer INSTALL_FAILED_UPDATE_INCOMPATIBLE, a assinatura instalada é diferente.
+Se puder apagar os dados locais do APK anterior:
+"%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe" uninstall com.nvu.operacional
+"%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe" install android\app\build\outputs\apk\debug\app-debug.apk
+
+ATENÇÃO: adb uninstall apaga dados locais do app instalado. Se houver uma entrega local ainda
+não sincronizada, não desinstale; use APK assinado com a mesma keystore.
+
+ORDEM FINAL
+PREPARAR -> FUNCTIONS -> NETLIFY --no-build -> GERAR APK -> INSTALAR -> TESTE FÍSICO

@@ -1,0 +1,20 @@
+NVU R3.34-PC-HF22 — Android 1.0.74 / versionCode 74
+
+1) Extraia o ZIP em uma pasta curta, por exemplo C:\NVU\HF22
+2) Abra o CMD na raiz do projeto.
+3) Execute:
+
+PREPARAR-ANDROID-WINDOWS.bat
+
+O preparador executa os gates funcionais e a compilacao Android real antes do APK.
+
+Build debug manual, se necessario:
+cd android
+gradlew.bat --stop
+gradlew.bat clean :app:assembleDebug --no-daemon
+
+APK debug esperado:
+android\app\build\outputs\apk\debug\app-debug.apk
+
+Para producao assinada, use o workflow .github\workflows\build-android-release.yml com a keystore oficial.
+Identidade esperada: com.nvu.operacional / 1.0.74 / 74.

@@ -1,0 +1,11 @@
+R3.32 e uma revisao Android nativa. Web 2.3.9 e Firebase Functions nao foram alterados.
+
+1) Extraia em uma pasta nova.
+2) Execute:
+   PREPARAR-ANDROID-WINDOWS.bat
+3) Apos [OK] PROJETO PREPARADO COM SUCESSO, execute:
+   GERAR-APK-DEBUG-WINDOWS.bat
+4) APK:
+   android\app\build\outputs\apk\debug\app-debug.apk
+
+Nao e necessario republicar Netlify/Firebase somente por causa da R3.32.

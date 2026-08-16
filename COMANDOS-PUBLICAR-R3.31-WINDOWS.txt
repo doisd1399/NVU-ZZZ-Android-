@@ -1,0 +1,27 @@
+NVU R3.31 — Android 1.0.48 / versionCode 48
+Web 2.3.9 e Firebase Functions não mudaram nesta correção.
+
+1) Extraia o ZIP em uma pasta nova.
+2) Execute:
+
+PREPARAR-ANDROID-WINDOWS.bat
+
+3) Após [OK] PROJETO PREPARADO COM SUCESSO, execute:
+
+GERAR-APK-DEBUG-WINDOWS.bat
+
+4) APK gerado em:
+
+android\app\build\outputs\apk\debug\app-debug.apk
+
+5) Instalar via USB (na pasta android):
+
+"%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe" devices
+"%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe" install -r app\build\outputs\apk\debug\app-debug.apk
+
+Se houver INSTALL_FAILED_UPDATE_INCOMPATIBLE:
+
+"%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe" uninstall com.nvu.operacional
+"%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe" install app\build\outputs\apk\debug\app-debug.apk
+
+Não é necessário republicar Firebase Functions nem Netlify somente por causa da R3.31.

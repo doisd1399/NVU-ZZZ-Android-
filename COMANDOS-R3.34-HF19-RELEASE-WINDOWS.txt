@@ -1,0 +1,66 @@
+NVU R3.34-PC-HF19 — PROCESSO PELO PC
+Android: 1.0.71 / versionCode 71
+
+OBJETIVO HF19
+- Preservar integralmente o fluxo funcional da HF18: captura, seleção determinística, origem por ROI, cancelamento/reseleção, resultado, Receber, fila durável, ACK e sincronização.
+- Card NVU com largura estável e altura responsiva; estados longos usam scroll e permanecem dentro da área útil.
+- Recalcular posição vertical depois da medição real do card e considerar barra de status, cutout, navegação e teclado.
+- Nunca comprimir o card para proteger a leitura do resultado; mover quando houver espaço e mascarar o overlay quando necessário.
+- Preservar texto/foco do formulário manual durante atualizações de OCR/estado.
+- Mensagens de etapa centralizadas no topo seguro e visíveis por tempo mínimo antes de serem substituídas/confirmadas.
+- Toque fora minimiza apenas o card; toque intencional rápido na bolha volta a responder sem janela morta longa.
+- Notificações/SystemUI preservam card e estado; troca real para outro aplicativo minimiza o card somente após evidência sustentada de GTO em background.
+- Workflow de APK assinado alinhado para HF19 / 1.0.71 / 71.
+- Não alterar Web/Netlify/Functions.
+
+PREPARAÇÃO RECOMENDADA
+1. Extraia o ZIP em uma pasta curta, por exemplo:
+   C:\NVU\R3.34-PC-HF19
+
+2. Abra CMD nessa pasta e execute:
+   PREPARAR-ANDROID-WINDOWS.bat
+
+O preparador executa:
+- npm ci
+- lint
+- build das Functions somente para validação local
+- npm run verify:release
+- npm run build
+- prepare:cap-assets
+- npx cap sync android
+- verify:cap-assets
+- Gradle :app:compileDebugJavaWithJavac com Java 21
+
+BUILD RELEASE LOCAL
+   cd android
+   gradlew.bat clean assembleRelease --no-daemon
+
+IDENTIDADE ESPERADA
+   applicationId: com.nvu.operacional
+   EXPECTED_VERSION_CODE: "71"
+   EXPECTED_VERSION_NAME: "1.0.71"
+
+ARTEFATO ASSINADO PELO WORKFLOW GITHUB
+   NVU-R3.34-PC-HF19-release.apk
+
+INSTALAÇÃO ADB
+   "%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe" devices
+   "%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe" install -r "C:\CAMINHO\NVU-R3.34-PC-HF19-release.apk"
+
+FIREBASE
+   HF19 não altera Functions.
+   Se registerGtoTrip da HF14 já foi publicada, não é necessário novo deploy.
+
+TESTE FÍSICO PRIORITÁRIO HF19
+- abrir card com bolha no topo, meio e rodapé;
+- abrir revisão longa e confirmar que nenhum botão sai da tela;
+- abrir teclado e digitar origem; texto/foco não podem desaparecer durante refresh;
+- card aberto + resultado: card pode mover, nunca encolher/cortar conteúdo e nunca fechar por detector;
+- toque fora minimiza somente o card; tocar novamente na bolha reabre normalmente;
+- notificação com card aberto: card/estado preservados;
+- abrir WhatsApp/Outro app: card minimiza somente após troca real; bolha e viagem permanecem;
+- voltar ao GTO e continuar exatamente no mesmo estado;
+- confirmar mensagens de etapa no topo seguro, especialmente "Frete identificado. Tudo preparado, podemos partir!";
+- executar lista -> seleção -> viagem -> Concluído + valor -> Receber -> envio -> ACK;
+- testar cancelamento: frete A -> cancelar -> lista -> frete B; somente B deve permanecer válido;
+- repetir várias viagens na mesma MediaProjection.

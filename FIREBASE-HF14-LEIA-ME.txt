@@ -1,0 +1,12 @@
+NVU HF14 — ALTERAÇÃO MÍNIMA NECESSÁRIA NO FIREBASE
+
+A HF13 tratava destinationCompany como obrigatório também no registerGtoTrip.
+A HF14 tornou esse campo opcional para que sua ausência não impeça o envio automático.
+
+Depois de preparar/validar o projeto, publique somente a Function necessária:
+
+  firebase deploy --only functions:registerGtoTrip
+
+Antes do deploy, o PREPARAR-ANDROID-WINDOWS.bat já executa o build das Functions localmente.
+
+Não é necessário publicar Netlify nem alterar Google AI Studio por causa desta correção.

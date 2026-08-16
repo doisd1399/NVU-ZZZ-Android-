@@ -1,0 +1,39 @@
+
+> nvu-operacional@2.3.9 test:gto-r3.34-hf10-projection
+> node scripts/test-gto-r3-34-hf10-projection-runtime.mjs
+
+PASS HF10 Android identity
+PASS permission host is landscape
+PASS root cause removed: finishOnTaskLaunch is absent
+PASS permission host uses ordinary result-capable launch mode
+PASS permission host remains non-exported and transient
+PASS consent result is dispatched through the foreground service
+PASS recreated host never opens a second consent
+PASS host without result clears stuck in-flight state
+PASS service restart clears non-persistent permission latch
+PASS permission result watchdog prevents infinite stuck state
+PASS real bound grant overrides stale in-flight UI
+PASS Android 14+ projection FGS promotion occurs before getMediaProjection
+PASS ACTION_START_PROJECTION itself requests mediaProjection FGS type
+PASS permission flow survives a reclaimed observer process
+PASS permission host never converts slow startup into a false denial
+PASS projection surface uses maximum display metrics on modern Android
+PASS grant is registered before first VirtualDisplay
+PASS accepted grant creates its single VirtualDisplay immediately
+PASS silent ImageReader recovery preserves the same MediaProjection
+PASS silent-frame recovery never calls createVirtualDisplay
+PASS first captured frame is explicitly recorded
+PASS duplicate authorize stays blocked while grant is pending
+PASS terminal MediaProjection onStop is the path that re-enables consent
+PASS scenario: RESULT_OK recreates service and immediately starts capture
+PASS scenario: recreated-service capture validates first frame
+PASS scenario: exactly one authorization starts
+PASS scenario: accepted Android result latches grant
+PASS scenario: GTO surface starts without second authorization
+PASS scenario: first frame validates functional capture
+PASS scenario: silent-surface recovery does not lose grant
+PASS scenario: only terminal stop permits reauthorization
+PASS HF10 exact reported freight screenshot compile — GtoR334Hf9FreightScreenTest: PASS
+PASS HF10 exact reported freight screenshot scenarios — GtoR334Hf9FreightScreenTest: PASS
+
+33/33 HF10 projection/runtime checks passed.

@@ -1,0 +1,49 @@
+NVU R3.34-PC-HF21 — PROCESSO PELO PC
+Android: 1.0.73 / versionCode 73
+
+OBJETIVO HF21
+- Corrigir mistura silenciosa de dados entre página/linha e o frete realmente selecionado.
+- Congelar no toque: bitmap da página, geometria dos botões e baseline textual da mesma geração.
+- A leitura OCR da linha selecionada é a autoridade; histórico congelado só pode completar campo realmente ausente.
+- OCR que chegar de uma página posterior nunca participa daquele frete.
+- Falha/timeout do OCR da linha nunca auto-confirma dados do histórico; preserva a linha e pede somente o campo necessário.
+- Durante TRIP_IN_PROGRESS o OCR semântico de resultado passa a fallback de 1,8 s, sempre no frame mais recente.
+- Resultado continua semanticamente simples: Concluído + valor monetário. Nenhum gate de cor/pixel confirma resultado.
+
+PREPARAÇÃO RECOMENDADA
+1. Extraia o ZIP em um caminho simples, por exemplo:
+   C:\NVU\R3.34-PC-HF21
+
+2. Abra o CMD nessa pasta e execute:
+   PREPARAR-ANDROID-WINDOWS.bat
+
+O preparador executa npm ci, testes, build web, sync Capacitor e:
+   android\gradlew.bat :app:compileDebugJavaWithJavac --no-daemon
+
+Se a compilação Java real falhar, NÃO publique o APK.
+
+APK DEBUG PARA TESTE FÍSICO
+Depois do preparador passar:
+   cd android
+   gradlew.bat assembleDebug --no-daemon
+
+APK esperado:
+   android\app\build\outputs\apk\debug\app-debug.apk
+
+RELEASE ASSINADA
+O workflow .github\workflows\build-android-release.yml está alinhado para:
+   versionCode: 73
+   versionName: 1.0.73
+   artefato: NVU-R3.34-PC-HF21-release.apk
+
+TESTE FÍSICO PRIORITÁRIO
+1. Abra a página 2 com quatro fretes de 600Km e selecione a 3ª linha.
+2. O card deve manter exatamente os dados da 3ª linha; nenhuma informação da página/linha anterior pode aparecer.
+3. Troque rapidamente de página e toque em Aceitar: o snapshot pré-toque deve continuar sendo a fonte daquele frete.
+4. Se somente valor/origem ficar ilegível, pedir somente esse campo; não trocar carga/destino já lidos.
+5. Cancele o frete A, reabra a lista e aceite B: somente B passa a ser válido.
+6. Durante a viagem, confirme que a captura permanece saudável sem OCR pesado a cada ~700 ms.
+7. Na tela Concluído, confirme reconhecimento de Concluído + valor, toque em Receber e envio automático/ACK.
+8. Faça duas ou mais viagens seguidas na mesma sessão.
+
+HF21 não altera Web, Netlify ou Firebase Functions.

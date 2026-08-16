@@ -1,0 +1,62 @@
+NVU R3.23 — NETLIFY E APK RELEASE NO WINDOWS
+
+ORDEM CORRETA
+1. Publicar o dist R3.23 no Netlify.
+2. Preparar e abrir o projeto Android.
+3. Gerar o APK/AAB 1.0.40 assinado com a chave oficial.
+4. Instalar/testar no Android.
+5. Atualizar o Google AI Studio apenas como cópia-fonte, se desejar.
+
+NETLIFY — DEPLOY MANUAL
+1. Extraia NVU-NETLIFY-DIST-R3.23.zip.
+2. Confirme que index.html está na raiz da pasta extraída.
+3. No Netlify, abra o site stirring-pavlova-ca6808.
+4. Entre em Deploys e arraste a pasta extraída para o deploy manual.
+5. Aguarde Published e abra o site para conferir a versão.
+
+PREPARAR O PROJETO ANDROID
+Abra o CMD na pasta NVU-CAPACITOR-ANDROID-R3.23 e execute:
+
+PREPARAR-ANDROID-WINDOWS.bat
+
+Ou, manualmente:
+
+npm ci
+npm --prefix functions ci
+npm run lint
+npm --prefix functions run build
+npm run verify:release
+npm run build
+npm run prepare:cap-assets
+npx cap sync android
+npx cap open android
+
+GERAR RELEASE ASSINADA
+No Android Studio:
+Build > Generate Signed Bundle / APK > APK > Next
+
+Use a mesma chave .jks da versão anterior. O projeto não contém chave ou senha.
+A versão esperada é versionName 1.0.40 e versionCode 40.
+
+INSTALAR PELO ADB
+Primeiro conecte o celular, desbloqueie a tela, ative Depuração USB e aceite a
+mensagem "Permitir depuração USB" no próprio aparelho. Depois execute:
+
+"%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe" kill-server
+"%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe" start-server
+"%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe" devices
+
+Só continue se a última linha mostrar o número de série seguido de device.
+Substitua o caminho abaixo pelo caminho REAL do APK gerado:
+
+"%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe" install -r "C:\CAMINHO-REAL\app-release.apk"
+
+Se devices continuar vazio, não adianta repetir install -r. Transfira o APK para
+o celular, abra-o no gerenciador de arquivos e autorize "Instalar apps desconhecidos".
+
+ATENÇÃO AO APP ANTERIOR
+- install -r mantém os dados, mas só funciona se o APK novo tiver o mesmo
+  applicationId e a mesma assinatura.
+- Desinstalar a versão anterior apaga os dados locais e as permissões. Depois é
+  necessário autorizar novamente sobreposição, uso, acessibilidade/toque preciso
+  e captura de tela.

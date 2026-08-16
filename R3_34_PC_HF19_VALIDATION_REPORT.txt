@@ -1,0 +1,105 @@
+NVU R3.34-PC-HF19 — AUDITORIA VISUAL/OVERLAY E RELATÓRIO DE VALIDAÇÃO
+Android 1.0.71 / versionCode 71
+Base: R3.34-PC-HF18
+Data: 2026-08-16
+
+ESCOPO
+HF19 mantém a lógica funcional HF18 e corrige inconsistências confirmadas na camada de overlay/card/mensagens sem alterar Web, Netlify ou Firebase Functions.
+
+INCONSISTÊNCIAS CONFIRMADAS NA HF18 E CORRIGIDAS
+1. Card usava altura estimada fixa (~220dp) para limitar Y; um card real maior podia ultrapassar a área útil.
+   CORREÇÃO: altura real é medida após layout; card é reposicionado com base na altura medida e safe insets.
+
+2. Card longo não tinha limite/scroll estruturado.
+   CORREÇÃO: conteúdo passou a usar ScrollView; altura máxima = 80% da área útil disponível.
+
+3. Proteção da tela de resultado podia reduzir largura do card para ~168dp enquanto filhos ainda esperavam larguras maiores.
+   CORREÇÃO: card mantém 256dp. Proteção move o card inteiro quando houver coluna lateral suficiente; se não houver, mantém o card e sua região conhecida continua excluída da evidência do resultado.
+
+4. Título e resumo possuíam larguras internas fixas (232dp/202dp).
+   CORREÇÃO: filhos usam MATCH_PARENT dentro da largura estável do card.
+
+5. refreshMenuContents removia/recriava todo o formulário manual.
+   CORREÇÃO: texto digitado é mantido em draft local; enquanto o mesmo EditText estiver focado, refresh de OCR/estado não destrói o formulário.
+
+6. Inconsistência silenciosa descoberta na HF19: card aberto antes de REVIEW_REQUIRED podia continuar FLAG_NOT_FOCUSABLE e exibir um EditText não editável.
+   CORREÇÃO: flags/foco/softInput do WindowManager agora acompanham dinamicamente o estado de revisão.
+
+7. Teclado/notch/barras não faziam parte do limite vertical efetivo.
+   CORREÇÃO: safeTop considera status bar/display cutout; safeBottom considera navigation bar/display cutout/IME.
+
+8. Mensagem de etapa podia ser considerada "mostrada" no instante do addView e ser substituída cedo demais.
+   CORREÇÃO: mensagem de etapa tem exposição mínima de 1400ms; ACK só ocorre depois desse período e somente se a mesma view/etapa continuar visível.
+
+9. Mensagens superiores usavam Y fixo de 10dp.
+   CORREÇÃO: continuam centralizadas horizontalmente, agora no topo seguro abaixo de status/cutout.
+
+10. Card repetia instruções em journeyGuide + status/helper.
+    CORREÇÃO: o card mantém estado persistente e ação; mensagens de transição ficam no banner superior. currentJourneyGuide não repete instruções nos estados operacionais.
+
+11. Guard de ACTION_OUTSIDE bloqueava reabertura intencional por ~540ms.
+    CORREÇÃO: proteção contra o mesmo gesto foi reduzida a 140ms; suficiente para impedir fechar+reabrir pelo mesmo toque, sem janela morta longa.
+
+12. Saída real para outro aplicativo preservava card sobre o app externo.
+    CORREÇÃO: notificações/SystemUI continuam preservando o card. Um app terceiro confirmado por UsageStats + evento real de GTO em background por >=1050ms minimiza apenas o card; bolha, MediaProjection e estado permanecem.
+
+13. Inconsistência de release descoberta: workflow do APK assinado ainda estava travado em HF16 / versionCode 68.
+    CORREÇÃO: .github/workflows/build-android-release.yml alinhado para HF19 / versionCode 71 / versionName 1.0.71 e nomes de artefato HF19.
+
+ARQUIVOS FUNCIONAIS PRINCIPAIS ALTERADOS
+- android/app/src/main/java/com/nvu/operacional/GtoObserverService.java
+- android/app/src/main/java/com/nvu/operacional/GtoOverlayLayoutPolicy.java
+- android/app/build.gradle
+- .github/workflows/build-android-release.yml
+- scripts/test-gto-r3-34-hf19-overlay-visual.mjs (novo)
+- scripts/java-tests/com/nvu/operacional/GtoR334Hf19OverlayVisualPolicyTest.java (novo)
+- package.json (inclui regressão HF19 no verify:release)
+- regressões HF15/HF17/HF18 atualizadas somente para validar a implementação equivalente/evoluída.
+
+VALIDAÇÃO
+- HF19 overlay/visual: 24/24 PASS.
+- HF18 freight evidence: 16/16 PASS.
+- HF17 overlay dismiss: 12/12 PASS.
+- HF16 simple flow/cancelamento: 12/12 PASS.
+- HF15 overlay/stage: 13/13 PASS.
+- check-android-java-syntax: PASS (28 fontes).
+- A cadeia verify:release foi executada até HF19 e todos os blocos observados ficaram verdes; o executor encerrou a chamada monolítica por limite de tempo após os checks HF19. Os blocos finais HF18/HF19 foram executados novamente separadamente e passaram integralmente.
+- Regressões anteriores (seleção, captura, integridade, resultado, ACK, cancelamento/reseleção) chegaram verdes na mesma cadeia antes do limite do executor.
+
+ESCOPO PRESERVADO POR COMPARAÇÃO COM HF18
+Sem mudanças em:
+- src/
+- public/
+- app/
+- functions/
+- capacitor.config.ts
+- vite.config.ts
+- server.ts
+- package-lock.json
+Portanto não há novo deploy Web/Netlify/Functions por causa da HF19.
+
+COMPILAÇÃO ANDROID REAL NESTE AMBIENTE
+NÃO VALIDADA.
+Comando tentado:
+  ./gradlew :app:compileDebugJavaWithJavac --no-daemon
+O Gradle Wrapper não chegou ao Javac porque o ambiente não consegue resolver:
+  services.gradle.org
+Erro:
+  java.net.UnknownHostException: services.gradle.org
+O PREPARAR-ANDROID-WINDOWS.bat mantém :app:compileDebugJavaWithJavac como gate obrigatório antes do APK.
+
+TESTE FÍSICO CRÍTICO
+1. Bolha em baixo -> abrir card -> card fica inteiro dentro da área útil e bolha vai para o lado se estiver coberta.
+2. Review longo -> scroll funcional, largura estável, nenhum botão cortado.
+3. Digitar origem + OCR/refresh -> texto e foco permanecem.
+4. Estado muda para review com card já aberto -> campo aceita digitação sem fechar/reabrir.
+5. Teclado aberto -> card não fica atrás do teclado.
+6. Mensagem "Frete identificado. Tudo preparado, podemos partir!" central no topo seguro e legível por >=1,4s.
+7. Notificação -> card/estado preservados.
+8. WhatsApp/outro app -> card minimiza após saída real, bolha/viagem permanecem; retorno ao GTO mantém estado.
+9. Resultado com card aberto -> card nunca é reduzido para largura ilegível e nunca fecha por detector.
+10. Toque fora -> minimiza; toque intencional rápido posterior -> reabre.
+11. Fluxo completo e cancelamento/reseleção da HF18 continuam válidos.
+
+RISCO RESTANTE
+- Compilação Gradle/Javac real e validação física de WindowManager/IME em OEMs diferentes continuam sendo o gate final.

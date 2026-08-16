@@ -1,0 +1,18 @@
+NVU R3.25 HF1 - CORRECAO DA CERTIFICACAO NO WINDOWS
+Data: 2026-08-13
+
+Problema corrigido:
+- scripts/test-gto-r3-25-detection-flow.mjs executava "tsc" diretamente.
+- Em Windows, o npm run da raiz nao inclui functions\\node_modules\\.bin no PATH.
+- Resultado: spawnSync tsc ENOENT mesmo com TypeScript instalado dentro de functions.
+
+Correcao:
+- O teste agora resolve functions/node_modules/typescript/bin/tsc.
+- O compilador e executado explicitamente com process.execPath (Node), sem depender de tsc global ou PATH.
+- Se as dependencias de Functions nao estiverem instaladas, o teste informa explicitamente:
+  npm --prefix functions ci
+
+Validacao do hotfix:
+- R3.25 detection-flow: 16/16 PASS com compilador TypeScript local simulado no mesmo caminho usado no Windows.
+- Nenhuma logica de runtime do APK, detector, selecao, OCR, sincronizacao ou Firebase foi alterada neste hotfix.
+- Android continua R3.25 / versionName 1.0.42 / versionCode 42.

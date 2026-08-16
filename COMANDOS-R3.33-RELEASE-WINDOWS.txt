@@ -1,0 +1,33 @@
+NVU R3.33 — RELEASE ANDROID
+============================
+
+Versoes:
+- R3.33
+- Android 1.0.50 / versionCode 50
+- Web 2.3.9 (inalterado)
+- Firebase Functions (inalteradas nesta revisao)
+
+1) Preparar e certificar:
+   PREPARAR-ANDROID-WINDOWS.bat
+
+2) Esta revisao e nativa Android.
+   Nao republique Netlify/Firebase apenas por causa da R3.33.
+
+3) Gerar variante release:
+   cd android
+   gradlew.bat clean assembleRelease
+
+   Sem configuracao de assinatura no projeto, o Gradle gera um APK release nao assinado.
+
+4) Para a RELEASE DE PRODUCAO/ATUALIZACAO, use a MESMA keystore oficial da versao instalada:
+   - execute: npx cap open android
+   - Android Studio > Build > Generate Signed Bundle / APK
+   - APK > Next
+   - selecione a keystore oficial existente
+   - escolha build variant: release
+   - gere o APK assinado
+
+IMPORTANTE:
+- Nao crie uma keystore nova se pretende atualizar o mesmo applicationId com dados preservados.
+- Nunca inclua .jks, senhas ou credenciais dentro deste ZIP.
+- O APK debug e apenas para diagnostico; para producao use release assinada.

@@ -1,0 +1,18 @@
+R3.8 — TESTE DO PRE-FILTRO VISUAL COM SCREENSHOT REAL DO GTO
+=============================================================
+Fonte: tela "Concluído" fornecida pelo usuário (1000211153.png).
+Critérios do GtoResultVisualGate: dark >= 0.42, neutral >= 0.36, gold >= 0.14.
+O teste redimensiona a mesma captura real para verificar invariância geométrica do pre-filtro.
+
+1280x720 : dark=0.8796 neutral=0.4833 gold=0.5167 => PASS
+1600x720 : dark=0.8889 neutral=0.4667 gold=0.5000 => PASS
+1920x1080: dark=0.8704 neutral=0.4667 gold=0.5167 => PASS
+2160x1080: dark=0.8796 neutral=0.4833 gold=0.5167 => PASS
+2340x1080: dark=0.8704 neutral=0.4667 gold=0.5167 => PASS
+2400x1080: dark=0.8796 neutral=0.4833 gold=0.5167 => PASS
+2712x1220: dark=0.8796 neutral=0.4667 gold=0.5167 => PASS
+3200x1440: dark=0.8796 neutral=0.5000 gold=0.5167 => PASS
+1440x720 : dark=0.8796 neutral=0.4667 gold=0.5167 => PASS
+
+Resultado: 9/9 escalas aprovadas.
+Observação: este teste valida o pre-filtro visual sobre a tela real fornecida; não substitui testes físicos em aparelhos com UI do jogo reformatada pelo próprio GTO.

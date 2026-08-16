@@ -1,0 +1,107 @@
+NVU R3.34-PC-HF10 — RELATÓRIO DE CAUSA RAIZ E VALIDAÇÃO
+Data: 2026-08-15
+Base: R3.34 aprovada
+Android: versionName 1.0.62 / versionCode 62
+
+1. SINTOMA REPRODUZIDO
+- Usuário toca em Autorizar leitura da tela.
+- Android exibe Compartilhar a tela com o app NVU.
+- Usuário aceita.
+- Ao voltar ao GTO, o observador podia permanecer em "Autorização em andamento" ou registrar que a leitura foi encerrada pelo Android.
+- Em seguida, o menu voltava a oferecer nova autorização e a detecção não recebia uma sessão funcional.
+
+2. CAUSA RAIZ NO FLUXO HF9
+Foram encontradas duas janelas combinadas no pós-consentimento:
+
+A) Dependência de instância estática do serviço
+O RESULT_OK era consumido diretamente por acceptProjectionGrantIfRunning(). Isso pressupunha que o GtoObserverService e sua instância static permanecessem vivos durante todo o diálogo do sistema. Em um jogo pesado/OEM agressivo, o processo/serviço pode ser recriado enquanto o Android mantém a Activity de consentimento e ainda devolve um RESULT_OK válido.
+
+B) MediaProjection vinculada sem iniciar imediatamente a sessão real
+Mesmo quando getMediaProjection() funcionava, a HF9 deixava projectionSurfacePending=true e aguardava um ciclo posterior de UsageStats/foreground/estabilidade do GTO para só então executar createVirtualDisplay().
+Isso mantinha um grant real sem uma VirtualDisplay ativa durante a transição de volta ao jogo. O sintoma observado STOPPED_BEFORE_SURFACE/STOPPED_EARLY é compatível com a sessão sendo encerrada antes de a captura estar efetivamente estabelecida.
+
+3. CORREÇÃO HF10
+O fluxo agora segue a ordem do Android sem depender da vida da instância anterior:
+
+RESULT_OK
+-> ACTION_START_PROJECTION
+-> iniciar/recriar GtoObserverService se necessário
+-> promover foreground service para mediaProjection
+-> getMediaProjection()
+-> registerCallback()
+-> criar a única VirtualDisplay IMEDIATAMENTE
+-> ImageReader ativo
+-> primeiro frame recebido
+-> somente depois liberar análise conforme GTO/geomentria/frames estáveis.
+
+A Activity transparente permanece landscape e visualmente sobre o GTO apenas durante essa inicialização. A VirtualDisplay usa primeiro a geometria horizontal validada pelo host de consentimento, com fallback para maximumWindowMetrics. A análise não trata a Activity de consentimento como GTO; frames só entram no detector quando o foreground do GTO é válido.
+
+4. VALIDAÇÃO REAL DA AUTORIZAÇÃO
+A aplicação não considera mais "usuário tocou Compartilhar tela" como prova suficiente.
+São registradas etapas distintas:
+- consentimento recebido
+- foreground service mediaProjection
+- token MediaProjection obtido
+- callback registrado
+- VirtualDisplay criada
+- primeiro frame recebido
+- captura estabilizada para análise
+
+projectionFirstFrameAt é a prova de entrega real de pixels. Ao primeiro frame, projectionGrantValidated permanece verdadeiro, a reautorização é limpa e o status passa a ACTIVE_FRAMES_VALIDATED.
+
+5. REAUTORIZAÇÃO
+Enquanto a sessão estiver ativa/validada, o botão Autorizar não é reapresentado.
+Nova autorização é permitida somente após falha terminal real, recusa ou MediaProjection.Callback.onStop().
+
+O Android pode legitimamente executar onStop() se:
+- o usuário parar a projeção pela UI do sistema;
+- a tela for bloqueada;
+- outra sessão MediaProjection/gravador/espelhamento for iniciada;
+- o processo do aplicativo for morto.
+Essas causas são externas à lógica NVU e não podem ser anuladas por um app comum.
+
+6. BOTÃO FLUTUANTE
+A bolha continua sendo criada antes da autorização e permanece separada do estado da MediaProjection.
+Reiniciar Modo automático rearma/recria a bolha sem apagar a viagem.
+O botão independente "Reativar" continua removido.
+
+7. DETECÇÃO E VIAGEM
+Suítes críticas executadas:
+- Java Syntax: 18 fontes PASS
+- GTO native/detecção de telas: 49/49 PASS
+- Auto Sync/Firebase: 74/74 PASS
+- End-to-end: 35/35 PASS
+- Integridade frete/resultado: 16/16 PASS
+- Fluxo prático/seleção: 17/17 PASS
+- R3.33 resultado/Receber/ACK: 19/19 PASS
+- Integridade monetária: 10/10 PASS
+- Hotfix origem/destino/bolha: 24/24 PASS
+- HF10 MediaProjection: 33/33 PASS
+
+Também foi executado npm run verify:release completo com resultado final PASS.
+
+8. ITENS DO FLUXO COBERTOS
+PASS autorização/MediaProjection
+PASS bolha antes do consentimento
+PASS captura criada imediatamente após RESULT_OK
+PASS primeiro frame como prova funcional
+PASS detecção de telas
+PASS detecção da lista de fretes
+PASS seleção exata da linha
+PASS snapshot imutável do frete
+PASS tela de resultado
+PASS Receber durável
+PASS payload selado
+PASS fila local durável
+PASS registerGtoTrip
+PASS ACK antes de remover fila
+
+9. COMPILAÇÃO ANDROID REAL
+O pacote mantém PREPARAR-ANDROID-WINDOWS.bat como gate obrigatório. No PC ele executa o build Web, cap sync e :app:compileDebugJavaWithJavac com JDK 21 antes de liberar a preparação.
+
+Este ambiente não possui Android SDK/Gradle completo para substituir a compilação Gradle real do PC. Portanto, a certificação aqui cobre código, invariantes, regressões e testes automatizados; o APK físico deve passar pelo gate do Windows e pelo teste no aparelho.
+
+10. DEPLOY
+src HF9 -> HF10: idêntico.
+functions HF9 -> HF10: idêntico.
+Logo HF10 é Android nativo em relação à HF9. Netlify/Functions não precisam ser republicados se a camada HF2+ já estiver em produção.

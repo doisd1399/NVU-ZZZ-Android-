@@ -1,0 +1,62 @@
+NVU R3.34-PC-HF18 — PROCESSO PELO PC
+Android: 1.0.70 / versionCode 70
+
+OBJETIVO HF18
+- Preservar MediaProjection, overlay HF17, seleção determinística, fila durável, ACK e Firestore.
+- Corrigir origem com leitura da ROI completa da linha selecionada, inclusive OCR quebrado em múltiplas linhas.
+- Validar cada campo de frete de forma independente, sem consenso global nem votos artificiais.
+- Tratar destinationCompany como metadado opcional, sem bloquear revisão/envio.
+- Manter toque em N como candidato até transição compatível: N ou NONE, nunca M.
+- Limpar integralmente revisão/identidade entre viagens e unificar a transição “Tudo preparado, podemos partir!”.
+- Não alterar Netlify/Google AI Studio/Functions.
+
+PREPARAÇÃO RECOMENDADA
+1. Extraia o ZIP em uma pasta curta, por exemplo:
+   C:\NVU\R3.34-PC-HF18
+
+2. Abra CMD nessa pasta e execute:
+   PREPARAR-ANDROID-WINDOWS.bat
+
+O preparador executa:
+- npm ci
+- lint
+- build das Functions somente para validação local
+- npm run verify:release
+- npm run build
+- prepare:cap-assets
+- npx cap sync android
+- verify:cap-assets
+- Gradle :app:compileDebugJavaWithJavac com Java 21
+
+BUILD RELEASE LOCAL (sem assinatura configurada no projeto)
+   cd android
+   gradlew.bat clean assembleRelease --no-daemon
+
+IDENTIDADE ESPERADA
+   applicationId: com.nvu.operacional
+   EXPECTED_VERSION_CODE: "70"
+   EXPECTED_VERSION_NAME: "1.0.70"
+
+ARTEFATO ASSINADO PELO WORKFLOW GITHUB
+   NVU-R3.34-PC-HF18-release.apk
+
+INSTALAÇÃO ADB
+   "%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe" devices
+   "%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe" install -r "C:\CAMINHO\NVU-R3.34-PC-HF18-release.apk"
+
+FIREBASE
+   Se você JÁ publicou registerGtoTrip da HF14, não precisa publicar novamente para a HF18.
+   Se ainda não publicou, use:
+   firebase deploy --only functions:registerGtoTrip --project vtc-frota-log
+
+TESTE FÍSICO CRÍTICO
+- autorizar captura uma vez;
+- testar listas de 1 a 5+ fretes e cada linha;
+- confirmar que toque em N nunca seleciona M;
+- testar notificação antes/durante/depois do toque;
+- sair do GTO, abrir outro app e voltar;
+- testar origem com >, sem > e quebrada em duas linhas OCR;
+- testar campo ilegível/revisão manual sem reselecionar;
+- testar frete A cancelado -> nova lista -> frete B sem resíduos de A;
+- testar resultado, Receber e tentativa duplicada;
+- repetir em aparelho mais lento.

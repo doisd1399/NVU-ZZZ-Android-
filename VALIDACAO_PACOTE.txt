@@ -1,0 +1,14 @@
+NVU - validação do pacote
+Data: 20/07/2026
+
+OK - npm ci
+OK - npm run lint
+OK - npm run build
+OK - npx cap add android
+OK - npx cap sync android
+OK - configuração remota HTTPS testada
+OK - fallback local testado
+
+Observação: o Android SDK não está disponível neste ambiente, portanto não foi
+gerado APK. O projeto Android foi criado e sincronizado corretamente.
+O google-services.json deve ser copiado do projeto Firebase/Android existente.

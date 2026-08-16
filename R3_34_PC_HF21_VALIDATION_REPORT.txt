@@ -1,0 +1,63 @@
+NVU R3.34-PC-HF21 — RELATÓRIO DE AUDITORIA E VALIDAÇÃO
+Android 1.0.73 / versionCode 73
+
+ESCOPO
+Correção sobre HF20 focada na quebra observada após selecionar a 3ª linha da lista de fretes, redução da autoridade do OCR histórico e redução do OCR contínuo durante a viagem.
+
+CAUSA RAIZ CONFIRMADA NO CÓDIGO HF20
+1. O snapshot visual pré-toque já era imutável, porém o OCR específico da linha consultava stableFreightForRow(exactRow) novamente dentro do callback. Se a página ao vivo avançasse enquanto o OCR estava em andamento, esse apoio textual podia pertencer à geração atual e não à geração congelada no toque.
+2. mergeVerifiedPreciseWithStable() começava pelo objeto estabilizado da página. Uma leitura válida da linha selecionada só substituía o histórico em condições limitadas; portanto texto estabilizado podia manter autoridade excessiva sobre a linha realmente tocada.
+3. Em falha/timeout do OCR preciso existiam caminhos que podiam auto-confirmar um stableFreightForRow() em vez de manter apenas a identidade da linha e pedir revisão.
+4. Durante TRIP_IN_PROGRESS o fallback OCR semântico era executado aproximadamente a cada 700 ms. Isso não causava a mistura de fretes, mas era trabalho desnecessário contínuo em aparelhos fracos.
+
+OBSERVAÇÃO DE AUDITORIA
+A HF20 atual contém freightHistory.add(frameCopy) apenas uma vez por leitura. A correção HF21 não se baseia em uma suposta duplicação desse add. O problema real corrigido é precedência/geração do dado textual após o toque.
+
+CORREÇÕES HF21
+- FreightSelectionTransaction agora congela também baselineOption no momento do toque, junto de bitmap, botões e pageGeneration.
+- Todo apoio textual no OCR preciso usa frozenSelectedPageBaseline, nunca a página ao vivo posterior.
+- mergeVerifiedPreciseWithStable() agora começa pela leitura exata da linha selecionada.
+- Histórico congelado somente completa um campo sem evidência válida da linha selecionada. Ele nunca sobrescreve campo literal válido da linha.
+- Falha ou timeout do OCR preciso não auto-confirma histórico; entra em revisão preservando rowId.
+- Resultado continua baseado somente em Concluído + valor. Nenhum gate de cor/pixel voltou para o caminho de decisão.
+- Fallback OCR em viagem alterado de 700 ms para 1800 ms, mantendo acquireLatestImage() para não analisar o passado.
+
+REGRESSÃO ESPECÍFICA HF21
+13/13 PASS.
+Inclui cenário reproduzindo a captura: linha 3 = CARGA TIJOLO / Fábrica de Tijolo / Área Rural / 600Km / R$ 11600; um histórico incompatível Cerâmicas / Cruz do Oeste / R$ 5300 não pode reescrever esses campos.
+
+REGRESSÕES IMPORTANTES
+- validate:gto-native: 49/49 PASS
+- R3.23 data-integrity: 16/16 PASS
+- R3.30 selected-freight: 17/17 PASS
+- R3.31 continuity: 14/14 PASS
+- R3.32 card/continuity: 11/11 PASS
+- R3.33 audit-flow: 19/19 PASS
+- R3.34 money-integrity: 10/10 PASS
+- R3.34 PC hotfix: 24/24 PASS
+- HF10 projection/runtime: 33/33 PASS
+- HF12 intelligent-flow: 20/20 PASS
+- HF13 capture/origin: 16/16 PASS
+- HF14 review/overlay: 14/14 PASS
+- HF15 overlay/stage: 13/13 PASS
+- HF16 simple-flow: 12/12 PASS
+- HF17 overlay: 12/12 PASS
+- HF18 freight evidence: 16/16 PASS
+- HF19 visual: 24/24 PASS
+- HF20 overlay anchor: 19/19 PASS
+- HF21 selected-row authority: 13/13 PASS
+- Java syntax: 28 fontes PASS
+
+A cadeia verify:release monolítica excede o limite de tempo do executor, mas seus blocos foram executados em segmentos equivalentes após as correções e ficaram verdes.
+
+COMPILAÇÃO ANDROID REAL
+NÃO VALIDADA neste ambiente. O comando:
+  ./gradlew :app:compileDebugJavaWithJavac --no-daemon
+parou antes do Javac porque o wrapper tentou baixar gradle-8.14.3-all.zip e o ambiente retornou java.net.UnknownHostException: services.gradle.org.
+O PREPARAR-ANDROID-WINDOWS.bat mantém essa compilação como gate obrigatório.
+
+ESCOPO DE ARQUIVOS
+Alteração funcional: Android nativo GtoObserverService.java.
+Metadados/release: build.gradle, workflow, PREPARAR.
+Testes: regressões atualizadas para refletir a regra mais forte de autoridade da linha selecionada e novo teste HF21.
+Web/Netlify/Firebase Functions não foram alterados funcionalmente.

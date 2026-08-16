@@ -1,0 +1,13 @@
+R3.13 GTO MODOS PRINT/AUTOMÁTICO — AUDITORIA DE COMPATIBILIDADE
+
+- src compartilhado: 141/141 arquivos idênticos entre Google AI Studio/Netlify e Capacitor
+- functions: 14/14 arquivos idênticos
+- public: 3/3 arquivos idênticos
+- dependencies e devDependencies: idênticas
+- firebase.json, firestore.rules, storage.rules, vite.config.ts e netlify.toml: idênticos
+- validate:gto-auto-web: 47/47
+- audit:gto-r3.13: 20/20
+- test:gto-r3.13-print: 12/12
+- regressão nativa anterior preservada: 47/47 native, 74/74 sync, R3.8 110/110, R3.10 40/40, R3.11 37/37, R3.12 18/18
+- cenários: R3.8 34/34; stress 14.279 viagens; R3.11 races sem cross-session; R3.12 compact 59/59
+- arquivos TS/TSX alterados passaram no parser/transpilador TypeScript isolado.

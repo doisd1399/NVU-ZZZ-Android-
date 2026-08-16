@@ -1,0 +1,51 @@
+NVU R3.34-PC-HF20 — PROCESSO PELO PC
+Android: 1.0.72 / versionCode 72
+
+OBJETIVO HF20
+- Card NVU ancorado visualmente à bolha.
+- Card abre à esquerda/direita conforme espaço útil; se necessário a bolha é deslocada apenas o mínimo.
+- Ao minimizar, a bolha volta à posição escolhida pelo motorista.
+- Movimentos automáticos não sobrescrevem a posição salva pelo usuário.
+- Bolha e arraste respeitam status bar, notch, navigation bar e área segura.
+- Toque fora minimiza somente o card.
+- OCR de resultado continua ativo mesmo com o card aberto.
+- Lista de fretes continua prioritária; se não houver área segura para o card sem cobrir Aceitar, somente o card é minimizado.
+
+PREPARAÇÃO RECOMENDADA
+1. Extraia o ZIP em um caminho simples, por exemplo:
+   C:\NVU\R3.34-PC-HF20
+
+2. Abra o CMD nessa pasta e execute:
+   PREPARAR-ANDROID-WINDOWS.bat
+
+O preparador executa npm ci, testes, build web, sync Capacitor e:
+   android\gradlew.bat :app:compileDebugJavaWithJavac --no-daemon
+
+Se a compilação Java real falhar, NÃO publique o APK.
+
+APK DEBUG PARA TESTE FÍSICO
+Depois do preparador passar:
+   cd android
+   gradlew.bat assembleDebug --no-daemon
+
+APK esperado:
+   android\app\build\outputs\apk\debug\app-debug.apk
+
+RELEASE ASSINADA
+O workflow .github\workflows\build-android-release.yml está alinhado para:
+   versionCode: 72
+   versionName: 1.0.72
+   artefato: NVU-R3.34-PC-HF20-release.apk
+
+TESTE FÍSICO PRIORITÁRIO
+1. Arraste a bolha para esquerda, direita, centro, topo e rodapé.
+2. Abra o card em cada posição: deve ficar ao lado da bolha, no lado mais adequado.
+3. Se o sistema deslocar a bolha para encaixar o card, minimize: a bolha deve voltar à posição do motorista.
+4. Toque fora do card: deve minimizar somente o card.
+5. Toque novamente na bolha: deve reabrir sem piscar.
+6. Arraste a bolha com card aberto: card minimiza e o novo local do arraste passa a ser a preferência.
+7. Durante viagem, mantenha card aberto até aparecer Concluído: resultado deve ser detectado normalmente.
+8. Na lista real de fretes, card/bolha não podem cobrir permanentemente Aceitar.
+9. Repita em aparelho com notch/barra gestual e com teclado aberto em revisão de origem.
+
+HF20 não altera Web, Netlify ou Firebase Functions.

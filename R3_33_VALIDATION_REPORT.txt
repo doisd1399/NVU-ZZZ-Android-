@@ -1,0 +1,49 @@
+NVU R3.33 — VALIDATION REPORT
+==============================
+Date: 2026-08-14
+Android: 1.0.50 / versionCode 50
+Web: 2.3.9 (unchanged)
+Firebase Functions: unchanged by R3.33
+
+STRUCTURAL AUDIT / CHANGES
+- Durable locked-freight snapshot can repair a stale WAITING_FREIGHT runtime only for the same session.
+- Real result routing is restored before frame classification when durable freight proves an active trip.
+- Expanded NVU overlay is closed before semantic result OCR so it cannot cover the GTO result text.
+- Result visual gate rejects normal gameplay/overlay while preserving the real result fixture.
+- Floating menu uses compact Operacao summary with real operation/vehicle/trailer data.
+- Redundant Viagem em andamento line, Trocar frete atual and normal Confirmar conclusao da entrega were removed.
+- Result message: Toque em Receber para concluir a viagem.
+- Receive message: Enviando viagem automaticamente...
+- Success message occurs only on real backend ACK: Viagem enviada com sucesso!
+- Pending network/backend detail is preserved diagnostically without exposing raw technical errors as the main driver message.
+- Previous-session ACK is isolated from the active session.
+- Minimize/temporary exit preserves state and re-arms visual/touch context on return.
+- Strict freight card signature from R3.32 remains enabled.
+
+FULL RELEASE CERTIFICATION
+Command: npm run verify:release
+Exit code: 0
+PASS/OK assertions: 643
+FAIL assertions: 0
+JavaSyntaxCheck: PASS (16 sources)
+R3.33 specific: 19/19
+Native flow: 49/49
+Auto sync/Firebase contract: 74/74
+R3.26 deterministic: 21/21
+R3.27 runtime: 31/31
+R3.28 practical: 17/17
+R3.29 strict screen: 15/15
+R3.30 selected freight: 17/17
+R3.31 continuity: 14/14
+R3.32 card continuity: 11/11
+
+REAL-SCREEN REGRESSION FIXTURES
+- scripts/fixtures/r333-real-result.png
+- scripts/fixtures/r333-trip-overlay.png
+- scripts/fixtures/r333-result-failure-gameplay.png
+
+BUILD NOTE
+This Linux validation environment has Java 21 but no local Android SDK/Gradle distribution cache, so a full Android Gradle build could not be executed here without downloading Gradle. PREPARAR-ANDROID-WINDOWS.bat remains the release gate on the developer Windows machine and performs a real :app:compileDebugJavaWithJavac build with JDK 21 before reporting success.
+
+PRODUCTION SIGNING
+R3.33 is a source/release package. A production APK must be signed with the same official keystore used by the existing installed production app. No .jks or passwords are included in this ZIP.

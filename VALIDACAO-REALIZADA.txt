@@ -1,0 +1,33 @@
+NVU - VALIDACAO DO PACOTE CORRIGIDO
+
+APROVADO:
+- package-lock.json sem URLs internas da OpenAI;
+- .npmrc apontando para https://registry.npmjs.org/;
+- npm ci: 936 pacotes instalados com sucesso;
+- TypeScript: npm run lint aprovado;
+- Vite/Esbuild: npm run build aprovado;
+- Capacitor Android: npx cap sync android aprovado;
+- plugins detectados:
+  @capacitor-firebase/authentication 8.3.0
+  @capacitor/app 8.1.0
+  @capacitor/push-notifications 8.1.2
+- google-services.json válido e compatível com com.nvu.operacional;
+- URL remota configurada para https://stirring-pavlova-ca6808.netlify.app;
+- comandos de limpeza compatíveis com Windows;
+- scripts automáticos de preparação e geração de APK adicionados.
+
+OBSERVACAO:
+A compilacao Gradle final nao foi concluida no ambiente de validacao porque esse
+ambiente bloqueou a resolucao de services.gradle.org. O projeto inclui o Gradle
+Wrapper oficial e um script Windows que baixa as dependencias e gera o APK na
+maquina do usuario.
+
+R3.1 / Android 1.0.20
+- Fluxo normal: removido "Verificar finalização agora".
+- Mensagem de rota: "Ao chegar ao destino, a NVU identificará a conclusão e registrará a viagem automaticamente."
+- Fallback: "Confirmar conclusão da entrega" somente após falha repetida de confirmação automática com evidência visual de resultado.
+- validate-gto-native-flow: 47/47
+- validate-gto-auto-sync: 74/74
+- audit-gto-fix18: 26/26
+- audit-gto-r2-lifecycle: 25/25
+- audit-gto-r3-guided-auto-flow: 25/25

@@ -1,0 +1,48 @@
+NVU R3.26 — ORDEM CORRETA DE PREPARAÇÃO E PUBLICAÇÃO
+====================================================
+
+VERSÕES
+R3.26 / Web 2.3.7 / Android 1.0.43 / versionCode 43
+
+1) EXTRAIA O ZIP E ABRA O CMD NA RAIZ DO PROJETO
+
+2) PREPARE E CERTIFIQUE
+PREPARAR-ANDROID-WINDOWS.bat
+
+Só continue se aparecer:
+[OK] PROJETO PREPARADO COM SUCESSO
+
+3) PUBLIQUE AS FIREBASE FUNCTIONS
+npx firebase login
+npx firebase deploy --only functions --project vtc-frota-log
+
+Só continue se o deploy terminar sem erro.
+
+4) PUBLIQUE O WEB R3.26 NO NETLIFY — OBRIGATÓRIO NESTA RELEASE
+npx netlify-cli deploy --prod --dir=dist
+
+A pasta deve estar vinculada ao projeto existente:
+stirring-pavlova-ca6808.netlify.app
+
+5) GERE O APK
+GERAR-APK-DEBUG-WINDOWS.bat
+
+Saída esperada:
+android\app\build\outputs\apk\debug\app-debug.apk
+
+O gerador verifica Java 21, Android SDK e a paridade dos assets R3.26 antes do Gradle.
+
+6) INSTALE VIA USB
+"%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe" devices
+"%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe" install -r android\app\build\outputs\apk\debug\app-debug.apk
+
+Se aparecer INSTALL_FAILED_UPDATE_INCOMPATIBLE, a assinatura instalada é diferente.
+Se puder apagar os dados locais do APK anterior:
+"%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe" uninstall com.nvu.operacional
+"%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe" install android\app\build\outputs\apk\debug\app-debug.apk
+
+ATENÇÃO: adb uninstall remove os dados locais do aplicativo instalado. Não execute se
+precisar preservar dados locais pendentes; nesse caso use a mesma keystore da versão antiga.
+
+ORDEM FINAL
+PREPARAR -> FIREBASE FUNCTIONS -> NETLIFY DIST -> GERAR APK -> INSTALAR -> TESTE FÍSICO

@@ -1,0 +1,23 @@
+NVU R3.34-PC-HF23 — Android 1.0.75 / versionCode 75
+
+1) Extraia o ZIP em uma pasta curta, por exemplo C:\NVU\HF23
+2) Abra o CMD nessa pasta.
+3) Execute:
+
+PREPARAR-ANDROID-WINDOWS.bat
+
+O preparador deve executar o gate Java/Gradle real antes do APK.
+Se preferir validar manualmente:
+
+npm run verify:release
+cd android
+gradlew.bat :app:compileDebugJavaWithJavac
+gradlew.bat assembleDebug
+
+APK debug esperado:
+android\app\build\outputs\apk\debug\app-debug.apk
+
+Para release assinado, use o workflow .github/workflows/build-android-release.yml
+com os secrets de assinatura já configurados.
+
+Identidade esperada: com.nvu.operacional / 1.0.75 / versionCode 75.

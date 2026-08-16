@@ -1,0 +1,72 @@
+NVU GTO R3.11 / v1.0.31 — AUDITORIA DE ESTABILIZAÇÃO
+Data: 2026-08-12
+Base auditada: R3.10 v1.0.30 FULL-FLOW-STRESS-HARDENED
+
+CORREÇÕES NOVAS ENCONTRADAS NA AUDITORIA
+1. Corrida assíncrona entre sessões:
+   callbacks tardios do ML Kit poderiam terminar depois de reset/nova sessão e atualizar
+   dados da viagem seguinte. R3.11 vincula OCR geral e OCR preciso a sessionId + geração.
+2. Geração de OCR de página reutilizável:
+   o reset voltava freightPageGeneration a zero; um callback antigo poderia coincidir com
+   a geração da nova sessão. R3.11 mantém a geração monotônica e limpa caches persistidos.
+3. Pressão em celulares fracos:
+   heartbeat, foreground e diagnóstico de lista eram persistidos com frequência excessiva.
+   A detecção continua em tempo real na memória, mas gravações diagnósticas são limitadas.
+4. OCR textual de fundo:
+   reduzido de atualização aproximada a cada 900 ms para 1800 ms em página estável;
+   nova página/primeira leitura continuam imediatas e o OCR exato da linha selecionada
+   continua independente.
+5. Concorrência do OCR preciso:
+   espera ganhou limite de 3,5 s e fallback fail-closed; não há retry infinito a cada 45 ms.
+6. ACK Firebase / falha de armazenamento local:
+   o ACK da sessão atual agora é persistido localmente antes de apagar fila/snapshot.
+   Se o ACK local falhar, fila e snapshot ficam preservados para retry idempotente.
+   Se somente a limpeza da fila falhar, a viagem permanece SYNCED e a limpeza é repetida.
+
+SUÍTES REEXECUTADAS APÓS AS CORREÇÕES
+- validate-gto-native-flow: 47/47
+- validate-gto-auto-sync: 74/74
+- validate-gto-auto-web: 47/47
+- audit-gto-fix18: 26/26
+- R3.3 freight re-arm: 21/21
+- R3.4 device/layout compatibility: 42/42
+- R3.5 result/sync recovery: 34/34
+- R3.6 Receive latch: 32/32
+- R3.7 full stability: 63/63
+- R3.8 release certification: 110/110
+- R3.9 projection/OEM hotfix: 12/12
+- R3.10 aggressive invariants: 40/40
+- R3.11 stabilization invariants: 37/37
+- R3.8 modeled runtime scenarios: 34/34
+- R3.10 stress: 1500 operações / 14279 viagens completas
+- R3.11 session-race/resource-pressure: 0 escrita cruzada entre sessões no modelo;
+  2994 callbacks atrasados exercitados e rejeitados; redução estimada de 92,1% das
+  persistências de hot-path no cenário de 10 min/60 fps usado pelo modelo.
+- Senior navigation: 10/10
+
+STRESS R3.10 REVALIDADO
+- 14.279 viagens completas
+- 2.631 retries seguros de leitura de frete
+- 3.106 recuperações de MediaProjection
+- 2.567 reinícios de processo
+- 4.595 desconexões da bolha
+- 21.346 retries de rede/watchdog
+- 1.397 fallbacks do sensor de resultado
+- 12.779 transições consecutivas para nova viagem após ACK
+- 14.279 sessionIds únicos
+- nenhuma viagem duplicada, perdida, mutada ou cruzada no modelo
+
+EMPACOTAMENTO
+- sem node_modules
+- sem dist
+- sem diretórios de build/.gradle
+- estrutura de raiz preservada
+
+LIMITAÇÃO DE VALIDAÇÃO
+A suíte valida código, invariantes, estados e modelos de corrida/stress. O ambiente de
+container não conseguiu executar o Gradle Android porque o wrapper precisa baixar a
+distribuição e o ambiente não tem acesso DNS externo. A base R3.10 já havia sido preparada
+para build local; as alterações R3.11 são nativas e foram verificadas também por análise
+léxica/estrutural Java. Validação física final em pelo menos um aparelho problemático e um
+aparelho de baixo desempenho continua necessária antes de distribuição ampla, pois OEMs
+podem alterar comportamento de overlay/MediaProjection fora do controle do aplicativo.

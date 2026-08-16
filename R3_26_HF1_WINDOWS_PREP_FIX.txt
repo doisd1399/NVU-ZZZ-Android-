@@ -1,0 +1,16 @@
+R3.26-HF1 - Hotfix de preparacao Windows
+
+Causa corrigida:
+PREPARAR-ANDROID-WINDOWS.bat criava android/local.properties antes de npm run verify:release.
+A auditoria R2 exige que esse arquivo especifico da maquina nao faca parte do pacote,
+portanto a preparacao reprovava 24/25 mesmo em um ZIP corretamente limpo.
+
+Correcao:
+- android/local.properties continua EXCLUIDO do pacote distribuido.
+- verify:release roda antes da criacao do arquivo local.
+- ao final da preparacao, o script cria android/local.properties somente na maquina do usuario,
+  apontando para %LOCALAPPDATA%/Android/Sdk quando o SDK estiver instalado no caminho padrao.
+- Nenhuma logica GTO, Web, Firebase ou Android runtime foi alterada neste hotfix.
+
+Versao do app permanece:
+R3.26 / Web 2.3.7 / Android 1.0.43 / versionCode 43

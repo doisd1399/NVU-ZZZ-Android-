@@ -1,0 +1,125 @@
+NVU R3.34-PC-HF12 — RELATORIO DE AUDITORIA E VALIDACAO
+Data: 2026-08-15
+Base auditada: R3.34-PC-HF11
+Nova identidade Android: versionName 1.0.64 / versionCode 64
+Web: 2.3.9 (sem alteracao funcional nesta HF)
+Escopo funcional: Android nativo / observador GTO
+
+1. VEREDITO
+A HF11 foi evoluida para um observador GTO orientado por estado, contexto, toque, geometria e multiplas evidencias. A selecao do frete deixa de depender de OCR completo ou de um unico sinal visual, o estado confirmado e preservado durante interferencias, e campos ilegíveis passam a ser tratados como revisao pontual em vez de obrigar nova selecao.
+
+A nova fonte HF12 somente foi empacotada depois que todas as regressoes executaveis no sandbox ficaram verdes. A compilacao Gradle real NAO foi declarada como executada neste ambiente porque o wrapper precisa baixar Gradle 8.14.3 e o sandbox nao conseguiu resolver services.gradle.org. O fluxo PREPARAR-ANDROID-WINDOWS.bat e o workflow GitHub continuam bloqueando a release se a compilacao Java/Gradle real falhar.
+
+2. CAUSAS-RAIZ IDENTIFICADAS
+- Selecao e leitura de dados estavam acopladas demais: falha de OCR/reconstrucao podia ser tratada como falha da selecao inteira e levar o fluxo de volta a WAITING_FREIGHT.
+- O detector da lista ainda continha gates visuais por linha suficientemente rigidos para uma linha degradada derrubar a confianca da pagina inteira.
+- A fila de captura podia analisar frame antigo em aparelho lento; ordem do Handler nao e uma garantia de atualidade visual.
+- A tela de resultado dependia excessivamente de semantica textual completa, embora sua estrutura visual e o contexto do estado ja fornecessem evidencias fortes.
+- Retorno de SystemUI/notificacao/app externo preservava o estado, mas precisava de uma barreira explicita de frames limpos antes de voltar a tomar decisoes criticas.
+- A bolha/menu NVU ja evitava parte do painel de fretes, mas nao protegia de forma equivalente a regiao critica de resultado/recebimento.
+- Durante a auditoria foi encontrado um caso de borda em que falha local de integridade com todos os campos legiveis poderia reentrar na confirmacao; corrigido para retry local preservando a selecao.
+
+3. ALTERACOES FUNCIONAIS ANDROID
+- GtoFreightListEvidencePolicy: lista confirmada por evidencia agregada de geometria, repeticao, Aceitar, contexto de card e media visual; uma linha fraca/ocluida nao invalida automaticamente as demais.
+- GtoSelectionIdentityPolicy: com coordenada de toque utilizavel, selectedRow so pode ser a linha tocada ou NONE. Evidencia visual conflitante nunca pode escolher outra linha.
+- Snapshot/transacao pre-toque continua imutavel e e usado como identidade da linha.
+- GtoFreightReviewPolicy: separa FRETE SELECIONADO de CAMPOS COMPLETOS. Campo faltante vira REVIEW_REQUIRED por campo com procedencia OCR ou MANUAL_DRIVER.
+- Destino/origem/carga digitados manualmente sao preservados literalmente; nao ha autocorrecao silenciosa pelo resolvedor de cidades.
+- GtoFrameFreshnessPolicy: frames antigos sao descartados; existe janela maior, porem limitada, apenas para evento critico de toque.
+- GtoResultEvidencePolicy: resultado usa assinatura estrutural + evidencias sem exigir um unico pixel, botao, cor ou rotulo.
+- Resultado continua sendo acompanhado mesmo se um campo do frete estiver em revisao; o resultado fica pendente localmente ate o frete poder ser travado de forma integra.
+- Receber continua idempotente/duravel; toque de recebimento durante revisao e preservado e nao gera duplicacao.
+- Retorno ao GTO em CONFIRMING_FREIGHT agora participa do refresh visual transitório sem apagar a identidade selecionada.
+- Depois de retorno de app/SystemUI/overlay detectado, o GtoCaptureStabilityGate e reiniciado e exige 3 frames estaveis antes de decisoes criticas.
+- Overlay NVU ganha protecao da regiao critica de resultado, alem da protecao ja existente da lista.
+- Cada linha serializada passa a carregar rowId, bounds, acceptRect, fieldConfidence e fieldStatus.
+- Falha local de lock/integridade vira LOCAL_INTEGRITY retryable, sem reset do frete.
+
+4. INVARIANTES COBERTOS
+A. Toque na linha N => selectedRow=N ou NONE, nunca M diferente de N.
+B. Campo ilegivel nao gera informacao inventada.
+C. Notificacao/SystemUI nao apaga selecao confirmada.
+D. Sair do simulador nao reseta a viagem.
+E. Overlay NVU e removido/reposicionado da regiao critica esperada.
+F. Frame antigo e descartado e nao substitui contexto mais novo.
+G. Falha de OCR nao equivale a falha da selecao.
+H. Uma linha fraca nao invalida automaticamente as outras linhas.
+I. Recebimento/sincronizacao continuam protegidos por latch/fila/idempotencia existentes.
+J. Sem evidencia suficiente, o sistema preserva o estado, aguarda ou pede apenas o campo necessario.
+
+5. EVIDENCIAS DE REGRESSAO — TODAS VERDES APOS O BUMP HF12
+Infra/arquitetura:
+- verify:project: PASS
+- verify:cap-remote: PASS
+- Android Google Auth: 8/8
+- JavaSyntaxCheck: PASS (23 fontes)
+- Senior navigation: 10/10
+- validate:gto-native: 49/49
+- validate:gto-auto-sync: 74/74
+
+Historicas:
+- R2: 25/25
+- R3.3: 21/21
+- R3.5: 35/35
+- R3.6: 32/32
+- R3.7: 63/63
+- R3.13: 20/20
+- R3.13 print: 12/12
+- R3.17: 20/20
+- R3.19: 35/35
+- R3.20: 36/36
+- R3.21: 13/13
+- R3.22: 8/8
+- R3.23: 16/16
+- R3.24: 14/14
+- R3.25: 16/16
+- R3.26: 21/21
+- R3.27: 31/31
+- R3.28: 17/17
+- R3.29: 15/15
+- R3.30: 17/17
+- R3.31: 14/14
+- R3.32: 11/11
+- R3.33: 19/19
+- R3.34 money-integrity: 10/10
+- R3.34 PC hotfix: 24/24
+- R3.34 HF10 projection/runtime: 33/33
+
+Nova HF12:
+- test:gto-r3.34-hf12-intelligent-flow: 20/20
+- Teste critico de identidade executado para varias linhas: toque em N + evidencia visual conflitante de M => NONE; nunca M.
+
+6. COMPONENTES PRESERVADOS
+- Arquitetura de autorizacao MediaProjection e grant/runtime estabilizados.
+- Fila duravel, ACK, receive latch e idempotencia existentes.
+- Contrato/estados canonicos do Firestore/Functions.
+- Sincronizacao GTO existente, salvo integracao local necessaria para review/result pending.
+- Nenhuma alteracao funcional em src/, public/, app/, functions/src/, Netlify, Google AI Studio, capacitor.config.ts ou vite.config.ts.
+- package-lock.json permanece identico ao HF11.
+
+7. LIMITACAO DE BUILD DESTE AMBIENTE
+Tentativas de restaurar dependencias/compilar foram bloqueadas por rede/DNS do sandbox:
+- npm ci: EAI_AGAIN ao acessar registry.npmjs.org.
+- Gradle wrapper: java.net.UnknownHostException: services.gradle.org ao tentar baixar gradle-8.14.3-all.zip.
+
+Consequencia: NAO ha afirmacao de que um APK foi compilado neste sandbox. O pacote HF12 e uma fonte candidata validada pelas regressoes. Antes de instalar em aparelho, executar PREPARAR-ANDROID-WINDOWS.bat ou o workflow GitHub. Ambos mantem gate de compilacao; o BAT executa :app:compileDebugJavaWithJavac e aborta se falhar, e o workflow compila/assina/verifica package/version/certificado antes de publicar o APK.
+
+8. RISCOS RESTANTES / TESTE FISICO OBRIGATORIO
+- Variacoes reais de UI/OEM e disponibilidade de coordenadas de toque precisam da matriz fisica; quando coordenada for redigida pelo OEM, permanece o fallback visual conservador preexistente.
+- Linha com botao completamente ausente/nao detectavel pode fazer o detector aguardar em vez de inventar uma linha. Linha parcial/fraca e tolerada, mas ausencia total de geometria nao e inferida.
+- Valor final precisa de consenso monetario estavel para concluir; se estiver permanentemente ilegivel, a viagem permanece preservada em review em vez de enviar valor incompleto.
+- A deteccao de SystemUI depende do sinal de foreground disponivel no aparelho; quando detectada, a retomada exige os 3 frames limpos.
+
+9. MATRIZ MINIMA PARA TESTE FISICO
+- 1, 2, 3, 4, 5+ fretes; tocar cada linha e validar identidade exata.
+- Linha individual bugada/parcial; notificacao simples e varias notificacoes.
+- Notificacao antes, durante e depois do toque.
+- Bolha/menu em diferentes posicoes; confirmar reposicionamento na lista e no resultado.
+- Sem animacao/cor de Aceitar; toque fora de Aceitar; lista permanece igual apos toque.
+- Aparelho lento, perda de frames, scroll/frame atrasado, rotacao/resize.
+- Sair para outro app e retornar no mesmo estado; retornar ja em TRIP_RESULT.
+- Campo obrigatorio ilegivel e correcao manual; verificar texto literal/provenance.
+- Resultado/ganhos e Receber; toque duplicado/reabertura; confirmar uma unica sincronizacao.
+
+10. CRITERIO DE APROVACAO FISICA
+A HF12 so deve substituir a base estavel em producao depois de a compilacao real passar e a matriz fisica acima confirmar principalmente: identidade N/NONE, continuidade apos interrupcao, nenhum dado inventado e nenhuma duplicacao de viagem/recebimento.

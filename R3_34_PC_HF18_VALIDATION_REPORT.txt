@@ -1,0 +1,101 @@
+NVU R3.34-PC-HF18 — AUDITORIA FOCADA E RELATÓRIO DE VALIDAÇÃO
+Android 1.0.70 / versionCode 70
+Base auditada: R3.34-PC-HF17
+Data: 2026-08-16
+
+VEREDITO DA HF17
+HF17 permaneceu reprovada para o cenário físico reportado. A causa não era apenas OCR ruim: a leitura de origem e a validação do frete ainda carregavam regras globais antigas que podiam transformar um único campo incerto em revisão do frete inteiro.
+
+CAUSAS RAIZ CONFIRMADAS
+1. Origem: o fallback geométrico operava principalmente em uma única Text.Line. Quando o ML Kit quebrava origem e empresa destino em linhas separadas ou perdia o separador '>', a origem podia ficar vazia.
+2. Validação global: isFreightDataReliable ainda dependia de consenso/votos agregados, incompatível com validação independente por campo.
+3. destinationCompany: apesar de opcional para o motorista, ainda interferia indiretamente em confiança/conflito operacional.
+4. Evidência artificial: caminhos de revisão podiam promover evidência ao fabricar votes/consensus=2.
+5. Watchdog: um timeout de OCR ainda podia devolver o fluxo à seleção mesmo depois de a identidade real da linha ter sido confirmada.
+6. Revisão manual: o botão Salvar podia ser acionado vazio e gerar a mensagem 'Valor inválido para origem'.
+7. Transição inconsistente: confirmação automática e confirmação após revisão não passavam necessariamente pelo mesmo caminho para TRIP_IN_PROGRESS/mensagem de partida.
+8. Resíduos entre viagens: chaves de review/selection identity podiam permanecer após limpeza da viagem.
+9. Inconsistência silenciosa descoberta durante HF18: o caminho de toque exato entrava em CONFIRMING_FREIGHT antes de provar a transição do GTO. Isso criava risco de deadlock/reseleção depois que a revisão passou a exigir identidade CONFIRMED.
+
+CORREÇÕES HF18
+- GtoOriginGeometryPolicy agora lê a ROI completa da linha já selecionada e aceita OCR quebrado em múltiplas linhas, sem escolher outra linha e sem inventar texto.
+- Novo GtoFreightFieldEvidencePolicy: carga, origem, destino, distância e valor possuem evidência independente.
+- destinationCompany permanece apenas como metadado opcional e não participa do gate operacional/revisão.
+- Removida promoção artificial de consensusFrames/votes para satisfazer confiança.
+- trustedReviewDraft usa evidência do próprio campo, não consenso global.
+- Watchdog preserva linha CONFIRMED e converte atraso de OCR em revisão do campo ausente, nunca em reseleção.
+- Salvar origem começa desabilitado e só habilita com valor manual válido.
+- commit automático e commit após revisão convergem em transitionConfirmedFreightToTripInProgress(), que sempre emite 'Frete identificado. Tudo preparado, podemos partir!'.
+- clearTripAnalysis remove estado transitório de review e selection identity para impedir vazamento entre viagens.
+- Toque exato agora é TOUCH_LOCKED/candidato. Só a mesma linha mudar visualmente OU a lista desaparecer de forma estável confirma a seleção. Se a evidência visual apontar outra linha, a seleção resulta em NONE. Regra: toque N => N ou NONE, nunca M.
+
+ARQUIVOS FUNCIONAIS PRINCIPAIS ALTERADOS
+- android/app/src/main/java/com/nvu/operacional/GtoObserverService.java
+- android/app/src/main/java/com/nvu/operacional/GtoOriginGeometryPolicy.java
+- android/app/src/main/java/com/nvu/operacional/GtoFreightFieldEvidencePolicy.java (novo)
+- android/app/src/main/java/com/nvu/operacional/GtoSelectionIdentityPolicy.java
+- android/app/build.gradle (1.0.70 / 70)
+
+REGRESSÕES HF18
+- Origem com separador visível.
+- Origem/empresa destino em linhas OCR separadas, sem separador.
+- Origem sem destinationCompany.
+- Evidência independente por campo.
+- destinationCompany ausente sem REVIEW_REQUIRED.
+- Nenhuma fabricação de votes/consensus.
+- Manual vazio não submete.
+- Transição única de partida.
+- Limpeza de review/selection entre viagens.
+- Toque N + saída da lista => N.
+- Toque N + mudança visual da própria N => N.
+- Toque N + evidência visual M => NONE.
+- Toque sem transição => NONE.
+
+RESULTADOS
+- npm run verify:release: PASS completo.
+- check-android-java-syntax: PASS (28 fontes).
+- HF18 freight evidence/selection: 16/16 PASS.
+- HF17 overlay-dismiss: 12/12 PASS.
+- HF16 simple-flow/cancelamento: 12/12 PASS.
+- HF15 overlay/stage: 13/13 PASS.
+- HF14 review/overlay: 14/14 PASS.
+- HF13 capture/origin: 16/16 PASS.
+- HF12 intelligent-flow: 20/20 PASS.
+- HF10 projection/runtime: 33/33 PASS.
+- validate:gto-native: 49/49 PASS.
+- validate:gto-auto-sync: 74/74 PASS.
+- Demais regressões históricas incluídas em verify:release: PASS.
+
+ESCOPO PRESERVADO
+Comparação por conteúdo com HF17 confirmou sem mudanças funcionais em:
+- src/
+- public/
+- app/
+- functions/
+- netlify.toml
+- capacitor.config.ts
+- vite.config.ts
+- server.ts
+- package-lock.json
+Logo, nenhuma nova publicação Web/Netlify/Functions é necessária por causa da HF18. A alteração registerGtoTrip da HF14 continua sendo a mesma já existente na base.
+
+COMPILAÇÃO ANDROID REAL NESTE AMBIENTE
+NÃO VALIDADA.
+Comando tentado:
+  ./gradlew :app:compileDebugJavaWithJavac --stacktrace
+O Gradle Wrapper não chegou ao Javac porque tentou baixar gradle-8.14.3-all.zip e o ambiente retornou:
+  java.net.UnknownHostException: services.gradle.org
+Isso é uma limitação de rede do ambiente, não um PASS de compilação. O PREPARAR-ANDROID-WINDOWS.bat mantém :app:compileDebugJavaWithJavac como gate obrigatório no PC antes de gerar o APK.
+
+TESTE FÍSICO PRIORITÁRIO
+1. Lista real -> tocar N -> confirmar N ou NONE, nunca M.
+2. Origem com e sem '>' e em OCR quebrado em duas linhas.
+3. Origem não legível -> revisão apenas da origem; botão Salvar bloqueado enquanto vazio.
+4. Após revisão válida -> mensagem central superior 'Frete identificado. Tudo preparado, podemos partir!'.
+5. Frete A -> cancelar no simulador -> lista reaparece -> aceitar B -> nenhum dado/review de A permanece.
+6. Card NVU permanece estável conforme HF17.
+7. Concluído + valor -> Receber -> fila durável -> envio -> ACK.
+8. Repetir várias viagens na mesma MediaProjection.
+
+RISCO RESTANTE
+- Compilação Gradle/Javac real e comportamento físico do ML Kit no dispositivo precisam ser validados no PC/aparelho. A HF18 adiciona regressão comportamental para o layout OCR quebrado que não existia nas versões anteriores, mas teste físico continua sendo o gate final.

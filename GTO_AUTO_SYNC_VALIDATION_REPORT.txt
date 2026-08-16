@@ -1,0 +1,22 @@
+NVU GTO — validação da camada nativa + registro automático
+
+Base: FIX16 Seleção Determinística, já validado no aparelho pelo usuário.
+
+Alterações desta etapa não substituem o detector FIX16. Foram adicionados:
+- sessão UUID por viagem;
+- fila local durável;
+- chamada autenticada da callable registerGtoTrip;
+- retry de sincronização;
+- proteção de fila por driverId em aparelho compartilhado;
+- estado sincronizando / registrado / recusado no overlay.
+
+Validações executadas:
+- npm run validate:gto-native: 45/45 aprovado.
+- npm run validate:gto-auto-sync: 16/16 aprovado.
+- npm run lint: aprovado.
+- npm run verify:project: aprovado.
+- GtoAutoTripSync.java: javac alcançou resolução de tipos externos sem reportar erro de sintaxe Java; Android/Firebase jars não existem neste runtime.
+
+Build completo:
+- O Vite local deste container não pode usar o node_modules transportado do Windows porque falta o binário opcional Linux do Rollup.
+- O Gradle/Android final deve ser executado no Android Studio do usuário, como nas versões anteriores.

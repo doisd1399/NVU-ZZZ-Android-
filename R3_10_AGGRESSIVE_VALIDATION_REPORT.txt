@@ -1,0 +1,49 @@
+NVU GTO R3.10 / Android 1.0.30
+VALIDAÇÃO AGRESSIVA FINAL
+Data: 2026-08-12
+
+CORREÇÕES ADICIONAIS SOBRE R3.9
+- Confirmação de cold-start do Observador ampliada para ~5 s.
+- Recuperação do Observador ampliada para ~4 s.
+- Confirmação de MediaProjection ampliada para ~8 s.
+- Retorno automático ao GTO após reautorização ampliado para ~8 s.
+- Abertura do GTO reutiliza a tarefa existente via REORDER_TO_FRONT quando possível.
+- Grace de retorno da permissão ampliado para 6,5 s e supressão de hide para 12 s.
+- Retry da bolha reduzido para 350 ms.
+- Overlay desconectado pelo OEM zera o throttle e pode ser recriado no mesmo ciclo de foreground.
+- Recuperação pós-permissão tenta restaurar a bolha em 220/700/1400/2600/4200/6500 ms.
+
+REGRESSÃO / INVARIANTES
+- validate:gto-native: 47/47
+- validate:gto-auto-sync: 74/74
+- audit:gto-fix18: 26/26
+- audit:gto-r3.3: 21/21
+- audit:gto-r3.4: 42/42
+- audit:gto-r3.5: 34/34
+- audit:gto-r3.6: 32/32
+- audit:gto-r3.7: 63/63
+- audit:gto-r3.8: 110/110
+- audit:gto-r3.9: 12/12
+- audit:gto-r3.10: 40/40
+- test:gto-r3.8-scenarios: 34/34
+- validate:senior-navigation: 10/10
+- verify:project: OK (node_modules deliberadamente ausente no pacote limpo)
+
+STRESS R3.10
+- 1.500 operações completas simuladas
+- 14.279 viagens completas simuladas
+- 2.631 leituras de frete conflitantes/ilegíveis rejeitadas com segurança
+- 3.106 perdas/recuperações de MediaProjection
+- 2.567 reinícios de processo durante viagem
+- 4.595 desconexões da bolha pelo OEM
+- 21.346 falhas/timeouts de rede com retry preservado
+- 1.397 contingências do sensor de resultado
+- 12.779 transições consecutivas para nova viagem após ACK
+- 14.279 sessões únicas registradas
+- 0 duplicação, perda, mutação ou cruzamento de sessão no modelo de stress
+
+FLUXO COBERTO
+Iniciar trabalho -> Observador -> autorização de tela -> abrir/retornar GTO -> bolha -> iniciar viagem -> lista -> seleção -> lock imutável de carga/origem/destino/km/valor -> rota -> resultado -> Receber -> persistência local síncrona -> fila durável -> Firebase -> ACK exato -> nova viagem -> encerramento da operação.
+
+LIMITAÇÃO DE CERTIFICAÇÃO
+Os testes acima são auditorias de código, invariantes e simulações determinísticas. Eles não substituem ensaio físico em todos os modelos/OEMs Android. Nenhum software que dependa de MediaProjection, overlays, gerenciamento de processos do OEM e do comportamento de outro aplicativo pode receber garantia literal de zero imprevistos em todo aparelho sem validação física/device-farm. O pacote foi endurecido para falhar de modo seguro: preservar estado/dados e exigir recuperação/reauthorização em vez de registrar dados ambíguos.

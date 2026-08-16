@@ -1,0 +1,107 @@
+NVU R3.34-PC-HF16 — RELATÓRIO DE VALIDAÇÃO
+Data: 2026-08-15
+Android: 1.0.68
+versionCode: 68
+Base: R3.34-PC-HF15
+
+OBJETIVO
+Simplificar as validações visuais do fluxo GTO, reduzir falsos positivos/negativos e tratar corretamente o cenário em que o motorista cancela uma viagem no simulador, retorna à lista e aceita outro frete.
+
+ALTERAÇÕES PRINCIPAIS
+
+1. LISTA DE FRETES — VALIDAÇÃO SIMPLES POR LINHA
+- A detecção ativa deixa de exigir uma página visualmente perfeita.
+- Uma lista candidata precisa de ao menos uma linha forte e geometricamente válida com evidências associadas no mesmo card: região de Aceitar + informação do frete.
+- Evidências isoladas de HUD/cenário não são suficientes para anunciar ao motorista que a lista foi reconhecida.
+- A mensagem de lista detectada é emitida somente após o parser semântico obter opção real de frete com valor/distância no card.
+- Uma linha defeituosa não invalida outras linhas válidas.
+
+2. SELEÇÃO — IDENTIDADE POR TOQUE PRESERVADA
+- Não foi relaxada a proteção crítica da seleção.
+- O toque continua associado ao snapshot/AcceptRect da linha correspondente.
+- Invariante preservado: toque em N => selectedRow N ou NONE; nunca M diferente de N.
+
+3. VIAGEM ATIVA — MENOS REVALIDAÇÃO VISUAL
+- O estado TRIP_IN_PROGRESS permanece como contexto confiável.
+- O detector não precisa revalidar continuamente a assinatura completa do HUD para manter a viagem.
+- Frames recentes continuam sendo priorizados.
+
+4. RESULTADO — REGRA SEMÂNTICA SIMPLIFICADA
+- Resultado passa a ser confirmado principalmente por: texto "Concluído" + valor monetário válido.
+- A assinatura antiga baseada em proporções de pixels escuros/cor/formato do modal deixa de dirigir a decisão ativa.
+- "Receber" pode ser localizado depois; não é necessário reconhecer toda a tela no mesmo frame para preservar o resultado.
+- O próprio overlay NVU continua excluído da região de OCR pertinente.
+
+5. CANCELAMENTO NO SIMULADOR + NOVO FRETE
+Fluxo implementado:
+TRIP_IN_PROGRESS
+-> lista real reaparece
+-> sistema reconhece retorno à lista, mas PRESERVA o frete atual
+-> aguarda um novo toque real em Aceitar
+-> somente quando o novo Aceitar é evidenciado:
+   a) descarta o snapshot da sessão anterior via GtoAutoTripSync.discardSessionSnapshot(...)
+   b) marca localmente a sessão anterior como cancelada no GTO
+   c) NÃO sincroniza a viagem cancelada como concluída
+   d) inicia uma nova sessão limpa
+   e) restaura o snapshot da nova lista
+   f) aplica a seleção exata da nova linha tocada
+-> o novo frete passa a ser o frete válido da sessão.
+
+Importante: somente a reaparição da lista NÃO apaga o frete anterior. Isso protege contra falso positivo. A substituição acontece apenas com evidência de novo Aceitar.
+
+6. RESULTADO JÁ DETECTADO NÃO É DESCARTADO
+- Se a viagem já estiver em RESULT_DETECTED/AWAITING_BONUS, uma lista visual não é tratada como cancelamento automático.
+- O resultado anterior permanece protegido para evitar perda/duplicidade de entrega.
+
+7. SINCRONIZAÇÃO
+- MediaProjection, snapshot imutável, fingerprint, fila durável, ACK, Firebase/Firestore e sincronização automática foram preservados.
+- Functions não foram alteradas da HF15 para HF16.
+- A compatibilidade da HF14 que tornou destinationCompany opcional permanece no pacote.
+
+ARQUIVOS/COMPONENTES CENTRAIS
+- GtoSimpleScreenDetectionPolicy.java (novo)
+- GtoFreightListEvidencePolicy.java
+- GtoFastVisualDetector.java
+- GtoObserverService.java
+- scripts/java-tests/com/nvu/operacional/GtoR334Hf16SimpleFlowPolicyTest.java
+- scripts/test-gto-r3-34-hf16-simple-flow.mjs
+
+VALIDAÇÃO AUTOMATIZADA
+npm run verify:release: PASS (exit 0)
+
+Resultados de regressão relevantes no run completo:
+- R3.29 strict-screen: 15/15 PASS
+- R3.30 selected-freight: 17/17 PASS
+- R3.31 continuity: 14/14 PASS
+- R3.32 card-continuity: 11/11 PASS
+- R3.33 audit-flow: 19/19 PASS
+- Money integrity: 10/10 PASS
+- PC hotfix: 24/24 PASS
+- HF10 projection/runtime: 33/33 PASS
+- HF12 intelligent-flow: 20/20 PASS
+- HF13 capture/origin: 16/16 PASS
+- HF14 review/overlay: 14/14 PASS
+- HF15 overlay/stage: 13/13 PASS
+- HF16 simple-flow/cancellation: 12/12 PASS
+- Java syntax check: PASS (26 fontes)
+
+GATE DE COMPILAÇÃO ANDROID
+Comando tentado:
+./gradlew :app:compileDebugJavaWithJavac --no-daemon
+
+Resultado neste ambiente: NÃO EXECUTADO ATÉ O JAVAC por bloqueio externo de rede.
+O Gradle Wrapper tentou baixar:
+https://services.gradle.org/distributions/gradle-8.14.3-all.zip
+mas recebeu java.net.UnknownHostException: services.gradle.org.
+
+Portanto, não é correto declarar que este ambiente compilou o APK. O ZIP inclui PREPARAR-ANDROID-WINDOWS.bat e o workflow de release, que mantêm a compilação real como gate no PC/GitHub.
+
+TESTE FÍSICO AINDA NECESSÁRIO
+- Lista real com um e vários fretes.
+- Selecionar frete A, iniciar viagem, cancelar no simulador, retornar à lista, aceitar frete B e confirmar que somente B permanece atual.
+- Confirmar que A não é enviado como viagem concluída.
+- Concluir B, tocar Receber e verificar sincronização/ACK uma única vez.
+- Repetir com múltiplas viagens na mesma sessão MediaProjection.
+
+VEREDITO
+Código candidato HF16 aprovado pela suíte automatizada disponível. A lógica de cancelamento/reseleção foi implementada de forma conservadora: lista reaparecida preserva o frete anterior; novo Aceitar validado descarta a sessão cancelada e promove apenas o novo frete. A compilação Android real e o teste físico permanecem gates obrigatórios antes de produção.

@@ -1,0 +1,57 @@
+NVU R3.34-PC-HF15 — PROCESSO PELO PC
+Android: 1.0.67 / versionCode 67
+
+OBJETIVO HF15
+- Preservar Google Auth HF11, MediaProjection, fila durável, ACK e Firestore.
+- Evoluir somente o observador GTO Android para estado + contexto + múltiplas evidências.
+- Não alterar Netlify/Google AI Studio.
+- HF15 não altera novamente as Functions. A compatibilidade destinationCompany opcional continua sendo a mesma introduzida na HF14.
+
+PREPARAÇÃO RECOMENDADA
+1. Extraia o ZIP em uma pasta curta, por exemplo:
+   C:\NVU\R3.34-PC-HF15
+
+2. Abra CMD nessa pasta e execute:
+   PREPARAR-ANDROID-WINDOWS.bat
+
+O preparador executa:
+- npm ci
+- lint
+- build das Functions somente para validação local
+- npm run verify:release
+- npm run build
+- prepare:cap-assets
+- npx cap sync android
+- verify:cap-assets
+- Gradle :app:compileDebugJavaWithJavac com Java 21
+
+BUILD RELEASE LOCAL (sem assinatura configurada no projeto)
+   cd android
+   gradlew.bat clean assembleRelease --no-daemon
+
+IDENTIDADE ESPERADA
+   applicationId: com.nvu.operacional
+   EXPECTED_VERSION_CODE: "67"
+   EXPECTED_VERSION_NAME: "1.0.67"
+
+ARTEFATO ASSINADO PELO WORKFLOW GITHUB
+   NVU-R3.34-PC-HF15-release.apk
+
+INSTALAÇÃO ADB
+   "%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe" devices
+   "%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe" install -r "C:\CAMINHO\NVU-R3.34-PC-HF15-release.apk"
+
+FIREBASE
+   Se você JÁ publicou registerGtoTrip da HF14, não precisa publicar novamente para a HF15.
+   Se ainda não publicou, use:
+   firebase deploy --only functions:registerGtoTrip --project vtc-frota-log
+
+TESTE FÍSICO CRÍTICO
+- autorizar captura uma vez;
+- testar listas de 1 a 5+ fretes e cada linha;
+- confirmar que toque em N nunca seleciona M;
+- testar notificação antes/durante/depois do toque;
+- sair do GTO, abrir outro app e voltar;
+- testar campo ilegível/revisão manual sem reselecionar;
+- testar resultado, Receber e tentativa duplicada;
+- repetir em aparelho mais lento.

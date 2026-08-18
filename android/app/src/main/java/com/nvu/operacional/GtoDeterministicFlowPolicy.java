@@ -86,8 +86,9 @@ final class GtoDeterministicFlowPolicy {
     }
 
 
-    static boolean mayProbeFreightListForCurrentState(String state, boolean explicitReplacementArmed) {
-        if ("TRIP_IN_PROGRESS".equals(state)) return explicitReplacementArmed;
+    static boolean mayProbeFreightListForCurrentState(String state, boolean ignoredExplicitReplacementFlag) {
+        // HF34: recognition of the GTO jobs list is never conditional on a menu/button.
+        // The list is a first-class lifecycle state and must always be observable.
         return mayObserveFreightListOutsideWaiting(state);
     }
 
@@ -120,12 +121,12 @@ final class GtoDeterministicFlowPolicy {
             || "AWAITING_BONUS_VALIDATION".equals(state);
     }
 
-    static boolean mayReplaceActiveTrip(String state, boolean explicitlyArmed) {
-        return explicitlyArmed && "TRIP_IN_PROGRESS".equals(state);
+    static boolean mayReplaceActiveTrip(String state, boolean stableFreightListReturned) {
+        return stableFreightListReturned && "TRIP_IN_PROGRESS".equals(state);
     }
 
-    static boolean freightListIsInformationalOnly(String state, boolean explicitlyArmed) {
-        return "TRIP_IN_PROGRESS".equals(state) && !explicitlyArmed;
+    static boolean freightListIsInformationalOnly(String state, boolean ignored) {
+        return false;
     }
 
     static boolean mayInterpretResultScreen(String state) {

@@ -33,7 +33,7 @@ check("active trip freight detector is explicitly gated", service.includes("mayP
 check("unarmed trip force-clears stale freight-list UI", service.includes('putString("screenState", "TRIP")') && service.includes('putBoolean("activeTripFreightListVisible", false)'));
 check("legacy replacement path is explicit-only but no longer exposed in normal UI", !service.includes('menuButton("Trocar frete atual")') && service.includes("mayProbeFreightListForCurrentState") && service.includes("explicitReplacement"));
 check("post-ACK flow automatically prepares next freight", service.includes("shouldAutoPrepareNextFreightAfterSync") && service.includes("beginTrip(false, false)"));
-check("driver is explicitly told only ACK-confirmed send succeeded", service.includes("Viagem enviada com sucesso!"));
+check("driver is explicitly told only ACK-confirmed send succeeded", service.includes("Viagem enviada com sucesso!") || service.includes("Viagem enviada ✓"));
 check("app return refreshes only transient visual context", service.includes("refreshTransientVisualContextAfterGtoReturn") && service.includes("Durable selected-freight/result data is never"));
 check("post-sync state change while outside GTO is expected", service.includes("expectedPostSyncNextTrip") && service.includes("gtoAutoNextTripPreparedAt"));
 check("extreme top HUD cannot be a one-row list", detector.includes("screenHeight * 0.055f"));

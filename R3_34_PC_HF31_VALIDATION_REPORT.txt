@@ -1,0 +1,22 @@
+NVU R3.34 PC-HF31 — Android 1.0.83 / versionCode 83
+
+OBJETIVO
+Corrigir o indício crítico observado no botão flutuante fora do GTO sem enfraquecer o supervisor contínuo de MediaProjection da HF30.
+
+CAUSA RAIZ IDENTIFICADA
+O alvo destrutivo “Remover e parar NVU” dependia do fechamento normal do stream MotionEvent do próprio overlay. Em transições de task/janela/OEM, um TYPE_APPLICATION_OVERLAY pode perder/destacar seu canal de input sem receber necessariamente o ACTION_UP/ACTION_CANCEL esperado. Como o estado de dragging era local ao listener e o helper não possuía lease/generation próprios, o alvo podia ficar órfão. Além disso, o ACTION_UP autorizava a parada usando essencialmente dragging + geometria, sem validar pointer, geração do gesto e frescor do evento.
+
+CORREÇÕES HF31
+1. Estado do gesto da bolinha promovido para escopo do serviço.
+2. Cada ACTION_DOWN recebe geração e pointer ID únicos.
+3. O helper de remoção é vinculado à mesma geração.
+4. Lease de inatividade de 1,8 s e duração máxima de 12 s eliminam helpers órfãos se Android/OEM não entregar evento terminal.
+5. ACTION_CANCEL, multipointer, detach do overlay, onTaskRemoved e falha de updateViewLayout invalidam o gesto sem tocar em MediaProjection ou tripState.
+6. Gesto iniciado sobre GTO é permanentemente não destrutivo; sair do GTO com o mesmo dedo não habilita “parar NVU”.
+7. Retorno ao GTO desarma imediatamente a semântica destrutiva do gesto atual.
+8. ACTION_UP só pode parar quando pointer, geração, alvo visível, highlight, geometria e frescor forem simultaneamente válidos.
+9. O gesto é invalidado antes do dispatch de ACTION_STOP, impedindo replay/late event.
+10. Supervisor HF30 de MediaProjection foi preservado.
+
+GATE DE RELEASE
+Executar npm run verify:release e compilação Java/Gradle real antes de gerar APK. A validação física final ainda deve testar: GTO -> compartilhar -> lista -> Home/outro app -> retorno, notificação, bloqueio/desbloqueio, rotação/resize e arraste interrompido.

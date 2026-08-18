@@ -19,6 +19,18 @@ public class MainActivity extends BridgeActivity {
     }
 
     @Override
+    public void onResume() {
+        super.onResume();
+        GtoObserverService.reportMainActivityForeground(true);
+    }
+
+    @Override
+    public void onPause() {
+        GtoObserverService.reportMainActivityForeground(false);
+        super.onPause();
+    }
+
+    @Override
     public void onStart() {
         super.onStart();
         GtoObserverService.recoverIfEnabled(this);

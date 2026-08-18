@@ -1,0 +1,42 @@
+NVU HF30 — Windows
+Android 1.0.82 / versionCode 82
+
+IMPORTANTE
+Use somente a pasta extraída do ZIP HF30. Não misture arquivos da HF28/HF29.
+
+1) Preparação completa + testes + build web + Capacitor + compilação Java Android real:
+PREPARAR-ANDROID-WINDOWS.bat
+
+O preparador deve terminar com:
+[OK] PROJETO PREPARADO COM SUCESSO
+
+2) Gerar APK Release:
+cd android
+gradlew.bat assembleRelease --no-daemon
+
+Saída esperada:
+android\app\build\outputs\apk\release\
+
+Identidade esperada:
+applicationId com.nvu.operacional
+versionCode 82
+versionName 1.0.82
+
+3) Para distribuir como atualização aos usuários existentes:
+- assine com a MESMA keystore/certificado de produção já usado pela NVU;
+- não altere applicationId;
+- versionCode 82 deve ser maior que o instalado no aparelho.
+
+4) O que a HF30 muda no GTO Observe:
+- RESULT_OK do compartilhamento é vinculado ao serviço imediatamente;
+- enquanto o token MediaProjection continuar válido, falta de frames NÃO derruba a autorização;
+- ImageReader/Surface/Handler são reconstruídos na mesma autorização;
+- stalls repetidos continuam tentando indefinidamente na mesma sessão válida;
+- o watchdog de frames não depende de UsageStats dizer que o GTO está em foreground;
+- WAITING_FREIGHT é recuperado se o serviço Android for recriado;
+- falha transitória ao promover o Foreground Service não encerra o observador;
+- host de consentimento tolera OEM lento (janela 9 s / até 80 tentativas de estabilização);
+- se o Android realmente revogar MediaProjection, o NVU volta a abrir a confirmação automaticamente quando o GTO estiver em contexto seguro.
+
+LIMITAÇÃO DO ANDROID
+Se o próprio Android revogar o token MediaProjection (onStop), matar o processo ou exigir novo grant, o sistema operacional exige uma nova confirmação humana em “Compartilhar”. O NVU pode abrir essa tela automaticamente, mas não pode confirmar o botão do Android pelo usuário. Enquanto o token válido estiver vivo, a HF30 não deve pedir nova autorização por simples falta de frames.

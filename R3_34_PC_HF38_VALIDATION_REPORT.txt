@@ -1,0 +1,179 @@
+NVU R3.34-PC-HF38 — RELATÓRIO DE CAUSA RAIZ E VALIDAÇÃO
+Data: 2026-08-17
+Android: 1.0.90
+versionCode: 90
+Base: R3.34-PC-HF37
+Escopo: Android nativo / GTO Observe. Sem alteração Web/Netlify/Functions em relação à HF37.
+
+1. INCIDENTE FÍSICO CONFIRMADO
+Na lista real do GTO a linha selecionada continha, de forma totalmente visível:
+- Carga: Tijolos Maciços
+- Origem: Fabrica de Tijolo
+- Destino: Cruz do Oeste
+- Distância: 600Km
+- Valor: R$ 16.386,00
+
+Após Aceitar, o gameplay iniciou e a NVU preservou origem, destino, distância e valor, mas abriu REVIEW_REQUIRED com "Confirme somente carga".
+
+Isso provou duas coisas:
+A) a linha selecionada estava correta — quatro campos pertenciam exatamente ao mesmo frete;
+B) a falha restante estava no parser OCR do conteúdo textual da linha, não na identidade da seleção, no cancelamento da viagem anterior ou no detector da lista.
+
+As capturas físicas estão empacotadas em:
+- scripts/fixtures/hf38-mixed-line-regression/list-with-cargo-km-same-band.png
+- scripts/fixtures/hf38-mixed-line-regression/review-toast-after-selection.png
+- scripts/fixtures/hf38-mixed-line-regression/review-card-cargo-missing.png
+
+2. CAUSA RAIZ EXATA
+A HF36 corrigiu corretamente a policy que permitia uma releitura focalizada preencher um campo inicialmente ausente. A HF37 corrigiu corretamente a fronteira entre a viagem anterior e a nova página certificada.
+
+Porém havia um erro anterior a essas duas proteções, compartilhado por TODAS as leituras de frete:
+- OCR geral da página;
+- OCR preciso da linha tocada;
+- releitura focalizada em escala maior;
+- fallback geométrico de origem.
+
+O GTO desenha carga e distância praticamente na mesma faixa horizontal; também desenha rota/empresa e valor em faixas horizontais próximas. Em alguns aparelhos/frames, o ML Kit agrupa regiões horizontalmente alinhadas em uma única Text.Line. Exemplos válidos de saída do reconhecedor:
+- "Tijolos Maciços 600Km"
+- "Fabrica de Tijolo > Cooper Log R$ 16.386"
+- "CARGA TIJOLO 600Km R$ 12.200 Aceitar"
+
+O parser anterior fazia o seguinte:
+- se uma Text.Line contivesse Km, descartava a linha inteira da coleção textual;
+- se uma Text.Line contivesse R$, descartava a linha inteira;
+- se contivesse Aceitar, também podia descartá-la inteira.
+
+Portanto:
+"Tijolos Maciços 600Km"
+=> 600Km era extraído corretamente
+=> a MESMA linha era removida do parser textual
+=> "Tijolos Maciços" desaparecia
+=> cargo ficava vazio.
+
+O mesmo defeito existia em refinePreciseRowFields(). Logo, executar uma segunda e uma terceira leitura da mesma imagem não corrigia nada: se o ML Kit voltasse a agrupar cargo+Km, TODAS as tentativas repetiam deterministicamente o mesmo descarte.
+
+Essa é a razão pela qual a HF36 podia ter a policy de retry correta e ainda assim o aparelho continuar chegando em "Confirme somente carga".
+
+3. CORREÇÃO HF38
+Foi criada a policy pura:
+android/app/src/main/java/com/nvu/operacional/GtoFreightMixedLinePolicy.java
+
+Nova regra:
+uma Text.Line é tratada como composição de evidências, não como campo exclusivo.
+
+Exemplos:
+- "Tijolos Maciços 600Km"
+  => distância = 600Km
+  => texto remanescente = "Tijolos Maciços"
+
+- "Fabrica de Tijolo > Cooper Log R$ 16.386"
+  => valor = R$ 16.386
+  => texto remanescente = "Fabrica de Tijolo > Cooper Log"
+
+- "CARGA TIJOLO 600Km R$ 12.200 Aceitar"
+  => distância e valor continuam extraídos pelas rotinas numéricas
+  => Aceitar continua sendo evidência de botão
+  => texto remanescente = "CARGA TIJOLO"
+
+A policy remove SOMENTE os tokens operacionais da cópia textual:
+- Km;
+- R$/RS;
+- Aceitar.
+
+O texto literal restante é preservado para cargo/rota/destino.
+
+4. PONTOS DO FLUXO CORRIGIDOS
+A mesma regra foi aplicada aos três locais que podiam reintroduzir o defeito:
+
+A) parseFreightOptions()
+Antes: linha com Km/R$ era excluída por completo.
+Agora: Km/R$ são extraídos normalmente e o restante textual da mesma linha permanece elegível para cargo/rota/destino.
+
+B) refinePreciseRowFields()
+Antes: a leitura precisa da linha selecionada também eliminava a Text.Line inteira se ela carregasse número.
+Agora: a releitura precisa/focalizada usa exatamente o mesmo parser de composição.
+
+C) inferOriginCompanyFromSelectedRowLines()
+Antes: uma rota fundida com R$ podia chegar contaminada à inferência geométrica ou ser ignorada pelos validadores.
+Agora: os tokens operacionais são removidos antes da inferência de origem.
+
+5. FLUXO PRESERVADO
+HF38 NÃO altera as regras aprovadas das versões imediatamente anteriores:
+- HF35: aparência visual sozinha não possui autoridade para cancelar viagem; lista real exige certificação semântica.
+- HF36: campo ausente passa por releituras automáticas antes de revisão manual.
+- HF37: lista real reaberta durante viagem descarta completamente a sessão anterior; a nova página certificada é semeada atomicamente na nova sessão e Aceitar se vincula somente à geração atual.
+- HF30/HF31/HF32: continuidade de MediaProjection, lifecycle da bolinha e reconhecimento contínuo permanecem intactos.
+
+6. INVARIANTE APÓS HF38
+Sempre que a linha exata selecionada contiver texto e tokens operacionais na mesma Text.Line, os dois tipos de informação coexistem.
+
+NUNCA MAIS:
+texto + Km/R$ => descartar a linha textual inteira.
+
+AGORA:
+texto + Km/R$ => extrair Km/R$ + preservar texto remanescente.
+
+Assim, a própria arquitetura deixa de depender de como o ML Kit decide segmentar visualmente a mesma linha em aparelhos diferentes.
+
+7. GATE NOVO HF38
+scripts/test-gto-r3-34-hf38-mixed-line-recovery.mjs
+scripts/java-tests/com/nvu/operacional/GtoHf38MixedFreightLinePolicyTest.java
+scripts/java-tests/com/nvu/operacional/GtoHf38UserCargoRegressionScreenshotTest.java
+
+Matriz de texto validada:
+- Tijolos Maciços 600Km => Tijolos Maciços
+- 600Km Tijolos Maciços => Tijolos Maciços
+- CARGA TIJOLO 600Km R$ 12.200 Aceitar => CARGA TIJOLO
+- Fabrica de Tijolo > Cooper Log R$ 16.386 => rota preservada
+- R$ 16.386,00 => nenhum texto fabricado
+- 600Km => nenhum texto fabricado
+- Aceitar => nenhum texto fabricado
+- variantes com espaço "600 km" => preservadas.
+
+Resultado HF38: 18/18 PASS.
+
+As capturas físicas também foram executadas contra GtoFastVisualDetector:
+- lista fonte: lista real, exatamente 4 botões Aceitar;
+- gameplay com toast de revisão: não é lista;
+- gameplay com card NVU de revisão: não é lista.
+Resultado: PASS.
+
+8. REGRESSÕES EXECUTADAS
+- JavaSyntaxCheck: PASS (44 fontes)
+- validate:gto-native: 49/49 PASS
+- validate:gto-auto-sync: 74/74 PASS
+- R3.30 selected-freight: 17/17 PASS
+- HF21 selected-row authority: 13/13 PASS
+- HF25 focused fields: 16/16 PASS
+- HF30 MediaProjection continuity: 24/24 PASS
+- HF31 bubble lifecycle: 16/16 PASS
+- HF32 continuous recognition: 18/18 PASS
+- HF34 deterministic lifecycle: 22/22 PASS
+- HF35 freight-list/HUB authority: 10/10 PASS
+- HF36 cargo auto-recovery: 11/11 PASS
+- HF37 replacement-session isolation: 19/19 PASS
+- HF38 mixed-line recovery: 18/18 PASS
+
+9. COMPILAÇÃO GRADLE
+Foi tentado:
+./gradlew :app:compileDebugJavaWithJavac --no-daemon
+
+O wrapper não pôde baixar Gradle 8.14.3 porque este executor não resolve services.gradle.org (UnknownHostException). Portanto, o Javac Android real permanece como gate do workflow GitHub/Windows incluído no pacote.
+
+A validação sintática independente dos fontes Java passou com 44 fontes, e as policies puras novas compilaram/executaram via javac nos gates HF38.
+
+10. BUILD / DEPLOY
+Release candidata:
+NVU R3.34-PC-HF38
+Android 1.0.90
+versionCode 90
+
+HF38 altera apenas Android nativo em relação à HF37.
+- Web/Netlify: sem alteração.
+- Firebase Functions: sem alteração.
+
+Cenário físico decisivo:
+lista real -> selecionar Tijolos Maciços/linha equivalente -> Aceitar -> gameplay -> NVU deve bloquear automaticamente carga + origem + destino + km + valor, sem abrir "Confirme somente carga" quando a carga estava visível.
+
+Também repetir:
+viagem ativa -> lista real reabre -> viagem anterior descartada -> nova página/lista -> Aceitar -> somente o novo frete assume a sessão.

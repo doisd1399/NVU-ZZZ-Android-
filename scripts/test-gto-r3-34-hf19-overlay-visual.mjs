@@ -40,7 +40,7 @@ check("focused review field is not destroyed by background refresh", refresh.inc
 check("menu focusability follows review state dynamically", service.includes("updateMenuWindowInteractionMode") && layout.includes("interactionChanged"));
 check("IME is included in bottom safe inset", service.includes("WindowInsets.Type.ime()"));
 check("driver-stage banner respects top system/cutout inset", chip.includes("safeTopInsetPx() + dp(6)"));
-check("driver-stage banner has minimum readable exposure", service.includes("DRIVER_STAGE_MIN_VISIBLE_MS = 1400L") && chip.includes("acknowledgementDelay"));
+check("driver-stage banner has bounded readable exposure without delaying newer state", service.includes("DRIVER_STAGE_MIN_VISIBLE_MS = 650L") && chip.includes("acknowledgementDelay") && service.includes("journey-state messages are live state, not a slideshow queue"));
 check("stage acknowledgement occurs after exposure not immediately", !chip.includes("if (onShown != null) onShown.run()") && chip.includes("mainHandler.postDelayed"));
 check("persistent card no longer duplicates journey instructions", guide.includes("return \"\""));
 check("same-gesture outside guard is narrow", service.includes("OUTSIDE_SAME_GESTURE_GUARD_MS = 140L") && !service.includes("BUBBLE_TAP_DEBOUNCE_MS + 180L"));

@@ -132,7 +132,7 @@ public class GtoObserverService extends Service {
     // that delay/omit UsageEvents after MediaProjection returns to the game. A valid
     // freight-list capture refreshes it continuously while the list is visible.
     private static final long VISUAL_GTO_EVIDENCE_FRESH_MS = 2400L;
-    private static final long FREIGHT_PAGE_OCR_REFRESH_MS = 1800L;
+    private static final long FREIGHT_PAGE_OCR_REFRESH_MS = 420L;
     private static final long PRECISE_OCR_BUSY_RETRY_MS = 80L;
     private static final long PRECISE_OCR_BUSY_WAIT_TIMEOUT_MS = 8000L;
     private static final long FREIGHT_CONFIRMATION_WATCHDOG_MS = 7000L;
@@ -141,6 +141,11 @@ public class GtoObserverService extends Service {
     // drops the callback, never leave the observer indefinitely stuck in the in-flight
     // state. A late RESULT_OK is still accepted if it arrives after this watchdog.
     private static final long PROJECTION_PERMISSION_RESULT_WATCHDOG_MS = 45_000L;
+    // HF30: RESULT_OK can reach the transparent host before the already-running service
+    // processes ACTION_START_PROJECTION on slower OEMs. Give the service/direct rescue
+    // handoff time to bind the one-use grant before classifying it as unbound.
+    private static final long PROJECTION_GRANT_DISPATCH_GRACE_MS = 4_000L;
+    private static final long PROJECTION_PERMISSION_RETURN_WITHOUT_RESULT_GRACE_MS = 2_600L;
     // Initial MediaProjection consent must appear only after the real GTO task is
     // foreground. This prevents creating a portrait capture surface from the NVU UI.
     // HF5: permission is event-gated by real landscape geometry, not a blind long timer.
@@ -159,11 +164,21 @@ public class GtoObserverService extends Service {
     private static final long PROJECTION_SURFACE_REBIND_COOLDOWN_MS = 1500L;
     private static final long PROJECTION_AUTO_REAUTH_COOLDOWN_MS = 12_000L;
     private static final int PROJECTION_SURFACE_REAUTH_ESCALATION_ATTEMPTS = 3;
-    private static final long EXPLICIT_FREIGHT_REPLACEMENT_TIMEOUT_MS = 30_000L;
     private static final long DRIVER_ERROR_NOTICE_THROTTLE_MS = 4500L;
     private static final long BUBBLE_TAP_DEBOUNCE_MS = 180L;
+    // HF31: the destructive drag helper is leased to one live pointer gesture only.
+    // OEM/task transitions are not guaranteed to deliver ACTION_UP/ACTION_CANCEL to an
+    // application-overlay input channel, so a helper with no fresh motion must expire.
+    private static final long BUBBLE_GESTURE_IDLE_TIMEOUT_MS = 1800L;
+    private static final long BUBBLE_GESTURE_MAX_DURATION_MS = 12_000L;
+    private static final long BUBBLE_STOP_RELEASE_FRESH_MS = 900L;
     private static final long OUTSIDE_SAME_GESTURE_GUARD_MS = 140L;
-    private static final long DRIVER_STAGE_MIN_VISIBLE_MS = 1400L;
+    private static final long DRIVER_STAGE_MIN_VISIBLE_MS = 650L;
+    // HF44: once a jobs list is semantically certified, the OCR-free visual detector
+    // is allowed to keep the sticky visible option count fresh. Two matching frames are
+    // enough to reject a one-frame detector wobble while still updating in ~1 frame pair.
+    private static final int LIVE_FREIGHT_COUNT_CONFIRM_FRAMES = 2;
+    private static final long LIVE_FREIGHT_COUNT_CONFIRM_MS = 24L;
     private static final long EXTERNAL_APP_MENU_MINIMIZE_MS = 1050L;
     private static final long FAST_SELECTION_CONFIRM_WINDOW_MS = 900L;
     private static final long FAST_SELECTION_FALSE_POSITIVE_TIMEOUT_MS = 950L;
@@ -189,16 +204,26 @@ public class GtoObserverService extends Service {
     // latest frame only and performs a bounded fallback pass for "Concluído + valor";
     // selection/list identity never depends on route OCR. We intentionally avoid reviving
     // color/pixel result gates because the NVU overlay itself is part of MediaProjection.
-    private static final long ACTIVE_TRIP_VISUAL_PROBE_MS = 180L;
-    private static final long ACTIVE_TRIP_RESULT_FALLBACK_OCR_MS = 1800L;
+    private static final long ACTIVE_TRIP_VISUAL_PROBE_MS = 32L;
+    private static final long ACTIVE_TRIP_RESULT_FALLBACK_OCR_MS = 220L;
+    // HF32: the OCR-free visual recognizer runs continuously while capture is needed.
+    // State rules decide whether recognized evidence may mutate the journey; recognition
+    // itself is never disabled merely because a different GTO step is active.
+    private static final long SCREEN_RECOGNITION_TELEMETRY_MS = 750L;
     private static final int ACTIVE_TRIP_FREIGHT_LIST_CONFIRM_FRAMES = 2;
-    private static final long ACTIVE_TRIP_FREIGHT_LIST_CONFIRM_MS = 180L;
+    private static final long ACTIVE_TRIP_FREIGHT_LIST_CONFIRM_MS = 55L;
+    // HF35: visual geometry is only a candidate. Any lifecycle transition caused by the
+    // jobs list requires a fresh semantic certification from the same saved right-panel
+    // snapshot. This keeps recognition fast while making false HUB/HUD matches harmless.
+    private static final long ACTIVE_TRIP_FREIGHT_SEMANTIC_RETRY_MS = 180L;
+    private static final long ACTIVE_TRIP_FREIGHT_SEMANTIC_REJECT_BACKOFF_MS = 520L;
+    private static final long ACTIVE_TRIP_FREIGHT_SEMANTIC_FRESH_MS = 1600L;
     // When the driver opens the GTO freight list before pressing the NVU floating
     // button, the observer must still bootstrap the operation from the live list.
     // Keep this gate shorter than the normal stale-session replacement gate so a
     // fast "Aceitar" press is not lost while the APK UI is being opened.
     private static final int UNARMED_FREIGHT_LIST_CONFIRM_FRAMES = 2;
-    private static final long UNARMED_FREIGHT_LIST_CONFIRM_MS = 180L;
+    private static final long UNARMED_FREIGHT_LIST_CONFIRM_MS = 55L;
     // R3.6: an exact touch on Receber is a durable completion event. It has no timeout.
     // Once latched, loading/logo screens and elapsed time cannot invalidate the delivery.
     // Explicit ADS touches remain a separate action and never enter the normal receive path.
@@ -207,6 +232,13 @@ public class GtoObserverService extends Service {
 
     private static volatile boolean running = false;
     private static volatile GtoObserverService instance;
+    // In-process duplicate-safe handoff for OEMs that delay the service Intent carrying
+    // MediaProjection RESULT_OK. The object is never persisted and is cleared as soon as
+    // getMediaProjection() consumes the grant or the handoff becomes obsolete.
+    private static final Object PROJECTION_GRANT_LOCK = new Object();
+    private static Intent stagedProjectionGrantData;
+    private static int stagedProjectionGrantResultCode = 0;
+    private static long stagedProjectionGrantResultAt = 0L;
 
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final AtomicBoolean ocrBusy = new AtomicBoolean(false);
@@ -229,6 +261,23 @@ public class GtoObserverService extends Service {
     private TextView bubbleRemoveTargetView;
     private WindowManager.LayoutParams bubbleRemoveTargetParams;
     private boolean bubbleRemoveTargetHighlighted = false;
+    // HF31: authoritative gesture state lives at service scope instead of inside the
+    // View.OnTouchListener closure. This lets foreground/lifecycle watchdogs invalidate
+    // an orphaned destructive gesture even when Android never sends its terminal event.
+    private long bubbleGestureGeneration = 0L;
+    private long bubbleActiveGestureGeneration = 0L;
+    private long bubbleRemoveTargetGestureGeneration = 0L;
+    private int bubbleGesturePointerId = MotionEvent.INVALID_POINTER_ID;
+    private boolean bubbleGestureActive = false;
+    private boolean bubbleDragging = false;
+    private boolean bubbleGestureStartedOutsideGto = false;
+    private float bubbleGestureDownRawX = 0f;
+    private float bubbleGestureDownRawY = 0f;
+    private int bubbleGestureStartX = 0;
+    private int bubbleGestureStartY = 0;
+    private long bubbleGestureDownAt = 0L;
+    private long bubbleGestureLastEventAt = 0L;
+    private Runnable bubbleGestureExpiryRunnable;
     private Boolean lastCaptureHealthIndicatorState = null;
     private WindowManager.LayoutParams bubbleParams;
     private LinearLayout menuView;
@@ -291,10 +340,21 @@ public class GtoObserverService extends Service {
     private float replacementFreightPressedScore = 0f;
     private boolean replacementFreightTouchPending = false;
     private long replacementFreightTouchAt = 0L;
-    // Active trips never enter replacement mode from pixels alone. The driver must arm
-    // the explicit "Trocar frete atual" action while a real GTO freight list is visible.
-    private boolean freightReplacementExplicitlyArmed = false;
-    private long freightReplacementExplicitlyArmedAt = 0L;
+    private long replacementFreightCandidateGeneration = 0L;
+    private boolean replacementFreightSemanticCertified = false;
+    private long replacementFreightSemanticCertifiedAt = 0L;
+    private int replacementFreightSemanticAnchorRows = 0;
+    private int replacementFreightSemanticCompleteRows = 0;
+    // HF37: lifecycle certification already parsed the exact replacement page. Keep a
+    // detached semantic copy so cancelling the previous trip cannot erase the new page
+    // before a fast Aceitar touch is correlated. These rows belong only to the current
+    // replacementFreightCandidateGeneration and are cleared on any page/candidate reset.
+    private final List<FreightOption> replacementFreightCertifiedOptions = new ArrayList<>();
+    private long lastReplacementFreightSemanticOcrAt = 0L;
+    private long replacementFreightSemanticRejectedAt = 0L;
+    // HF35: active trip cancellation is never authorized by pixels alone. Visual list
+    // geometry only arms a candidate; semantic list evidence from the same panel snapshot
+    // must certify the lifecycle boundary before the previous trip can be discarded.
     private boolean activeTripFreightListVisible = false;
     private long activeTripFreightListLastSeenAt = 0L;
     private GtoFastVisualDetector.Frame activeTripFreightListBaseline;
@@ -319,6 +379,12 @@ public class GtoObserverService extends Service {
     private int deferredSelectionFailureRow = -1;
     private String deferredSelectionFailureReason = "";
     private boolean deferredNormalResultConfirmation = false;
+    // HF45: a semantically certified freight list may appear while the previous
+    // delivery result is still protected. Seal that delivery into the durable queue
+    // first, but keep ownership of the already-certified NEW page until the replacement
+    // session is created. This prevents RESULT_CONFIRMED from becoming a dead-end between
+    // the old result and the visible next jobs list.
+    private boolean deferAutoNextPreparationForCertifiedListBoundary = false;
     private long lastDriverErrorNoticeAt = 0L;
     private long lastDriverStageRetryAt = 0L;
     private long lastGtoForegroundEvidenceAt = 0L;
@@ -327,6 +393,12 @@ public class GtoObserverService extends Service {
     private long suppressForegroundHideUntil = 0L;
     private boolean projectionPermissionInFlight = false;
     private boolean projectionPermissionAfterGtoOpenPending = false;
+    // HF27: sticky proof that the MediaProjection consent flow was launched from a
+    // positively verified GTO foreground. It bridges OEM UsageStats lag after consent
+    // until Android reports a concrete foreground owner; it never overrides a known
+    // third-party package.
+    private boolean projectionVerifiedGtoBridgeActive = false;
+    private boolean nvuMainActivityForeground = false;
     private long projectionPermissionAfterGtoOpenArmedAt = 0L;
     private long projectionPermissionLandscapeStableSince = 0L;
     private int projectionPermissionLandscapeWidth = 0;
@@ -362,12 +434,18 @@ public class GtoObserverService extends Service {
     // invalidates callbacks from the previous token so an old onStop() can never release
     // the newly-created ImageReader/VirtualDisplay.
     private long projectionGeneration = 0L;
+    private boolean projectionVirtualDisplayEverCreated = false;
     private int captureResizeRetryCount = 0;
     private int projectionSurfaceRebindAttempts = 0;
     private long lastProjectionSurfaceRecoveryAt = 0L;
     private long lastProjectionAutoReauthAt = 0L;
     private long lastProjectionFrameAt = 0L;
+    // HF32: this timestamp means a real screen classifier completed, not just that a
+    // stability frame arrived. It is the authoritative recognition heartbeat.
     private long lastProjectionAnalyzedFrameAt = 0L;
+    private long lastFreightProducerTimestampNs = 0L;
+    private long lastAnalysisProducerTimestampNs = 0L;
+    private long lastScreenRecognitionTelemetryAt = 0L;
     private VirtualDisplay virtualDisplay;
     private ImageReader imageReader;
     private TextRecognizer textRecognizer;
@@ -419,7 +497,9 @@ public class GtoObserverService extends Service {
     private long resultScreenLastSeenAt = 0L;
     private long resultActionTouchAt = 0L;
     private long resultExitSeenAt = 0L;
+    private long resultAdUiLastSeenAt = 0L;
     private int gameplayFramesAfterResult = 0;
+    private int resultDialogVisualAbsentFrames = 0;
     private boolean manualFinishCapturePending = false;
     private long manualFinishRequestedAt = 0L;
     private int manualFinishAttempts = 0;
@@ -481,6 +561,11 @@ public class GtoObserverService extends Service {
     private long freightSemanticCertifiedAt = 0L;
     private int freightSemanticAnchorRows = 0;
     private int freightEvidenceRetryCount = 0;
+    // HF44: UI-only debounce for the sticky "lista detectada" count. This never grants
+    // list authority and never mutates a trip; semantic certification remains mandatory.
+    private int liveFreightMessageCandidateCount = 0;
+    private int liveFreightMessageCandidateFrames = 0;
+    private long liveFreightMessageCandidateSince = 0L;
     private long lastFreightPageOcrAt = 0L;
     private boolean fastTouchPulseActive = false;
     private long fastTouchPulseAt = 0L;
@@ -517,10 +602,12 @@ public class GtoObserverService extends Service {
             // still bootstrap the surface on OEMs whose foreground event arrives late.
             maybeStartPendingProjectionSurface(now);
             maybeRecoverProjectionFrameDelivery(now);
+            expireBubbleGestureIfStale(now);
 
             // OEMs can detach an overlay without throwing through our original addView().
             // Treat a detached bubble as absent so the existing retry path can restore it.
             if (bubbleView != null && !bubbleView.isAttachedToWindow()) {
+                cancelBubbleGesture("BUBBLE_DETACHED", true);
                 bubbleView = null;
                 captureHealthDotView = null;
                 lastCaptureHealthIndicatorState = null;
@@ -544,11 +631,19 @@ public class GtoObserverService extends Service {
                 && getPackageName().equals(foregroundPackage);
             boolean visualBridgeAllowed = visualGtoProofFresh
                 && (packageUnknown || ownPermissionReturnBridge);
+            boolean verifiedProjectionBridgeAllowed = GtoProjectionForegroundBridgePolicy.allow(
+                projectionVerifiedGtoBridgeActive,
+                transientForegroundSurfaceActive,
+                packageMatchesGto,
+                packageUnknown,
+                getPackageName().equals(foregroundPackage),
+                nvuMainActivityForeground
+            );
             if (transientForegroundSurfaceActive
                 && gtoForeground
                 && transientForegroundSurfaceAt > 0L
                 && now - transientForegroundSurfaceAt >= TRANSIENT_OVERLAY_STALE_RECOVERY_MS
-                && (packageMatchesGto || visualBridgeAllowed)) {
+                && (packageMatchesGto || visualBridgeAllowed || verifiedProjectionBridgeAllowed)) {
                 // Fail-open only to ANALYSIS, never to data acceptance: every screen/freight
                 // still has to pass its ordinary visual + OCR consensus gates. This repairs
                 // OEMs that omit the transient-surface background event and would otherwise
@@ -563,13 +658,13 @@ public class GtoObserverService extends Service {
 
             boolean rawGto = observerPermissionsReady
                 && !transientForegroundSurfaceActive
-                && (packageMatchesGto || visualBridgeAllowed);
+                && (packageMatchesGto || visualBridgeAllowed || verifiedProjectionBridgeAllowed);
 
             if (rawGto) {
                 // A remove target is only meaningful outside GTO while the user is dragging.
                 // If foreground changes mid-gesture, remove the helper immediately without
                 // touching the primary bubble or the observer state.
-                hideBubbleRemoveTarget();
+                disarmBubbleStopForCurrentGesture("GTO_FOREGROUND");
                 long absenceMs = nonGtoForegroundSince > 0L ? now - nonGtoForegroundSince : 0L;
                 lastGtoForegroundEvidenceAt = now;
                 nonGtoForegroundSince = 0L;
@@ -603,8 +698,10 @@ public class GtoObserverService extends Service {
                 // simply retry on the next foreground poll instead of racing the bubble.
                 maybeLaunchInitialProjectionPermissionOverGto(now);
                 retryPendingDriverStageIfNeeded(now);
+                recoverSealedCompletionToWaitingIfNeeded();
                 updateFreightTouchPulseSensor();
                 ensureProjectionAuthorizationIfNeeded(now);
+                enforceOperationalReadiness(now, observerPermissionsReady);
             } else if (transientForegroundSurfaceActive && gtoForeground) {
                 // Do not destroy/recreate the main floating bubble for notification shade,
                 // permission controller or OEM game-assistant surfaces. OCR/touch sensing is
@@ -641,6 +738,7 @@ public class GtoObserverService extends Service {
                 suspendPassiveDetectionOverlaysKeepBubbleAndMenu();
             }
 
+            if (!rawGto) enforceOperationalReadiness(now, observerPermissionsReady);
             updateCaptureHealthIndicator(now);
 
             if (now - lastAutoSyncRetryAt >= AUTO_SYNC_RETRY_INTERVAL_MS && GtoAutoTripSync.hasPending(GtoObserverService.this)) {
@@ -714,8 +812,8 @@ public class GtoObserverService extends Service {
 
         if (activeLegacyUntrusted) {
             String unsafeSession = prefs.getString("gtoTripSessionId", "");
+            if (!clearTripAnalysis()) return;
             GtoAutoTripSync.discardSessionSnapshot(this, unsafeSession);
-            clearTripAnalysis();
             prefs.edit()
                 .putString("tripState", STATE_IDLE)
                 .putString("lastEvent", "Frete legado sem prova humana descartado · inicie o trabalho novamente")
@@ -893,6 +991,7 @@ public class GtoObserverService extends Service {
         if (context == null) return;
         String safeStatus = status == null || status.trim().isEmpty() ? "PERMISSION_FLOW_FAILED" : status.trim();
         String safeError = error == null ? "" : error.trim();
+        clearStagedProjectionGrant(0L);
         SharedPreferences shared = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
         shared.edit()
             .putBoolean("projectionPermissionInFlight", false)
@@ -948,8 +1047,89 @@ public class GtoObserverService extends Service {
         }
         updateNotification();
         scheduleBubbleRestoreAfterPermission();
-        if (gtoForeground) {
-            showStatusChip("A autorização de leitura não foi concluída. Abra a bolinha NVU e tente novamente.", 4200L);
+        if (captureIsNeededForCurrentState()) {
+            showStatusChip("A autorização não concluiu. O NVU vai tentar reabrir a confirmação automaticamente.", 3800L);
+            mainHandler.postDelayed(
+                () -> ensureProjectionAuthorizationIfNeeded(System.currentTimeMillis()),
+                320L
+            );
+        }
+    }
+
+    public static void reportMainActivityForeground(boolean foreground) {
+        GtoObserverService live = instance;
+        if (live == null || !running) return;
+        live.mainHandler.post(() -> {
+            live.nvuMainActivityForeground = foreground;
+            if (live.prefs != null) {
+                live.prefs.edit()
+                    .putBoolean("nvuMainActivityForeground", foreground)
+                    .putLong("nvuMainActivityForegroundChangedAt", System.currentTimeMillis())
+                    .apply();
+            }
+        });
+    }
+
+    public static void stageProjectionGrantFromPermissionHost(int resultCode, Intent resultData, long resultAt) {
+        if (resultCode != android.app.Activity.RESULT_OK || resultData == null || resultAt <= 0L) return;
+        synchronized (PROJECTION_GRANT_LOCK) {
+            stagedProjectionGrantResultCode = resultCode;
+            stagedProjectionGrantData = resultData;
+            stagedProjectionGrantResultAt = resultAt;
+        }
+    }
+
+    public static boolean rescueStagedProjectionGrantIfRunning(long expectedResultAt) {
+        GtoObserverService live = instance;
+        if (live == null || !running) return false;
+        live.mainHandler.post(() -> live.bindStagedProjectionGrantIfNeeded(expectedResultAt));
+        return true;
+    }
+
+    private static Intent peekStagedProjectionGrant(int expectedCode, long minResultAt) {
+        synchronized (PROJECTION_GRANT_LOCK) {
+            if (stagedProjectionGrantData == null
+                || stagedProjectionGrantResultCode != expectedCode
+                || stagedProjectionGrantResultAt < minResultAt) return null;
+            return stagedProjectionGrantData;
+        }
+    }
+
+    private static void clearStagedProjectionGrant(long throughResultAt) {
+        synchronized (PROJECTION_GRANT_LOCK) {
+            if (stagedProjectionGrantData == null) return;
+            if (throughResultAt > 0L && stagedProjectionGrantResultAt > throughResultAt) return;
+            stagedProjectionGrantData = null;
+            stagedProjectionGrantResultCode = 0;
+            stagedProjectionGrantResultAt = 0L;
+        }
+    }
+
+    private void bindStagedProjectionGrantIfNeeded(long expectedResultAt) {
+        if (destroying || !running) return;
+        if (projectionActive || projectionSurfacePending || mediaProjection != null) {
+            clearStagedProjectionGrant(expectedResultAt);
+            projectionPermissionInFlight = false;
+            prefs.edit().putBoolean("projectionPermissionInFlight", false).apply();
+            return;
+        }
+        Intent staged = peekStagedProjectionGrant(android.app.Activity.RESULT_OK, expectedResultAt);
+        if (staged == null) return;
+        try {
+            startForegroundForTypes(true);
+            prefs.edit()
+                .putLong("projectionGrantDirectRescueAt", System.currentTimeMillis())
+                .putString("lastEvent", "Compartilhamento aceito · resgatando autorização diretamente no observador")
+                .apply();
+            acceptProjectionGrantOnMainThread(android.app.Activity.RESULT_OK, staged);
+        } catch (Exception ex) {
+            prefs.edit()
+                .putString("projectionError", "Grant rescue: " + describeError(ex))
+                .putLong("projectionErrorAt", System.currentTimeMillis())
+                .putBoolean("projectionReauthRequired", true)
+                .putBoolean("projectionReauthAutoAllowed", true)
+                .putString("lastEvent", "Falha no resgate direto da autorização; recuperação automática continuará")
+                .apply();
         }
     }
 
@@ -966,13 +1146,14 @@ public class GtoObserverService extends Service {
      * be launched, so keeping the grant in-process removes the asynchronous service-intent
      * race that could briefly make an accepted grant look unauthorized again.
      */
-    // HF10 deliberately has no direct/static RESULT_OK binding path. The permission
-    // Activity always dispatches ACTION_START_PROJECTION so Android can recreate the
-    // service/process and the documented foreground-service ordering remains intact.
+    // HF30 keeps ACTION_START_PROJECTION as the process-recreation-safe authoritative
+    // path and also stages RESULT_OK in-process so an OEM-delayed service Intent cannot
+    // strand an already accepted one-use grant.
 
     private boolean acceptProjectionGrantOnMainThread(int resultCode, Intent resultData) {
         if (resultCode != android.app.Activity.RESULT_OK || resultData == null) return false;
         if (projectionActive || (projectionSurfacePending && mediaProjection != null)) {
+            clearStagedProjectionGrant(prefs.getLong("projectionConsentResultAt", 0L));
             projectionPermissionInFlight = false;
             prefs.edit()
                 .putBoolean("projectionPermissionInFlight", false)
@@ -1114,6 +1295,8 @@ public class GtoObserverService extends Service {
             .remove("projectionConsentResultAt")
             .remove("projectionGrantReceivedAt")
             .putBoolean("overlayVisible", false)
+            .putBoolean("observerOperationalReady", false)
+            .putString("observerOperationalStatus", "STARTING")
             .putLong("serviceStartedAt", serviceNow)
             .putLong("serviceHeartbeatAt", serviceNow)
             .remove("startError")
@@ -1125,6 +1308,41 @@ public class GtoObserverService extends Service {
         selectionTextRecognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS);
         recordObserverEvent("SERVICE_STARTED", "Observador inicializado");
         sanitizeLegacyUntrustedPendingSelectionOnStartup();
+
+        // HF42 crash-safe terminal proof recovery. A certified result is stronger than
+        // volatile service/UI state. If the dedicated proof store write was interrupted
+        // but the synchronous runtime/session snapshot survived, promote that evidence
+        // back into the separate escrow before any stale-state cleanup can run.
+        String runtimeCertifiedSession = prefs.getString("resultCertifiedSessionId", "");
+        if (runtimeCertifiedSession.isEmpty()) runtimeCertifiedSession = prefs.getString("gtoTripSessionId", "");
+        if (prefs.getBoolean("resultCertifiedLatched", false)
+            && !prefs.getBoolean("resultWatchedAdEvidence", false)
+            && !runtimeCertifiedSession.isEmpty()
+            && GtoAutoTripSync.hasRecoverableSessionSnapshot(this, runtimeCertifiedSession, true)
+            && !GtoResultProofStore.hasCertified(this, runtimeCertifiedSession)) {
+            GtoResultProofStore.certify(
+                this, runtimeCertifiedSession, prefs.getString("resultValue", ""),
+                prefs.getString("resultSnapshotPath", ""), prefs.getLong("resultCertifiedAt", serviceNow)
+            );
+        }
+        // If a previous lifecycle path lost volatile runtime keys before the completed
+        // payload was sealed, restore the immutable freight snapshot and result proof
+        // first, then resume RESULT_DETECTED instead of silently IDLE.
+        String protectedResultSession = GtoResultProofStore.protectedSessionId(this);
+        if (!protectedResultSession.isEmpty()
+            && GtoAutoTripSync.hasRecoverableSessionSnapshot(this, protectedResultSession, true)
+            && !GtoAutoTripSync.hasPendingSession(this, protectedResultSession)) {
+            prefs.edit()
+                .putString("gtoTripSessionId", protectedResultSession)
+                .putLong("gtoTripSessionStartedAt", Math.max(1L, prefs.getLong("gtoTripSessionStartedAt", serviceNow)))
+                .putString("tripState", STATE_RESULT_DETECTED)
+                .putString("completionStatus", "RESULT_CERTIFIED_PENDING_ACTION")
+                .putString("gtoTripSyncStatus", GtoAutoTripSync.STATUS_IN_PROGRESS)
+                .putString("lastEvent", "Entrega certificada restaurada do cofre local · aguardando resolução terminal")
+                .apply();
+            GtoAutoTripSync.restoreLockedFreightToPrefs(this, prefs, protectedResultSession);
+            GtoResultProofStore.restoreToRuntime(this, prefs, protectedResultSession);
+        }
         // MediaProjection itself cannot survive process death, but the immutable FIX18
         // operation/freight snapshot can. Preserve a real in-progress session and only
         // require the driver to re-authorize screen reading when capture is needed again.
@@ -1136,11 +1354,20 @@ public class GtoObserverService extends Service {
             && !GtoAutoTripSync.STATUS_SYNCED.equals(restoredSyncStatus);
         boolean recoverActiveTrip = isRecoverableActiveState(restoredState)
             && hasFreshDurableSession(restoredState);
+        boolean recoverWaitingObserver = STATE_WAITING_FREIGHT.equals(restoredState)
+            && prefs.getBoolean("enabled", false);
         String restoredResultAction = prefs.getString("resultAction", "");
         boolean recoverExactReceive = recoverActiveTrip
             && (STATE_RESULT_DETECTED.equals(restoredState) || STATE_AWAITING_BONUS.equals(restoredState))
-            && ("RECEIVE".equals(restoredResultAction) || "RECEIVE_FALLBACK_CONFIRMED".equals(restoredResultAction))
-            && prefs.getBoolean("resultReceiveLatched", false);
+            && restoredResultAction != null
+            && restoredResultAction.startsWith("RECEIVE")
+            && prefs.getBoolean("resultReceiveLatched", false)
+            && prefs.getBoolean("resultCertifiedLatched", false)
+            && !prefs.getBoolean("resultWatchedAdEvidence", false);
+        boolean recoverCertifiedResult = recoverActiveTrip
+            && (STATE_RESULT_DETECTED.equals(restoredState) || STATE_AWAITING_BONUS.equals(restoredState))
+            && prefs.getBoolean("resultCertifiedLatched", false)
+            && !prefs.getBoolean("resultWatchedAdEvidence", false);
 
         if (recoverCompletedTrip) {
             prefs.edit()
@@ -1170,9 +1397,24 @@ public class GtoObserverService extends Service {
                     ? "Viagem GTO preservada após reinício · autorize a leitura da tela para finalizar"
                     : "Sessão GTO preservada após reinício · autorize a leitura da tela")
                 .apply();
+        } else if (recoverWaitingObserver) {
+            // WAITING_FREIGHT has no immutable selected-row snapshot yet, but the observer
+            // operation itself is durable. If Android recreates the sticky service, keep
+            // waiting for a freight and automatically request a fresh MediaProjection; do
+            // not silently fall back to IDLE and leave GTO Observe dead.
+            prefs.edit()
+                .putString("tripState", STATE_WAITING_FREIGHT)
+                .putString("projectionStatus", "REAUTH_REQUIRED_AFTER_SERVICE_RESTART")
+                .putBoolean("projectionReauthRequired", true)
+                .putBoolean("projectionReauthAutoAllowed", true)
+                .putBoolean("projectionReauthNoticeShown", false)
+                .putString("lastEvent", "Observador restaurado após reinício · aguardando GTO para renovar a leitura")
+                .apply();
         } else if (!STATE_IDLE.equals(restoredState)) {
-            GtoAutoTripSync.discardSessionSnapshot(this, prefs.getString("gtoTripSessionId", ""));
-            clearTripAnalysis();
+            String staleSessionId = prefs.getString("gtoTripSessionId", "");
+            if (clearTripAnalysis()) {
+                GtoAutoTripSync.discardSessionSnapshot(this, staleSessionId);
+            }
             prefs.edit()
                 .putString("tripState", STATE_IDLE)
                 .putString("lastEvent", "Sessão GTO anterior encerrada com segurança")
@@ -1188,6 +1430,14 @@ public class GtoObserverService extends Service {
             // The exact Receber action is durable. A process restart after the tap must
             // continue completion immediately instead of waiting for the GTO screen again.
             mainHandler.postDelayed(this::confirmNormalResultAutomatically, 250L);
+        } else if (recoverCertifiedResult) {
+            // Result proof itself survives process death. Re-arm observation and keep the
+            // delivery protected until Receive/no-ad/list-boundary resolves it.
+            prefs.edit()
+                .putString("lastEvent", "Entrega certificada recuperada · monitorando somente evidência terminal")
+                .apply();
+            mainHandler.postDelayed(this::updateFreightTouchPulseSensor, 250L);
+            mainHandler.postDelayed(this::flushAutomaticTripQueue, 1200L);
         } else {
             mainHandler.postDelayed(this::flushAutomaticTripQueue, 1200L);
         }
@@ -1198,9 +1448,12 @@ public class GtoObserverService extends Service {
         String action = intent != null ? intent.getAction() : ACTION_START;
 
         if (ACTION_STOP.equals(action)) {
+            clearStagedProjectionGrant(0L);
             prefs.edit()
                 .putBoolean("enabled", false)
                 .putBoolean("overlayVisible", false)
+                .putBoolean("observerOperationalReady", false)
+                .putString("observerOperationalStatus", "OFF")
                 .remove("startError")
                 .apply();
             stopProjection();
@@ -1211,6 +1464,7 @@ public class GtoObserverService extends Service {
         }
 
         if (ACTION_PROJECTION_DENIED.equals(action)) {
+            clearStagedProjectionGrant(0L);
             projectionPermissionAfterGtoOpenPending = false;
             projectionPermissionAfterGtoOpenArmedAt = 0L;
             projectionPermissionInFlight = false;
@@ -1259,29 +1513,58 @@ public class GtoObserverService extends Service {
             .putLong("serviceHeartbeatAt", startedAt)
             .remove("startError")
             .apply();
+        boolean projectionGrantAction = ACTION_START_PROJECTION.equals(action);
         try {
             // The RESULT_OK handoff is the exact point where Android allows the
             // mediaProjection foreground-service type on Android 14+. Promote the
             // already-running observer *before* getMediaProjection(), and never
             // downgrade while a projection is bound/active.
-            boolean projectionGrantAction = ACTION_START_PROJECTION.equals(action);
             startForegroundForTypes(
                 projectionGrantAction || projectionActive || projectionSurfacePending || mediaProjection != null
             );
         } catch (Exception ex) {
-            running = false;
+            // A transient failure while adding the mediaProjection service type must not
+            // kill GTO Observe. Keep the base observer foreground if possible, preserve
+            // all trip state, and let the supervisor retry the Android consent path.
+            String detail = describeError(ex);
             prefs.edit()
-                .putString("startError", describeError(ex))
-                .putLong("serviceHeartbeatAt", 0L)
+                .putString("startError", detail)
+                .putString("projectionError", projectionGrantAction ? "FGS projection type: " + detail : detail)
+                .putLong("serviceHeartbeatAt", startedAt)
+                .putString("lastEvent", projectionGrantAction
+                    ? "Falha transitória ao promover serviço de captura · observador preservado"
+                    : "Falha ao atualizar serviço em primeiro plano · observador continuará tentando")
                 .apply();
-            stopSelf();
-            return START_NOT_STICKY;
+            try {
+                startForegroundForTypes(false);
+            } catch (Exception fallbackEx) {
+                prefs.edit()
+                    .putString("startError", describeError(fallbackEx))
+                    .putString("lastEvent", "Android recusou a atualização do foreground; serviço sticky preservado")
+                    .apply();
+            }
+            if (projectionGrantAction) {
+                projectionPermissionInFlight = false;
+                projectionStatus = "PROJECTION_FGS_PROMOTION_FAILED";
+                prefs.edit()
+                    .putBoolean("projectionPermissionInFlight", false)
+                    .putString("projectionStatus", projectionStatus)
+                    .putBoolean("projectionReauthRequired", true)
+                    .putBoolean("projectionReauthAutoAllowed", true)
+                    .putBoolean("projectionReauthNoticeShown", false)
+                    .apply();
+            }
         }
         scheduleForegroundPoll();
 
         if (ACTION_START_PROJECTION.equals(action)) {
             int resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, 0);
             Intent resultData = readProjectionData(intent);
+            if (resultData == null && resultCode == android.app.Activity.RESULT_OK) {
+                resultData = peekStagedProjectionGrant(
+                    resultCode, prefs.getLong("projectionConsentResultAt", 0L)
+                );
+            }
             boolean accepted = resultCode == android.app.Activity.RESULT_OK
                 && resultData != null
                 && acceptProjectionGrantOnMainThread(resultCode, resultData);
@@ -1304,6 +1587,10 @@ public class GtoObserverService extends Service {
                     .putBoolean("projectionReauthNoticeShown", false)
                     .putString("lastEvent", "Autorização recebida sem token de captura válido")
                     .apply();
+                mainHandler.postDelayed(
+                    () -> ensureProjectionAuthorizationIfNeeded(System.currentTimeMillis()),
+                    320L
+                );
             }
             scheduleBubbleRestoreAfterPermission();
         }
@@ -1533,7 +1820,12 @@ public class GtoObserverService extends Service {
     }
 
     private boolean isResultTrackingState(String state) {
+        // HF34: result recognition is a continuous screen state, not a one-shot edge.
+        // RESULT_DETECTED/AWAITING_BONUS must keep receiving semantic OCR so a subsequent
+        // Receber, ADS/bonus, gameplay return or jobs-list boundary is resolved in real time.
         return STATE_TRIP_IN_PROGRESS.equals(state)
+            || STATE_RESULT_DETECTED.equals(state)
+            || STATE_AWAITING_BONUS.equals(state)
             || (STATE_CONFIRMING_FREIGHT.equals(state) && isFreightReviewPending());
     }
 
@@ -1546,24 +1838,56 @@ public class GtoObserverService extends Service {
     }
 
     private boolean captureIsNeededForCurrentState() {
-        String state = getTripState();
-        return STATE_WAITING_FREIGHT.equals(state)
-            || STATE_CONFIRMING_FREIGHT.equals(state)
-            || STATE_TRIP_IN_PROGRESS.equals(state)
-            || STATE_RESULT_DETECTED.equals(state)
-            || STATE_AWAITING_BONUS.equals(state);
+        // HF33: capture ownership belongs to GTO Observe, never to a trip-state enum.
+        // The previous state-gated implementation created a circular blind spot: IDLE/
+        // CANCELLED expected the freight-list detector to bootstrap WAITING_FREIGHT, but
+        // those same states disabled capture/recognition before the detector could see it.
+        // Once Observe is enabled, the MediaProjection pipeline remains eligible for every
+        // GTO state; the reducer below decides whether recognized pixels may mutate a trip.
+        return prefs != null && prefs.getBoolean("enabled", false);
     }
 
     private void maybeNotifyProjectionReauthorization() {
         if (projectionActive || projectionPermissionInFlight || projectionSurfacePending || !captureIsNeededForCurrentState()) return;
         if (!prefs.getBoolean("projectionReauthRequired", false)) return;
         if (prefs.getBoolean("projectionReauthNoticeShown", false)) return;
+        boolean autoAllowed = prefs.getBoolean("projectionReauthAutoAllowed", true);
         prefs.edit()
             .putBoolean("projectionReauthNoticeShown", true)
-            .putString("lastEvent", "Leitura da tela precisa ser autorizada novamente pela bolinha NVU")
+            .putString("lastEvent", autoAllowed
+                ? "Leitura encerrada pelo Android · renovação automática preparada"
+                : "Leitura da tela precisa de nova autorização do motorista")
             .apply();
-        showStatusChip("Leitura da tela foi encerrada pelo Android. Abra a bolinha NVU e toque em Autorizar leitura da tela.", 5200L);
+        showStatusChip(autoAllowed
+            ? "A leitura foi interrompida pelo Android. O NVU vai reabrir a confirmação automaticamente."
+            : "A leitura foi recusada. Abra a bolinha NVU quando quiser autorizar novamente.", 4800L);
         updateNotification();
+    }
+
+    private boolean hasVerifiedGtoProjectionBridge() {
+        boolean packageMatchesGto = GTO_PACKAGE.equals(foregroundPackage);
+        boolean packageUnknown = foregroundPackage == null || foregroundPackage.isEmpty();
+        boolean packageIsNvu = getPackageName().equals(foregroundPackage);
+        return GtoProjectionForegroundBridgePolicy.allow(
+            projectionVerifiedGtoBridgeActive,
+            transientForegroundSurfaceActive,
+            packageMatchesGto,
+            packageUnknown,
+            packageIsNvu,
+            nvuMainActivityForeground
+        );
+    }
+
+
+    private boolean hasTrustedGtoContextForProjectionRecovery(long now) {
+        if (transientForegroundSurfaceActive) return false;
+        // Exact UsageStats evidence from GTO is stronger than a stale MainActivity latch.
+        if (GTO_PACKAGE.equals(foregroundPackage)) return true;
+        if (nvuMainActivityForeground) return false;
+        boolean visualFresh = lastVisualGtoForegroundEvidenceAt > 0L
+            && now >= lastVisualGtoForegroundEvidenceAt
+            && now - lastVisualGtoForegroundEvidenceAt <= VISUAL_GTO_EVIDENCE_FRESH_MS;
+        return visualFresh || hasVerifiedGtoProjectionBridge();
     }
 
     private void ensureProjectionAuthorizationIfNeeded(long now) {
@@ -1571,15 +1895,15 @@ public class GtoObserverService extends Service {
         maybeNotifyProjectionReauthorization();
 
         DisplayMetrics metrics = realDisplayMetrics();
-        boolean exactGto = gtoForeground && GTO_PACKAGE.equals(foregroundPackage);
+        boolean trustedGtoContext = hasTrustedGtoContextForProjectionRecovery(now);
         boolean landscape = metrics.widthPixels > metrics.heightPixels && metrics.heightPixels > 0;
         boolean bubbleAttached = bubbleView != null && bubbleView.isAttachedToWindow();
         boolean autoAllowed = prefs.getBoolean("projectionReauthAutoAllowed", true);
         if (!GtoProjectionRecoveryPolicy.shouldAutoRequest(
             true,
             autoAllowed,
-            gtoForeground,
-            exactGto,
+            trustedGtoContext,
+            trustedGtoContext,
             landscape,
             bubbleAttached,
             true,
@@ -1652,9 +1976,13 @@ public class GtoObserverService extends Service {
         );
         long resultAt = prefs.getLong("projectionConsentResultAt", 0L);
         if (resultAt > 0L && resultAt >= requestAt) {
-            // RESULT_OK/RESULT_CANCELED should immediately transition through the host.
-            // Reaching this branch without a bound token means the callback path did not
-            // finish cleanly; expose a terminal state instead of silently requesting again.
+            // HF30: RESULT_OK is not a failure just because the service Intent has not
+            // reached onStartCommand yet. First rescue the staged in-process grant and give
+            // the foreground service a bounded dispatch window. Only after that window do
+            // we arm a fresh Android request, automatically, while preserving the trip.
+            bindStagedProjectionGrantIfNeeded(resultAt);
+            if (projectionActive || projectionSurfacePending || mediaProjection != null) return;
+            if (now >= resultAt && now - resultAt < PROJECTION_GRANT_DISPATCH_GRACE_MS) return;
             projectionPermissionInFlight = false;
             projectionStatus = "CONSENT_RESULT_UNBOUND";
             prefs.edit()
@@ -1663,10 +1991,38 @@ public class GtoObserverService extends Service {
                 .putBoolean("projectionReauthRequired", true)
                 .putBoolean("projectionReauthAutoAllowed", true)
                 .putBoolean("projectionReauthNoticeShown", false)
-                .putString("projectionError", "O Android devolveu o resultado da autorização, mas nenhuma sessão de captura ficou vinculada.")
-                .putString("lastEvent", "Resultado de autorização sem sessão vinculada · nova tentativa manual necessária")
+                .putString("projectionError", "O Android aceitou o compartilhamento, mas o token não chegou ao serviço dentro da janela de vínculo.")
+                .putString("lastEvent", "Resultado de autorização sem vínculo · reativação automática armada")
                 .apply();
             if (menuView != null) mainHandler.post(this::refreshMenuContents);
+            mainHandler.postDelayed(() -> ensureProjectionAuthorizationIfNeeded(System.currentTimeMillis()), 220L);
+            return;
+        }
+
+        long consentVisibleAt = prefs.getLong("projectionConsentVisibleAt", 0L);
+        boolean returnedToTrustedGto = hasTrustedGtoContextForProjectionRecovery(now);
+        if (resultAt <= 0L
+            && consentVisibleAt > 0L
+            && now >= consentVisibleAt
+            && now - consentVisibleAt >= PROJECTION_PERMISSION_RETURN_WITHOUT_RESULT_GRACE_MS
+            && returnedToTrustedGto
+            && !transientForegroundSurfaceActive) {
+            // Some OEMs dismiss the Android consent UI after Share but lose the Activity
+            // callback. Once GTO is visibly back and no system permission surface remains,
+            // waiting 45 seconds only strands the observer. Unlock and reopen consent.
+            projectionPermissionInFlight = false;
+            projectionStatus = "CONSENT_RESULT_LOST_AFTER_GTO_RETURN";
+            prefs.edit()
+                .putBoolean("projectionPermissionInFlight", false)
+                .putString("projectionStatus", projectionStatus)
+                .putBoolean("projectionReauthRequired", true)
+                .putBoolean("projectionReauthAutoAllowed", true)
+                .putBoolean("projectionReauthNoticeShown", false)
+                .putString("projectionError", "A confirmação do Android fechou sem entregar o resultado ao observador.")
+                .putString("lastEvent", "Confirmação fechou sem callback · nova tentativa automática armada")
+                .apply();
+            if (menuView != null) mainHandler.post(this::refreshMenuContents);
+            mainHandler.postDelayed(() -> ensureProjectionAuthorizationIfNeeded(System.currentTimeMillis()), 220L);
             return;
         }
 
@@ -1760,7 +2116,9 @@ public class GtoObserverService extends Service {
         String runtimeError = prefs == null ? "" : prefs.getString("runtimePermissionError", "");
         if (!runtimeError.isEmpty()) return "Ação necessária · revise as permissões do GTO";
         if (prefs != null && prefs.getBoolean("projectionReauthRequired", false) && captureIsNeededForCurrentState()) {
-            return "Ação necessária · autorize novamente a leitura da tela";
+            return prefs.getBoolean("projectionReauthAutoAllowed", true)
+                ? "Reconectando leitura da tela automaticamente"
+                : "Ação necessária · autorize novamente a leitura da tela";
         }
         String state = getTripState();
         if (STATE_WAITING_FREIGHT.equals(state)
@@ -1881,35 +2239,43 @@ public class GtoObserverService extends Service {
             Math.max(bubbleSafeTop, metrics.heightPixels - bubbleSafeBottom - buttonSize)
         );
 
-        final float[] downRawX = new float[1];
-        final float[] downRawY = new float[1];
-        final int[] startX = new int[1];
-        final int[] startY = new int[1];
-        final boolean[] dragging = new boolean[1];
         final int touchSlop = Math.max(dp(10), ViewConfiguration.get(this).getScaledTouchSlop());
 
         bubbleView.setOnTouchListener((view, event) -> {
-            switch (event.getActionMasked()) {
+            final int action = event.getActionMasked();
+            final long now = System.currentTimeMillis();
+            switch (action) {
                 case MotionEvent.ACTION_DOWN:
-                    downRawX[0] = event.getRawX();
-                    downRawY[0] = event.getRawY();
-                    startX[0] = bubbleParams.x;
-                    startY[0] = bubbleParams.y;
-                    dragging[0] = false;
+                    beginBubbleGesture(event, now);
                     return true;
                 case MotionEvent.ACTION_MOVE:
-                    float dx = event.getRawX() - downRawX[0];
-                    float dy = event.getRawY() - downRawY[0];
-                    if (!dragging[0] && Math.hypot(dx, dy) >= touchSlop) {
-                        dragging[0] = true;
+                    if (!isBubbleGestureEventCompatible(event)) {
+                        cancelBubbleGesture("POINTER_CHANGED", true);
+                        return true;
+                    }
+                    bubbleGestureLastEventAt = now;
+                    scheduleBubbleGestureExpiry();
+                    float dx = event.getRawX() - bubbleGestureDownRawX;
+                    float dy = event.getRawY() - bubbleGestureDownRawY;
+                    if (!bubbleDragging && Math.hypot(dx, dy) >= touchSlop) {
+                        bubbleDragging = true;
                         // Dragging is an explicit user action, so collapsing the menu here
                         // is deterministic. Minor finger jitter never closes it anymore.
                         closeMenu(false);
-                        if (GtoBubbleDismissPolicy.shouldShowRemoveTarget(gtoForeground, true)) {
-                            showBubbleRemoveTarget();
-                        }
                     }
-                    if (!dragging[0]) return true;
+                    if (!bubbleDragging) return true;
+                    if (GtoBubbleDismissPolicy.shouldShowRemoveTarget(
+                        gtoForeground,
+                        bubbleDragging,
+                        bubbleGestureActive,
+                        bubbleGestureStartedOutsideGto
+                    )) {
+                        showBubbleRemoveTarget(bubbleActiveGestureGeneration);
+                    } else {
+                        // Starting the gesture over GTO can never become destructive merely
+                        // because UsageStats changes while the same finger remains down.
+                        hideBubbleRemoveTarget();
+                    }
                     DisplayMetrics screen = realDisplayMetrics();
                     int dragSafeLeft = dp(8);
                     int dragMaxX = Math.min(
@@ -1918,9 +2284,13 @@ public class GtoObserverService extends Service {
                     );
                     int dragSafeTop = safeTopInsetPx() + dp(8);
                     int dragSafeBottom = safeBottomInsetPx() + dp(8);
-                    bubbleParams.x = clamp(startX[0] + Math.round(dx), dragSafeLeft, dragMaxX);
+                    if (bubbleParams == null || bubbleView == null) {
+                        cancelBubbleGesture("BUBBLE_MISSING_DURING_MOVE", true);
+                        return true;
+                    }
+                    bubbleParams.x = clamp(bubbleGestureStartX + Math.round(dx), dragSafeLeft, dragMaxX);
                     bubbleParams.y = clamp(
-                        startY[0] + Math.round(dy),
+                        bubbleGestureStartY + Math.round(dy),
                         dragSafeTop,
                         Math.max(dragSafeTop, screen.heightPixels - dragSafeBottom - buttonSize)
                     );
@@ -1929,7 +2299,7 @@ public class GtoObserverService extends Service {
                         updateBubbleRemoveTargetHighlight();
                     } catch (Exception ex) {
                         recordOverlayFailure(ex);
-                        hideBubbleRemoveTarget();
+                        cancelBubbleGesture("UPDATE_VIEW_FAILURE", true);
                         try { windowManager.removeView(bubbleView); } catch (Exception ignored) {}
                         bubbleView = null;
                         captureHealthDotView = null;
@@ -1938,28 +2308,51 @@ public class GtoObserverService extends Service {
                     }
                     return true;
                 case MotionEvent.ACTION_UP:
-                    // updateViewLayout can fail on an OEM while the finger is still down.
-                    // In that case ACTION_MOVE already detached the broken overlay and
-                    // cleared bubbleParams. Never dereference that stale LayoutParams on
-                    // ACTION_UP; let the foreground self-heal recreate the bubble instead.
-                    if (dragging[0] && isBubbleDroppedOnRemoveTarget()) {
-                        hideBubbleRemoveTarget();
-                        stopObserverFromFloatingBubble();
-                        return true;
-                    }
-                    hideBubbleRemoveTarget();
+                    boolean pointerMatches = isBubbleGestureActionPointer(event);
+                    boolean wasDragging = bubbleDragging;
+                    long releaseGeneration = bubbleActiveGestureGeneration;
+                    boolean geometryInside = isBubbleDroppedOnRemoveTarget(releaseGeneration);
+                    boolean stopAllowed = GtoBubbleDismissPolicy.canCommitStop(
+                        gtoForeground,
+                        bubbleGestureActive,
+                        bubbleDragging,
+                        bubbleGestureStartedOutsideGto,
+                        pointerMatches,
+                        bubbleRemoveTargetView != null,
+                        bubbleRemoveTargetHighlighted,
+                        releaseGeneration != 0L && bubbleRemoveTargetGestureGeneration == releaseGeneration,
+                        geometryInside,
+                        now,
+                        bubbleGestureDownAt,
+                        bubbleGestureLastEventAt,
+                        BUBBLE_GESTURE_MAX_DURATION_MS,
+                        BUBBLE_STOP_RELEASE_FRESH_MS
+                    );
                     if (bubbleParams != null) {
                         prefs.edit().putInt("bubbleX", bubbleParams.x).putInt("bubbleY", bubbleParams.y).apply();
                     }
-                    if (!dragging[0] && bubbleView != null && bubbleParams != null) {
+                    // Invalidate the gesture before any destructive action. A late/replayed
+                    // event can no longer reuse the remove target or generation.
+                    cancelBubbleGesture("ACTION_UP", false);
+                    if (stopAllowed) {
+                        stopObserverFromFloatingBubble(releaseGeneration);
+                        return true;
+                    }
+                    if (!wasDragging && bubbleView != null && bubbleParams != null) {
                         toggleMenu();
                     } else if (bubbleView == null && gtoForeground && Settings.canDrawOverlays(this)) {
                         mainHandler.postDelayed(this::showBubbleIfAllowed, 220L);
                     }
                     return true;
                 case MotionEvent.ACTION_CANCEL:
-                    dragging[0] = false;
-                    hideBubbleRemoveTarget();
+                    cancelBubbleGesture("ACTION_CANCEL", false);
+                    return true;
+                case MotionEvent.ACTION_POINTER_DOWN:
+                case MotionEvent.ACTION_POINTER_UP:
+                    // The floating control is intentionally single-touch. Multi-pointer
+                    // transitions can alter actionIndex/raw coordinates across OEMs and are
+                    // never allowed to authorize a destructive stop.
+                    cancelBubbleGesture("MULTI_POINTER", true);
                     return true;
                 default:
                     return false;
@@ -1990,8 +2383,103 @@ public class GtoObserverService extends Service {
         }
     }
 
-    private void showBubbleRemoveTarget() {
-        if (gtoForeground || windowManager == null || bubbleRemoveTargetView != null) return;
+    private void beginBubbleGesture(MotionEvent event, long now) {
+        cancelBubbleGesture("NEW_ACTION_DOWN", false);
+        bubbleGestureGeneration++;
+        if (bubbleGestureGeneration <= 0L) bubbleGestureGeneration = 1L;
+        bubbleActiveGestureGeneration = bubbleGestureGeneration;
+        bubbleGesturePointerId = event.getPointerId(event.getActionIndex());
+        bubbleGestureActive = true;
+        bubbleDragging = false;
+        bubbleGestureStartedOutsideGto = !gtoForeground;
+        bubbleGestureDownRawX = event.getRawX();
+        bubbleGestureDownRawY = event.getRawY();
+        bubbleGestureStartX = bubbleParams == null ? 0 : bubbleParams.x;
+        bubbleGestureStartY = bubbleParams == null ? 0 : bubbleParams.y;
+        bubbleGestureDownAt = now;
+        bubbleGestureLastEventAt = now;
+        scheduleBubbleGestureExpiry();
+    }
+
+    private boolean isBubbleGestureEventCompatible(MotionEvent event) {
+        if (!bubbleGestureActive || event == null || event.getPointerCount() != 1) return false;
+        return event.getPointerId(0) == bubbleGesturePointerId;
+    }
+
+    private boolean isBubbleGestureActionPointer(MotionEvent event) {
+        if (!bubbleGestureActive || event == null || event.getPointerCount() < 1) return false;
+        int index = event.getActionIndex();
+        return index >= 0 && index < event.getPointerCount()
+            && event.getPointerId(index) == bubbleGesturePointerId;
+    }
+
+    private void scheduleBubbleGestureExpiry() {
+        if (mainHandler == null) return;
+        if (bubbleGestureExpiryRunnable != null) mainHandler.removeCallbacks(bubbleGestureExpiryRunnable);
+        final long generation = bubbleActiveGestureGeneration;
+        bubbleGestureExpiryRunnable = () -> {
+            if (generation != bubbleActiveGestureGeneration) return;
+            expireBubbleGestureIfStale(System.currentTimeMillis());
+        };
+        mainHandler.postDelayed(bubbleGestureExpiryRunnable, BUBBLE_GESTURE_IDLE_TIMEOUT_MS + 80L);
+    }
+
+    private void expireBubbleGestureIfStale(long now) {
+        if (!GtoBubbleDismissPolicy.shouldExpireGesture(
+            bubbleGestureActive,
+            now,
+            bubbleGestureDownAt,
+            bubbleGestureLastEventAt,
+            BUBBLE_GESTURE_MAX_DURATION_MS,
+            BUBBLE_GESTURE_IDLE_TIMEOUT_MS
+        )) return;
+        cancelBubbleGesture("GESTURE_LEASE_EXPIRED", true);
+    }
+
+    private void cancelBubbleGesture(String reason, boolean persistDiagnostic) {
+        long cancelledGeneration = bubbleActiveGestureGeneration;
+        bubbleGestureActive = false;
+        bubbleDragging = false;
+        bubbleGestureStartedOutsideGto = false;
+        bubbleGesturePointerId = MotionEvent.INVALID_POINTER_ID;
+        bubbleActiveGestureGeneration = 0L;
+        bubbleGestureDownAt = 0L;
+        bubbleGestureLastEventAt = 0L;
+        if (mainHandler != null && bubbleGestureExpiryRunnable != null) {
+            mainHandler.removeCallbacks(bubbleGestureExpiryRunnable);
+        }
+        bubbleGestureExpiryRunnable = null;
+        hideBubbleRemoveTarget();
+        if (persistDiagnostic && prefs != null) {
+            prefs.edit()
+                .putString("bubbleGestureLastCancelReason", reason == null ? "CANCELLED" : reason)
+                .putLong("bubbleGestureLastCancelAt", System.currentTimeMillis())
+                .putLong("bubbleGestureLastCancelGeneration", cancelledGeneration)
+                .apply();
+        }
+    }
+
+    private void disarmBubbleStopForCurrentGesture(String reason) {
+        if (!bubbleGestureActive) {
+            hideBubbleRemoveTarget();
+            return;
+        }
+        boolean wasDestructive = bubbleGestureStartedOutsideGto || bubbleRemoveTargetView != null;
+        bubbleGestureStartedOutsideGto = false;
+        hideBubbleRemoveTarget();
+        if (wasDestructive && prefs != null) {
+            prefs.edit()
+                .putString("bubbleGestureStopDisarmedReason", reason == null ? "CONTEXT_CHANGED" : reason)
+                .putLong("bubbleGestureStopDisarmedAt", System.currentTimeMillis())
+                .putLong("bubbleGestureStopDisarmedGeneration", bubbleActiveGestureGeneration)
+                .apply();
+        }
+    }
+
+    private void showBubbleRemoveTarget(long gestureGeneration) {
+        if (gtoForeground || windowManager == null || bubbleRemoveTargetView != null
+            || !bubbleGestureActive || !bubbleDragging || !bubbleGestureStartedOutsideGto
+            || gestureGeneration == 0L || gestureGeneration != bubbleActiveGestureGeneration) return;
         DisplayMetrics screen = realDisplayMetrics();
         final int width = dp(184);
         final int height = dp(52);
@@ -2028,20 +2516,24 @@ public class GtoObserverService extends Service {
             bubbleRemoveTargetView = target;
             bubbleRemoveTargetParams = params;
             bubbleRemoveTargetHighlighted = false;
+            bubbleRemoveTargetGestureGeneration = gestureGeneration;
             prefs.edit()
                 .putBoolean("bubbleRemoveTargetVisible", true)
+                .putLong("bubbleRemoveTargetGeneration", gestureGeneration)
                 .putString("lastEvent", "Arraste a bolinha até Remover e parar NVU para encerrar o observador")
                 .apply();
         } catch (Exception ex) {
             bubbleRemoveTargetView = null;
             bubbleRemoveTargetParams = null;
             bubbleRemoveTargetHighlighted = false;
+            bubbleRemoveTargetGestureGeneration = 0L;
             // The optional remove target is not the primary NVU overlay. A failure to
             // attach this helper must never mark the main bubble as unavailable or
             // interfere with capture/observer health.
             if (prefs != null) {
                 prefs.edit()
                     .putBoolean("bubbleRemoveTargetVisible", false)
+                    .remove("bubbleRemoveTargetGeneration")
                     .putString("bubbleRemoveTargetError", describeError(ex))
                     .putLong("bubbleRemoveTargetErrorAt", System.currentTimeMillis())
                     .apply();
@@ -2051,6 +2543,10 @@ public class GtoObserverService extends Service {
 
     private void updateBubbleRemoveTargetHighlight() {
         if (bubbleRemoveTargetView == null || bubbleRemoveTargetParams == null || bubbleParams == null || bubbleView == null) return;
+        if (!bubbleGestureActive || bubbleRemoveTargetGestureGeneration != bubbleActiveGestureGeneration) {
+            hideBubbleRemoveTarget();
+            return;
+        }
         int bubbleWidth = bubbleView.getWidth() > 0 ? bubbleView.getWidth() : dp(69);
         int bubbleHeight = bubbleView.getHeight() > 0 ? bubbleView.getHeight() : dp(56);
         boolean inside = GtoBubbleDismissPolicy.isDropInside(
@@ -2067,9 +2563,11 @@ public class GtoObserverService extends Service {
         bubbleRemoveTargetView.setText(inside ? "Solte para remover" : "Remover e parar NVU");
     }
 
-    private boolean isBubbleDroppedOnRemoveTarget() {
+    private boolean isBubbleDroppedOnRemoveTarget(long gestureGeneration) {
         if (gtoForeground || bubbleRemoveTargetView == null || bubbleRemoveTargetParams == null
-            || bubbleParams == null || bubbleView == null) return false;
+            || bubbleParams == null || bubbleView == null || !bubbleGestureActive
+            || gestureGeneration == 0L || bubbleRemoveTargetGestureGeneration != gestureGeneration
+            || bubbleActiveGestureGeneration != gestureGeneration) return false;
         int bubbleWidth = bubbleView.getWidth() > 0 ? bubbleView.getWidth() : dp(69);
         int bubbleHeight = bubbleView.getHeight() > 0 ? bubbleView.getHeight() : dp(56);
         return GtoBubbleDismissPolicy.isDropInside(
@@ -2086,21 +2584,30 @@ public class GtoObserverService extends Service {
         bubbleRemoveTargetView = null;
         bubbleRemoveTargetParams = null;
         bubbleRemoveTargetHighlighted = false;
-        if (prefs != null) prefs.edit().putBoolean("bubbleRemoveTargetVisible", false).apply();
-    }
-
-    private void stopObserverFromFloatingBubble() {
+        bubbleRemoveTargetGestureGeneration = 0L;
         if (prefs != null) {
             prefs.edit()
-                .putString("lastEvent", "Observador GTO encerrado pelo gesto de remover da bolinha")
+                .putBoolean("bubbleRemoveTargetVisible", false)
+                .remove("bubbleRemoveTargetGeneration")
+                .apply();
+        }
+    }
+
+    private void stopObserverFromFloatingBubble(long authorizedGestureGeneration) {
+        if (authorizedGestureGeneration == 0L) return;
+        if (prefs != null) {
+            prefs.edit()
+                .putString("lastEvent", "Observador GTO encerrado por gesto de remoção validado")
                 .putLong("observerStoppedFromBubbleAt", System.currentTimeMillis())
+                .putLong("observerStoppedFromBubbleGesture", authorizedGestureGeneration)
                 .apply();
         }
         Intent stopIntent = new Intent(this, GtoObserverService.class).setAction(ACTION_STOP);
         try {
             startService(stopIntent);
         } catch (Exception ex) {
-            // Same-process fallback. The gesture must never leave a half-running observer.
+            // Same-process fallback is still explicit-user-only because this method can
+            // only be reached after canCommitStop() validates pointer+generation+freshness.
             if (prefs != null) prefs.edit().putBoolean("enabled", false).apply();
             stopProjection();
             hideOverlays();
@@ -2125,18 +2632,17 @@ public class GtoObserverService extends Service {
     }
 
     private void updateFreightTouchPulseSensor() {
-        String state = getTripState();
-        boolean replacementSelectionArmed = replacementFreightCandidateArmed
-            && isReplaceableActiveSessionState(state);
-        boolean selectionArmed = STATE_WAITING_FREIGHT.equals(state) || replacementSelectionArmed;
-        boolean resultActionArmed = resultActionCanBeObserved(state)
-            && !replacementSelectionArmed;
-        boolean shouldShow = gtoForeground
-            && projectionActive
-            && captureStabilityGate.isReady()
-            && (selectionArmed || resultActionArmed)
-            && windowManager != null
-            && Settings.canDrawOverlays(this);
+        // HF41: Receber is irreversible in GTO. The 1px passive observer must already
+        // exist before RESULT_DETECTED is entered; creating it only after the result OCR
+        // left a real main-thread race where a fast tap could close the dialog before the
+        // input channel was attached. Keep the non-intercepting observer alive for the
+        // whole enabled GTO foreground session. State policy below still decides whether
+        // a touch may mutate freight/result data.
+        boolean shouldShow = GtoResultActionFlowPolicy.keepPassiveTouchObserver(
+            prefs != null && prefs.getBoolean("enabled", false),
+            gtoForeground,
+            windowManager != null && Settings.canDrawOverlays(this)
+        );
         if (shouldShow) showFreightTouchPulseSensor();
         else hideFreightTouchPulseSensor();
     }
@@ -2151,12 +2657,17 @@ public class GtoObserverService extends Service {
             if (event.getActionMasked() != MotionEvent.ACTION_OUTSIDE) return false;
             String state = getTripState();
             boolean replacementSelectionArmed = replacementFreightCandidateArmed
-                && isReplaceableActiveSessionState(state);
+                && replacementFreightSemanticRejectedAt <= 0L
+                && mayHandleCertifiedFreightBoundary(state);
             boolean selectionArmed = STATE_WAITING_FREIGHT.equals(state) || replacementSelectionArmed;
             boolean resultActionArmed = resultActionCanBeObserved(state)
                 && !replacementSelectionArmed;
-            if (!gtoForeground || !captureStabilityGate.isReady()) return false;
+            if (!gtoForeground) return false;
             if (selectionArmed) {
+                // Freight selection still needs a stable capture baseline. Result input
+                // does not: Receber must remain observable even while ImageReader/surface
+                // stability is recovering.
+                if (!captureStabilityGate.isReady()) return false;
                 // The menu is intentionally NOT a blocker. It is non-modal and the GTO
                 // Aceitar column remains touchable beside it. R3.21 discarded exactly
                 // that ACTION_OUTSIDE event, leaving the accepted trip in WAITING_FREIGHT.
@@ -2165,9 +2676,10 @@ public class GtoObserverService extends Service {
                 if (isTouchInsideOpenMenu(event)) return false;
                 queueFreightTouchMarker(event);
             } else if (resultActionArmed) {
-                // Preserve the result-screen rule: actions taken while the NVU menu is
-                // open belong to that menu and must not be interpreted as Receber/ADS.
-                if (menuView != null) return false;
+                // Result input is irreversible. A menu tap is ignored only when its
+                // coordinates provably belong to the NVU card; the card itself is also
+                // auto-closed when a result is detected so it cannot cover Receber.
+                if (isTouchInsideOpenMenu(event)) return false;
                 // ACTION_OUTSIDE normally carries the real screen coordinates. Resolve
                 // Receber x ADS immediately when the OEM preserves them; if coordinates
                 // are redacted, keep a durable pending action and resolve it from the
@@ -2228,7 +2740,7 @@ public class GtoObserverService extends Service {
                     : "Sensor de seleção indisponível; usando confirmação visual reforçada")
                 .apply();
             if (resultState) {
-                showStatusChip("Seu Android não permitiu detectar o toque em Receber. Toque em Receber normalmente; se necessário, a bolinha NVU liberará uma confirmação segura após a tela fechar.", 5600L);
+                showStatusChip("Seu Android não informou o toque em Receber. Toque normalmente; a entrega já fica preservada e o NVU resolverá a transição automaticamente.", 5200L);
             }
         }
     }
@@ -2308,6 +2820,12 @@ public class GtoObserverService extends Service {
     private void discardUnresolvedResultAndStartNewFreight() {
         String state = getTripState();
         if (!STATE_RESULT_DETECTED.equals(state) && !STATE_AWAITING_BONUS.equals(state)) return;
+        if (!GtoResultCompletionPolicy.mayDiscardUnresolvedResult(
+            prefs.getBoolean("resultCertifiedLatched", false)
+        )) {
+            showStatusChip("Entrega já comprovada pela tela Concluído. Ela permanece preservada e não pode ser descartada.", 4600L);
+            return;
+        }
         if (prefs.getBoolean("resultReceiveLatched", false)) {
             showStatusChip("Receber já foi confirmado. Esta entrega está preservada e não pode ser descartada.", 4200L);
             return;
@@ -2326,8 +2844,8 @@ public class GtoObserverService extends Service {
 
         String cancelledSessionId = prefs.getString("gtoTripSessionId", "");
         String cancelledSummary = prefs.getString("selectedFreightSummary", "");
+        if (!clearTripAnalysis()) return;
         GtoAutoTripSync.discardSessionSnapshot(this, cancelledSessionId);
-        clearTripAnalysis();
         prefs.edit()
             .putString("completionStatus", "CANCELLED_IN_GAME")
             .putString("lastCancelledSessionId", cancelledSessionId)
@@ -2355,6 +2873,7 @@ public class GtoObserverService extends Service {
         // remain on this screen for any amount of time before touching Receber.
         resultActionTouchAt = now;
         resultExitSeenAt = 0L;
+        resultAdUiLastSeenAt = 0L;
         gameplayFramesAfterResult = 0;
         prefs.edit()
             .putLong("resultActionTouchAt", now)
@@ -2433,6 +2952,12 @@ public class GtoObserverService extends Service {
             prefs.edit().putString("lastEvent", "Receber detectado, mas a confirmação local não pôde ser persistida").apply();
             return;
         }
+        announceDriverStage(
+            "RECEIVE_CONFIRMED",
+            "Receber confirmado ✓ · salvando viagem…",
+            0L,
+            true
+        );
         // Exact Receber is durable evidence. During field review, defer completion until
         // the selected freight is fully locked so the trip cannot be created without it.
         if (reviewPending) {
@@ -2463,15 +2988,19 @@ public class GtoObserverService extends Service {
             .putString("lastEvent", "Toque em Dobrar valor/ADS detectado; registro normal bloqueado")
             .apply();
         if (reviewPending) {
+            // HF42: touching the ADS option is not evidence that an advertisement was
+            // actually watched. Preserve the exact action while the freight review is
+            // completed, but keep rejection reserved exclusively for positive watched/
+            // reward evidence from GtoResultCompletionPolicy.
             prefs.edit()
-                .putBoolean("pendingBonusDuringFreightReview", true)
+                .putBoolean("pendingAdsActionDuringFreightReview", true)
                 .putBoolean("pendingResultDuringFreightReview", true)
-                .putString("lastEvent", "ADS/bônus detectado · aguardando revisão do frete sem perder o resultado")
+                .putString("lastEvent", "Opção ADS tocada · resultado preservado; aguardando prova real do anúncio e revisão do frete")
                 .apply();
             updateNotification();
             return;
         }
-        setTripState(STATE_AWAITING_BONUS, "Opção de dobrar valor detectada com toque preciso");
+        setTripState(STATE_AWAITING_BONUS, "Opção de dobrar valor detectada · aguardando evidência real do anúncio");
     }
 
     private void queueFreightTouchMarker(MotionEvent sourceEvent) {
@@ -2494,7 +3023,7 @@ public class GtoObserverService extends Service {
             // list is already visible, this touch is independent evidence that the driver
             // is choosing a new job. Promote to a clean WAITING_FREIGHT session before the
             // pressed frame arrives, while preserving the pre-touch page snapshot.
-            if (isReplaceableActiveSessionState(getTripState()) && replacementFreightCandidateArmed) {
+            if (mayHandleCertifiedFreightBoundary(getTripState()) && replacementFreightCandidateArmed) {
                 String replacementState = getTripState();
                 if ((STATE_RESULT_DETECTED.equals(replacementState) || STATE_AWAITING_BONUS.equals(replacementState))
                     && hasRecentNormalResultActionEvidence(System.currentTimeMillis())) {
@@ -2531,17 +3060,24 @@ public class GtoObserverService extends Service {
                     replacementFreightPressedRow = exactReplacementRow;
                     replacementFreightPressedScore = 1f;
                 }
+                // Preserve the human touch even when semantic certification is still
+                // running. Promotion remains impossible without same-page semantic proof,
+                // so this does not weaken the HUB false-positive protection; it only stops
+                // a fast Aceitar from disappearing between visual detection and ML Kit.
+                replacementFreightTouchPending = true;
+                replacementFreightTouchAt = System.currentTimeMillis();
                 if (GtoFreightBootstrapPolicy.shouldAwaitSecondListFrame(
                     replacementState, activeTripFreightListFrames, replacementFreightPressedRow
                 )) {
-                    replacementFreightTouchPending = true;
-                    replacementFreightTouchAt = System.currentTimeMillis();
-                    prefs.edit().putString("lastEvent", "Novo frete tocado · aguardando segundo quadro da lista").apply();
+                    prefs.edit().putString("lastEvent", "Novo frete tocado · aguardando confirmação da lista").apply();
                     return;
                 }
                 if (!promoteReplacementFreightCandidateToWaiting(
                     true, rawX, rawY, localX, localY
-                )) return;
+                )) {
+                    prefs.edit().putString("lastEvent", "Novo frete tocado · aguardando certificação semântica da página").apply();
+                    return;
+                }
                 touchArmedDuringPromotion = true;
             }
 
@@ -2781,12 +3317,16 @@ public class GtoObserverService extends Service {
                 blocked.setPadding(dp(6), 0, dp(6), dp(6));
                 target.addView(blocked);
             } else {
-                Button start = menuButton(STATE_IDLE.equals(state) ? "Iniciar viagem" : "Iniciar nova viagem");
-                start.setOnClickListener(v -> {
-                    closeMenu();
-                    beginTrip();
-                });
-                target.addView(start);
+                TextView automatic = new TextView(this);
+                boolean operationalReady = prefs.getBoolean("observerOperationalReady", false);
+                String operationalState = prefs.getString("observerOperationalStatus", "STARTING");
+                automatic.setText(operationalReady
+                    ? "Automação operacional · captura e detector estão recebendo e analisando o GTO em tempo real."
+                    : "Automação em preparação/recuperação (" + operationalState + ") · a bolinha sozinha não significa detecção ativa. O NVU continuará se autorreparando.");
+                automatic.setTextColor(operationalReady ? Color.rgb(210, 216, 224) : Color.rgb(245, 190, 86));
+                automatic.setTextSize(10.5f);
+                automatic.setPadding(dp(6), 0, dp(6), dp(7));
+                target.addView(automatic);
             }
         } else {
             String statusText = statusLabel(state);
@@ -2802,6 +3342,7 @@ public class GtoObserverService extends Service {
             if (STATE_WAITING_FREIGHT.equals(state)) {
                 TextView helper = new TextView(this);
                 int detected = prefs.getInt("freightCount", 0);
+                int visualDetected = prefs.getInt("freightVisualCount", 0);
                 String selectionFailure = prefs.getString("selectionFailureReason", "").trim();
                 boolean failedSelection = "FAILED".equals(
                     prefs.getString("selectionConfirmationStatus", "")
@@ -2816,7 +3357,10 @@ public class GtoObserverService extends Service {
                     String pStatus = prefs.getString("projectionStatus", "");
                     String pError = prefs.getString("projectionError", "").trim();
                     if (projectionPermissionInFlight) {
-                        helper.setText("Autorização em andamento · conclua a confirmação do Android. O botão ficará bloqueado até o resultado ser validado.");
+                        long consentResultAt = prefs.getLong("projectionConsentResultAt", 0L);
+                        helper.setText(consentResultAt > 0L
+                            ? "Compartilhamento aceito · o NVU está vinculando a captura automaticamente. Não autorize de novo."
+                            : "Autorização em andamento · conclua a confirmação do Android. O botão ficará bloqueado até o resultado ser validado.");
                     } else if (projectionSurfacePending || "WAITING_GTO_GEOMETRY".equals(pStatus)
                         || "WAITING_GTO_LANDSCAPE".equals(pStatus)) {
                         helper.setText("Compartilhamento aceito e validado · ativando a captura no GTO. Não autorize novamente.");
@@ -2824,22 +3368,29 @@ public class GtoObserverService extends Service {
                         helper.setText("O Android encerrou o compartilhamento antes de a captura iniciar. Verifique se outro gravador/espelhamento está ativo e autorize novamente.");
                     } else if ("STOPPED_EARLY".equals(pStatus)) {
                         helper.setText("Leitura foi encerrada logo após iniciar. Feche outro gravador/compartilhamento de tela, se houver, e toque em Autorizar novamente.");
-                    } else if ("START_FAILED".equals(pStatus) || "GRANT_DATA_INVALID".equals(pStatus)) {
-                        helper.setText("Leitura não iniciou" + (pError.isEmpty() ? "." : " · " + pError) + "\nToque em Autorizar novamente.");
+                    } else if ("START_FAILED".equals(pStatus) || "GRANT_DATA_INVALID".equals(pStatus)
+                        || "FIRST_SURFACE_GRANT_CONSUMED".equals(pStatus)) {
+                        helper.setText("A captura não iniciou" + (pError.isEmpty() ? "." : " · " + pError)
+                            + "\nO NVU vai reabrir a confirmação automaticamente.");
                     } else if ("CONSENT_RESULT_TIMEOUT".equals(pStatus)
                         || "CONSENT_RESULT_UNBOUND".equals(pStatus)
+                        || "CONSENT_RESULT_LOST_AFTER_GTO_RETURN".equals(pStatus)
                         || "CONSENT_HOST_FINISHED_WITHOUT_RESULT".equals(pStatus)) {
-                        helper.setText("A autorização anterior não foi concluída pelo Android"
+                        helper.setText("A confirmação anterior não chegou ao observador"
                             + (pError.isEmpty() ? "." : " · " + pError)
-                            + "\nToque em Autorizar somente uma vez para iniciar uma nova sessão.");
+                            + "\nO NVU vai reabrir a confirmação automaticamente quando o GTO estiver visível.");
                     } else if (pStatus.startsWith("REQUESTING_") || pStatus.startsWith("CONSENT_")) {
-                        helper.setText("Autorização em andamento · conclua a confirmação do Android.");
+                        helper.setText(prefs.getLong("projectionConsentResultAt", 0L) > 0L
+                            ? "Compartilhamento aceito · concluindo o vínculo automático da captura."
+                            : "Autorização em andamento · conclua a confirmação do Android.");
                     } else {
                         helper.setText("Leitura da tela não está ativa · toque em Autorizar.");
                     }
                 } else if (detected > 0) {
                     helper.setText("Lista detectada · " + detected + " frete" + (detected == 1 ? "" : "s")
                         + ". Selecione um.");
+                } else if (visualDetected >= 2) {
+                    helper.setText("Lista localizada · " + visualDetected + " fretes. Validando os dados para a seleção segura.");
                 } else {
                     String runtimeError = prefs.getString("runtimePermissionError", "").trim();
                     String readiness = prefs.getString("captureReadiness", "");
@@ -3104,6 +3655,8 @@ public class GtoObserverService extends Service {
             + "|" + projectionActive
             + "|" + projectionPermissionInFlight
             + "|" + projectionSurfacePending
+            + "|" + prefs.getBoolean("observerOperationalReady", false)
+            + "|" + prefs.getString("observerOperationalStatus", "")
             + "|" + prefs.getInt("freightCount", 0)
             + "|" + prefs.getString("selectionConfirmationStatus", "")
             + "|" + prefs.getString("reviewRequiredField", "")
@@ -3189,24 +3742,12 @@ public class GtoObserverService extends Service {
                 && statusChipView != null
                 && !driverStageKey.equals(statusChipDriverStageKey)) {
                 long visibleFor = Math.max(0L, now - statusChipShownAt);
-                boolean queueUntilReadable = GtoDriverMessagePriorityPolicy.shouldQueueUntilReadable(
-                    statusChipDriverStagePriority, incomingStagePriority, visibleFor, DRIVER_STAGE_MIN_VISIBLE_MS
-                );
-                long remaining = DRIVER_STAGE_MIN_VISIBLE_MS - visibleFor;
-                if (queueUntilReadable && remaining > 0L) {
-                    if (pendingDriverStageReplacementRunnable != null) {
-                        mainHandler.removeCallbacks(pendingDriverStageReplacementRunnable);
-                    }
-                    pendingDriverStageReplacementRunnable = () -> {
-                        pendingDriverStageReplacementRunnable = null;
-                        if (prefs == null) return;
-                        if (!gtoForeground && !transientForegroundSurfaceActive) return;
-                        String pendingKey = prefs.getString("driverStagePendingKey", "");
-                        if (!driverStageKey.equals(pendingKey)) return;
-                        showStatusChip(text, durationMs, onShown, true, driverStageKey);
-                    };
-                    mainHandler.postDelayed(pendingDriverStageReplacementRunnable, remaining);
-                    return;
+                // HF34: journey-state messages are live state, not a slideshow queue.
+                // A new authoritative stage replaces the previous stage immediately.
+                // Minimum visibility still controls auto-hide only; it never delays truth.
+                if (pendingDriverStageReplacementRunnable != null) {
+                    mainHandler.removeCallbacks(pendingDriverStageReplacementRunnable);
+                    pendingDriverStageReplacementRunnable = null;
                 }
             }
             // Driver-stage banners are authoritative while visible. A lower-priority
@@ -3266,21 +3807,28 @@ public class GtoObserverService extends Service {
                 statusChipShownAt = System.currentTimeMillis();
                 final TextView shownChip = chip;
                 if (onShown != null) {
-                    long acknowledgementDelay = driverStage ? DRIVER_STAGE_MIN_VISIBLE_MS : 0L;
+                    long acknowledgementDelay = 0L;
                     mainHandler.postDelayed(() -> {
                         if (statusChipView != shownChip) return;
                         if (driverStage && !driverStageKey.equals(statusChipDriverStageKey)) return;
                         onShown.run();
                     }, acknowledgementDelay);
                 }
-                statusChipHideRunnable = () -> {
-                    if (statusChipView != shownChip) return;
-                    hideStatusChip();
-                };
-                long visibleFor = driverStage
-                    ? Math.max(DRIVER_STAGE_MIN_VISIBLE_MS + 250L, durationMs)
-                    : Math.max(900L, durationMs);
-                mainHandler.postDelayed(statusChipHideRunnable, visibleFor);
+                if (driverStage && durationMs <= 0L) {
+                    // HF43: sticky journey truth. Some stages describe a screen that is
+                    // still physically present (jobs list/result). Do not auto-hide them;
+                    // the real lifecycle edge or the next authoritative stage replaces it.
+                    statusChipHideRunnable = null;
+                } else {
+                    statusChipHideRunnable = () -> {
+                        if (statusChipView != shownChip) return;
+                        hideStatusChip();
+                    };
+                    long visibleFor = driverStage
+                        ? Math.max(DRIVER_STAGE_MIN_VISIBLE_MS + 250L, durationMs)
+                        : Math.max(900L, durationMs);
+                    mainHandler.postDelayed(statusChipHideRunnable, visibleFor);
+                }
             } catch (Exception ex) {
                 prefs.edit()
                     .putString("statusOverlayError", describeError(ex))
@@ -3307,7 +3855,7 @@ public class GtoObserverService extends Service {
             .putString("driverStageMessage", message == null ? "" : message)
             .putLong("driverStageAt", now)
             .putString("driverStagePendingKey", key)
-            .putLong("driverStagePendingDurationMs", Math.max(900L, durationMs))
+            .putLong("driverStagePendingDurationMs", durationMs <= 0L ? 0L : Math.max(900L, durationMs))
             .putLong("driverStagePendingAt", now)
             .apply();
         if (force || !key.equals(previousKey)) {
@@ -3340,9 +3888,13 @@ public class GtoObserverService extends Service {
     }
 
     private String currentJourneyGuide(String state) {
-        // HF19: the card owns persistent state/actions; top-centre banners own stage
-        // transitions. Do not repeat the same driver instruction in two or three places.
-        if (STATE_IDLE.equals(state) || STATE_CANCELLED.equals(state)) return "Pronto para iniciar.";
+        // HF42: never claim real-time observation merely because the floating bubble is
+        // visible. The same readiness invariant drives the white health dot and this text.
+        if (STATE_IDLE.equals(state) || STATE_CANCELLED.equals(state)) {
+            return prefs != null && prefs.getBoolean("observerOperationalReady", false)
+                ? "Observando o GTO em tempo real."
+                : "Preparando a observação do GTO · recuperação automática ativa.";
+        }
         return "";
     }
 
@@ -3454,14 +4006,21 @@ public class GtoObserverService extends Service {
 
         String vehicle = prefs.getString("vehicleName", "").trim();
         String trailer = prefs.getString("trailerName", "").trim();
-        String health = prefs.getString("captureHealth", "");
-        String observerStatus = "HEALTHY_REAL_FRAMES".equals(health)
+        boolean observerReady = prefs.getBoolean("observerOperationalReady", false);
+        String observerStatus = observerReady
             ? "Ativo"
             : (projectionActive ? "Recuperando leitura" : "Aguardando leitura");
         String syncStatus = prefs.getString("gtoTripSyncStatus", "");
+        String currentSessionId = prefs.getString("gtoTripSessionId", "").trim();
+        boolean currentSessionQueued = !currentSessionId.isEmpty()
+            && GtoAutoTripSync.hasPendingSession(this, currentSessionId);
+        boolean backgroundPending = !prefs.getString("backgroundSyncPendingSessionId", "").trim().isEmpty()
+            || (!currentSessionQueued && GtoAutoTripSync.hasPending(this));
         String syncLabel = GtoAutoTripSync.STATUS_SYNCED.equals(syncStatus)
             ? "Sincronizada ✓"
-            : (GtoAutoTripSync.STATUS_PENDING.equals(syncStatus) ? "Envio pendente" : "—");
+            : (GtoAutoTripSync.STATUS_PENDING.equals(syncStatus) && currentSessionQueued
+                ? "Envio pendente"
+                : (backgroundPending ? "Anterior em envio" : "—"));
         return operation
             + "\nViagens: " + trips
             + "\nVeículo: " + (vehicle.isEmpty() ? "—" : vehicle)
@@ -3610,6 +4169,67 @@ public class GtoObserverService extends Service {
     private void ensureCaptureContinuityAfterGtoReturn() {
         if (!captureIsNeededForCurrentState() || projectionPermissionInFlight) return;
         long now = System.currentTimeMillis();
+
+        // HF30 core invariant: once RESULT_OK has produced a live MediaProjection token,
+        // ordinary resource loss is a repair problem, never a permission problem. The
+        // user grant may only be abandoned when Android itself revoked it (onStop) or the
+        // one legal VirtualDisplay has actually disappeared after being created.
+        if (mediaProjection != null && virtualDisplay != null) {
+            if (!projectionActive) {
+                projectionActive = true;
+                projectionSurfacePending = false;
+                projectionStatus = "ACTIVE_RECOVERED_FROM_BOUND_RESOURCES";
+                prefs.edit()
+                    .putBoolean("projectionActive", true)
+                    .putBoolean("projectionSessionBound", true)
+                    .putBoolean("projectionSurfacePending", false)
+                    .putBoolean("projectionGrantValidated", true)
+                    .putString("projectionStatus", projectionStatus)
+                    .putString("lastEvent", "Sessão de compartilhamento recuperada a partir dos recursos ainda vinculados")
+                    .apply();
+            }
+            repairPartialProjectionSurfaceWithoutReauthorization(now);
+            boolean captureHealthy = isCapturePipelineHealthy(now);
+            prefs.edit()
+                .putString("captureContinuityStatus", captureHealthy
+                    ? "RESUMED_AUTOMATICALLY"
+                    : "RECOVERING_REAL_FRAMES")
+                .putLong("captureContinuityCheckedAt", now)
+                .remove("captureContinuityError")
+                .apply();
+            maybeRecoverProjectionFrameDelivery(now);
+            return;
+        }
+
+        // Android 14+ grants permit only one createVirtualDisplay() call. If that display
+        // has genuinely disappeared after creation, never attempt a second display on the
+        // same token; automatically request a fresh Android grant instead.
+        if (mediaProjection != null && virtualDisplay == null && projectionVirtualDisplayEverCreated) {
+            escalateProjectionToFreshAuthorization(
+                "A VirtualDisplay autorizada foi perdida pelo Android"
+            );
+            return;
+        }
+
+        // A token can exist before its first VirtualDisplay. This is still the same user
+        // authorization and can be completed without showing Android consent again.
+        if (mediaProjection != null && !projectionVirtualDisplayEverCreated) {
+            if (!projectionSurfacePending) {
+                projectionSurfacePending = true;
+                projectionStatus = "GRANT_BOUND_RETRYING_FIRST_SURFACE";
+                prefs.edit()
+                    .putBoolean("projectionActive", false)
+                    .putBoolean("projectionSessionBound", true)
+                    .putBoolean("projectionSurfacePending", true)
+                    .putBoolean("projectionGrantValidated", true)
+                    .putString("projectionStatus", projectionStatus)
+                    .putString("lastEvent", "Autorização preservada · reconstruindo primeira superfície de captura")
+                    .apply();
+            }
+            maybeStartPendingProjectionSurface(now);
+            return;
+        }
+
         if (projectionSurfacePending && mediaProjection != null) {
             prefs.edit()
                 .putString("captureContinuityStatus", "WAITING_GTO_GEOMETRY")
@@ -3619,37 +4239,18 @@ public class GtoObserverService extends Service {
             maybeStartPendingProjectionSurface(now);
             return;
         }
+
         // The initial consent is deliberately delayed until GTO is already visible. Do
         // not convert that normal first-use path into a false reauthorization warning.
         if (!projectionActive && projectionPermissionAfterGtoOpenPending) return;
 
-        boolean coreCaptureBound = projectionActive
-            && mediaProjection != null
-            && imageReader != null
-            && virtualDisplay != null
-            && captureHandler != null;
-        if (coreCaptureBound) {
-            boolean captureHealthy = isCapturePipelineHealthy(now);
-            prefs.edit()
-                .putString("captureContinuityStatus", captureHealthy
-                    ? "RESUMED_AUTOMATICALLY"
-                    : "RECOVERING_REAL_FRAMES")
-                .putLong("captureContinuityCheckedAt", now)
-                .remove("captureContinuityError")
-                .apply();
-            // A bound MediaProjection token must never be discarded merely because the
-            // first frames after app/SystemUI return are stale. The watchdog repairs the
-            // ImageReader surface in-place while preserving the trip state.
-            maybeRecoverProjectionFrameDelivery(now);
-            return;
-        }
-
-        // Reauthorization is only necessary when the actual bound capture resources are
-        // gone. A mere app switch/frame stall is handled above without resetting state.
-        if (projectionActive || mediaProjection != null || imageReader != null || virtualDisplay != null) {
+        // Close only orphaned local consumers. Never call MediaProjection.stop() here:
+        // if the token is gone there is nothing to stop, and if it still exists one of
+        // the repair branches above owns it. This avoids self-revoking the user's grant.
+        if (imageReader != null || virtualDisplay != null || captureThread != null || captureHandler != null) {
             projectionGeneration++;
             projectionActive = false;
-            releaseCaptureResources(true);
+            releaseCaptureResources(false);
         }
         projectionStatus = "REAUTH_REQUIRED_ON_RETURN";
         prefs.edit()
@@ -3664,11 +4265,11 @@ public class GtoObserverService extends Service {
             .putBoolean("projectionReauthAutoAllowed", true)
             .putBoolean("projectionReauthNoticeShown", false)
             .putString("captureContinuityStatus", "REAUTH_REQUIRED")
-            .putString("captureContinuityError", "MediaProjection indisponível ao retornar ao GTO")
-            .putLong("captureContinuityCheckedAt", System.currentTimeMillis())
-            .putString("lastEvent", "Viagem preservada · leitura da tela precisa ser reativada")
+            .putString("captureContinuityError", "MediaProjection não está mais vinculada ao processo")
+            .putLong("captureContinuityCheckedAt", now)
+            .putString("lastEvent", "Viagem preservada · Android precisa renovar a autorização de leitura")
             .apply();
-        ensureProjectionAuthorizationIfNeeded(System.currentTimeMillis());
+        ensureProjectionAuthorizationIfNeeded(now);
     }
 
     private boolean isCapturePipelineHealthy(long now) {
@@ -3692,8 +4293,104 @@ public class GtoObserverService extends Service {
         lastProjectionAnalyzedFrameAt = now;
     }
 
+    private boolean isObserverOperationalReady(long now) {
+        boolean enabled = prefs != null && prefs.getBoolean("enabled", false);
+        boolean bubbleAttached = bubbleView != null && bubbleView.isAttachedToWindow();
+        boolean projectionBound = mediaProjection != null
+            && virtualDisplay != null
+            && imageReader != null
+            && captureHandler != null;
+        return GtoObserverOperationalPolicy.isReady(
+            enabled,
+            bubbleAttached,
+            gtoForeground,
+            projectionActive,
+            projectionBound,
+            isCapturePipelineHealthy(now)
+        );
+    }
+
+    private void enforceOperationalReadiness(long now, boolean runtimePermissionsReady) {
+        if (prefs == null) return;
+        boolean enabled = prefs.getBoolean("enabled", false);
+        boolean bubbleAttached = bubbleView != null && bubbleView.isAttachedToWindow();
+        boolean projectionBound = mediaProjection != null && virtualDisplay != null;
+        boolean captureHealthy = isCapturePipelineHealthy(now);
+        boolean explicitDenial = "DENIED".equals(projectionStatus)
+            && !prefs.getBoolean("projectionReauthAutoAllowed", false);
+
+        if (enabled && runtimePermissionsReady && gtoForeground && !bubbleAttached) {
+            lastBubbleAttemptAt = 0L;
+            showBubbleIfAllowed();
+            bubbleAttached = bubbleView != null && bubbleView.isAttachedToWindow();
+        }
+
+        if (GtoObserverOperationalPolicy.shouldArmInitialPermission(
+            enabled,
+            runtimePermissionsReady && gtoForeground,
+            bubbleAttached,
+            projectionActive,
+            projectionBound,
+            projectionSurfacePending,
+            projectionPermissionInFlight,
+            explicitDenial
+        )) {
+            // Repair a lost/stale bootstrap latch. The permission launcher still enforces
+            // exact GTO + stable landscape + attached bubble, so this cannot open consent
+            // over another app. This closes the startup state where the bubble was visible
+            // but no capture request was pending.
+            if (!projectionPermissionAfterGtoOpenPending) {
+                projectionPermissionAfterGtoOpenPending = true;
+                projectionPermissionAfterGtoOpenArmedAt = now;
+                prefs.edit()
+                    .putBoolean("projectionPermissionAfterGtoOpenPending", true)
+                    .putLong("projectionPermissionAfterGtoOpenArmedAt", now)
+                    .putString("lastEvent", "Observador incompleto · autorização de captura rearmada automaticamente")
+                    .apply();
+            }
+            maybeLaunchInitialProjectionPermissionOverGto(now);
+        }
+
+        if (GtoObserverOperationalPolicy.shouldRepairBoundCapture(
+            enabled,
+            runtimePermissionsReady && gtoForeground,
+            projectionBound,
+            captureHealthy,
+            projectionPermissionInFlight
+        )) {
+            repairPartialProjectionSurfaceWithoutReauthorization(now);
+            maybeRecoverProjectionFrameDelivery(now);
+        }
+
+        boolean ready = isObserverOperationalReady(now);
+        String operationalStatus = GtoObserverOperationalPolicy.status(
+            enabled,
+            bubbleView != null && bubbleView.isAttachedToWindow(),
+            runtimePermissionsReady && gtoForeground,
+            projectionPermissionInFlight,
+            projectionActive,
+            mediaProjection != null && virtualDisplay != null,
+            captureHealthy
+        );
+        boolean previousReady = prefs.getBoolean("observerOperationalReady", false);
+        String previousStatus = prefs.getString("observerOperationalStatus", "");
+        if (previousReady != ready || !operationalStatus.equals(previousStatus)) {
+            prefs.edit()
+                .putBoolean("observerOperationalReady", ready)
+                .putString("observerOperationalStatus", operationalStatus)
+                .putLong("observerOperationalChangedAt", now)
+                .putLong("observerOperationalLastFrameAt", lastProjectionFrameAt)
+                .putLong("observerOperationalLastAnalyzedAt", lastProjectionAnalyzedFrameAt)
+                .apply();
+            if (ready) {
+                recordObserverEvent("OBSERVER_READY", "Bolinha, permissão, captura e análise estão operacionais");
+            }
+            if (menuView != null) mainHandler.post(this::refreshMenuContents);
+        }
+    }
+
     private void updateCaptureHealthIndicator(long now) {
-        boolean healthy = isCapturePipelineHealthy(now);
+        boolean healthy = isObserverOperationalReady(now);
         if (captureHealthDotView != null
             && (lastCaptureHealthIndicatorState == null
                 || lastCaptureHealthIndicatorState.booleanValue() != healthy)) {
@@ -3734,6 +4431,8 @@ public class GtoObserverService extends Service {
         lastVisualAnalysisAt = 0L;
         lastActiveTripVisualProbeAt = 0L;
         lastActiveTripFallbackOcrAt = 0L;
+        lastFreightProducerTimestampNs = 0L;
+        lastAnalysisProducerTimestampNs = 0L;
 
         if (STATE_WAITING_FREIGHT.equals(state)) {
             clearFastTouchPulse(false);
@@ -3786,7 +4485,6 @@ public class GtoObserverService extends Service {
         if (STATE_TRIP_IN_PROGRESS.equals(state)) {
             clearReplacementFreightCandidate();
             clearActiveTripFreightListRuntime();
-            clearExplicitFreightReplacement();
             prefs.edit()
                 .putInt("freightCount", 0)
                 .putBoolean("activeTripFreightListVisible", false)
@@ -3863,8 +4561,9 @@ public class GtoObserverService extends Service {
         if (STATE_IDLE.equals(state)) return;
         if (isRecoverableActiveState(state) && hasFreshDurableSession(state)) return;
         if (!preserveCompletedTripBeforeReset()) return;
-        GtoAutoTripSync.discardSessionSnapshot(this, prefs.getString("gtoTripSessionId", ""));
-        clearTripAnalysis();
+        String previousSessionId = prefs.getString("gtoTripSessionId", "");
+        if (!clearTripAnalysis()) return;
+        GtoAutoTripSync.discardSessionSnapshot(this, previousSessionId);
         if (projectionActive) stopProjection();
         prefs.edit()
             .putString("tripState", STATE_IDLE)
@@ -3909,7 +4608,7 @@ public class GtoObserverService extends Service {
             || !GtoAutoTripSync.hasPendingSession(this, completedSession)
             || !canPrepareNextFreightFromSealedQueue()) return false;
 
-        clearTripAnalysis();
+        if (!clearTripAnalysis()) return false;
         String nextSessionId = GtoAutoTripSync.newSessionId();
         long now = System.currentTimeMillis();
         boolean persisted = prefs.edit()
@@ -3940,6 +4639,25 @@ public class GtoObserverService extends Service {
         return true;
     }
 
+    private boolean recoverSealedCompletionToWaitingIfNeeded() {
+        if (!STATE_RESULT_CONFIRMED.equals(getTripState())) return false;
+        String completedSessionId = prefs.getString("gtoTripSessionId", "").trim();
+        if (completedSessionId.isEmpty()
+            || !GtoAutoTripSync.hasPendingSession(this, completedSessionId)
+            || !canPrepareNextFreightFromSealedQueue()) return false;
+        boolean recovered = prepareNextFreightFromSealedQueue(completedSessionId);
+        if (recovered) {
+            announceDriverStage(
+                "QUEUED_NEXT_READY_RECOVERED",
+                "Viagem salva ✓ · enviando em segundo plano. Próximo frete liberado.",
+                0L,
+                true
+            );
+            recordObserverEvent("SEALED_COMPLETION_SELF_HEALED", "session=" + completedSessionId);
+        }
+        return recovered;
+    }
+
     private void beginTrip() {
         beginTrip(true, true);
     }
@@ -3966,8 +4684,12 @@ public class GtoObserverService extends Service {
             return;
         }
         if (!preserveCompletedTripBeforeReset()) return;
-        GtoAutoTripSync.discardSessionSnapshot(this, prefs.getString("gtoTripSessionId", ""));
-        clearTripAnalysis();
+        String previousSessionId = prefs.getString("gtoTripSessionId", "");
+        if (!clearTripAnalysis()) {
+            showStatusChip("Entrega certificada ainda está sendo preservada. O próximo frete será liberado assim que ela estiver selada.", 4200L);
+            return;
+        }
+        GtoAutoTripSync.discardSessionSnapshot(this, previousSessionId);
         String sessionId = GtoAutoTripSync.newSessionId();
         long sessionStartedAt = System.currentTimeMillis();
         boolean sessionPersisted = prefs.edit()
@@ -4120,7 +4842,8 @@ public class GtoObserverService extends Service {
         refreshForegroundPackage();
         long now = System.currentTimeMillis();
         DisplayMetrics metrics = realDisplayMetrics();
-        boolean exactGto = gtoForeground && GTO_PACKAGE.equals(foregroundPackage);
+        boolean exactGto = gtoForeground
+            && (GTO_PACKAGE.equals(foregroundPackage) || hasVerifiedGtoProjectionBridge());
         boolean landscape = metrics.widthPixels > metrics.heightPixels && metrics.heightPixels > 0;
         boolean bubbleAttached = bubbleView != null && bubbleView.isAttachedToWindow();
         if (!exactGto || !landscape || !bubbleAttached || !isLandscapeStableForProjectionConsent(now)) {
@@ -4152,8 +4875,8 @@ public class GtoObserverService extends Service {
         // Hard gate: never bring any NVU Activity forward unless the exact simulator
         // package is the foreground owner and the physical display is already landscape.
         // There is intentionally no visual-evidence or NVU-return bridge fallback here.
-        if (!gtoForeground
-            || !GTO_PACKAGE.equals(foregroundPackage)
+        boolean trustedGtoContext = hasTrustedGtoContextForProjectionRecovery(now);
+        if (!trustedGtoContext
             || width <= 0
             || height <= 0
             || width <= height
@@ -4224,7 +4947,9 @@ public class GtoObserverService extends Service {
     }
 
     private void scheduleBubbleRestoreAfterPermission() {
-        prefs.edit().putBoolean("projectionPermissionInFlight", false).apply();
+        // Bubble restoration must never mutate the projection lifecycle. RESULT_OK,
+        // DENIED and the supervisor are the only authorities allowed to clear the
+        // in-flight latch; changing only SharedPreferences here created UI/service drift.
         mainHandler.postDelayed(() -> restoreBubbleAfterPermission(false), 220L);
         mainHandler.postDelayed(() -> restoreBubbleAfterPermission(true), 700L);
         // Slower OEM launchers can take over a second to bring the GTO task back. Keep
@@ -4241,22 +4966,51 @@ public class GtoObserverService extends Service {
         long now = System.currentTimeMillis();
         boolean visualGtoFresh = lastVisualGtoForegroundEvidenceAt > 0L
             && now - lastVisualGtoForegroundEvidenceAt <= VISUAL_GTO_EVIDENCE_FRESH_MS;
-        boolean confirmedGto = GTO_PACKAGE.equals(foregroundPackage) || visualGtoFresh;
-        if (!confirmedGto || transientForegroundSurfaceActive || screenAnalysisPausedOutsideGto) return;
+        boolean verifiedBridge = hasVerifiedGtoProjectionBridge();
+        boolean confirmedGto = GTO_PACKAGE.equals(foregroundPackage) || visualGtoFresh || verifiedBridge;
+        if (!confirmedGto || transientForegroundSurfaceActive) return;
         gtoForeground = true;
         prefs.edit().putBoolean("gtoForeground", true).apply();
+        if (screenAnalysisPausedOutsideGto && verifiedBridge) {
+            resumeScreenAnalysisInSameState(
+                nonGtoForegroundSince > 0L ? Math.max(0L, now - nonGtoForegroundSince) : 0L
+            );
+            nonGtoForegroundSince = 0L;
+        }
         showBubbleIfAllowed();
     }
 
     private void cancelTrip() {
         recordObserverEvent("TRIP_CANCELLED_BY_DRIVER", prefs.getString("selectedFreightSummary", ""));
-        GtoAutoTripSync.discardSessionSnapshot(this, prefs.getString("gtoTripSessionId", ""));
-        clearTripAnalysis();
+        String sessionId = prefs.getString("gtoTripSessionId", "");
+        if (!clearTripAnalysis()) {
+            showStatusChip("Entrega já comprovada pelo GTO. Ela não pode ser cancelada ou perdida; a NVU vai concluir automaticamente.", 4600L);
+            return;
+        }
+        GtoAutoTripSync.discardSessionSnapshot(this, sessionId);
         setTripState(STATE_CANCELLED, "Viagem cancelada pelo motorista");
         showToast("Viagem cancelada.");
     }
 
-    private void clearTripAnalysis() {
+    private boolean clearTripAnalysis() {
+        String protectedSession = prefs == null ? "" : prefs.getString("gtoTripSessionId", "");
+        boolean certifiedPending = prefs != null
+            && prefs.getBoolean("resultCertifiedLatched", false)
+            && !prefs.getBoolean("resultWatchedAdEvidence", false)
+            && GtoResultProofStore.isProtectedPending(this, protectedSession)
+            && !GtoAutoTripSync.hasPendingSession(this, protectedSession)
+            && !GtoAutoTripSync.STATUS_SYNCED.equals(prefs.getString("gtoTripSyncStatus", ""));
+        if (certifiedPending) {
+            recordObserverIncident(
+                "CERTIFIED_RESULT_RESET_BLOCKED",
+                "session=" + protectedSession + " state=" + getTripState()
+            );
+            prefs.edit()
+                .putString("lastEvent", "Reset bloqueado · entrega certificada ainda não foi selada na fila")
+                .putString("gtoTripIntegrityStatus", "CERTIFIED_RESULT_PROTECTED")
+                .apply();
+            return false;
+        }
         activeReviewInputDraft = "";
         activeReviewInputField = "";
         activeReviewInput = null;
@@ -4268,7 +5022,6 @@ public class GtoObserverService extends Service {
         resultTouchFallbackReady = false;
         resultTouchFallbackContinuityBroken = false;
         clearReplacementFreightCandidate();
-        clearExplicitFreightReplacement();
         clearActiveTripFreightListRuntime();
         deferredPreciseFreightCommit = null;
         deferredSelectionFailureRow = -1;
@@ -4285,6 +5038,7 @@ public class GtoObserverService extends Service {
         resultActionTouchAt = 0L;
         resultExitSeenAt = 0L;
         gameplayFramesAfterResult = 0;
+        resultDialogVisualAbsentFrames = 0;
         manualFinishCapturePending = false;
         manualFinishRequestedAt = 0L;
         manualFinishAttempts = 0;
@@ -4428,6 +5182,14 @@ public class GtoObserverService extends Service {
             .remove("resultActionTouchAt")
             .remove("resultReceiveLatched")
             .remove("resultActionSource")
+            .remove("resultCertifiedLatched")
+            .remove("resultCertifiedAt")
+            .remove("resultCertifiedSessionId")
+            .remove("resultWatchedAdEvidence")
+            .remove("resultAdUiLastSeenAt")
+            .remove("resultTerminalStatus")
+            .remove("resultProofEscrowRetryAt")
+            .remove("resultProofEscrowRetryAttempt")
             .remove("finalGain")
             .remove("completionStatus")
             .remove("completionDetectedAt")
@@ -4457,12 +5219,14 @@ public class GtoObserverService extends Service {
             .remove("resultTouchFallbackReady")
             .remove("resultTouchFallbackContinuityBroken")
             .remove("resultTouchFallbackReason")
+            .remove("pendingAdsActionDuringFreightReview")
             .remove("resultSnapshotPath")
             .remove("resultSnapshotAt")
             .remove("resultSnapshotError")
             .remove("resultSnapshotErrorAt")
             .putString("screenState", "UNKNOWN")
             .apply();
+        return true;
     }
 
     private void openOperationalPanel() {
@@ -4778,7 +5542,7 @@ public class GtoObserverService extends Service {
     }
 
     private void hideOverlays() {
-        hideBubbleRemoveTarget();
+        cancelBubbleGesture("HIDE_OVERLAYS", false);
         closeMenu();
         hideStatusChip();
         hideFreightTouchPulseSensor();
@@ -4926,6 +5690,10 @@ public class GtoObserverService extends Service {
         analysisOcrGeneration++;
         lastOcrAt = 0L;
         lastActiveTripVisualProbeAt = 0L;
+        // Producer timestamps are meaningful only inside one ImageReader/surface ordering
+        // domain. Geometry/session invalidation starts a fresh domain.
+        lastFreightProducerTimestampNs = 0L;
+        lastAnalysisProducerTimestampNs = 0L;
         activeTripFreightListSeenSince = 0L;
         activeTripFreightListFrames = 0;
         clearReplacementFreightCandidate();
@@ -4993,11 +5761,23 @@ public class GtoObserverService extends Service {
 
     private boolean canUseFreightListAsVisualGtoProof(long now, GtoFastVisualDetector.Frame frame) {
         if (!projectionActive || frame == null || !frame.hasFreightList()) return false;
-        boolean waitingForFreight = STATE_WAITING_FREIGHT.equals(getTripState());
+        // HF33: strict GTO freight pixels may restore stale UsageStats in every Observe
+        // state, including IDLE/CANCELLED before automatic bootstrap. State mutation is
+        // still governed separately by the deterministic reducer.
+        boolean waitingForFreight = captureIsNeededForCurrentState();
         boolean returnGrace = now < suppressForegroundHideUntil;
         boolean packageMatchesGto = GTO_PACKAGE.equals(foregroundPackage);
         boolean packageUnknown = foregroundPackage == null || foregroundPackage.isEmpty();
-        boolean permissionReturnFromNvu = returnGrace && getPackageName().equals(foregroundPackage);
+        // HF29: the verified post-consent bridge is session-scoped, not timer-scoped.
+        // On some OEMs UsageStats can keep reporting NVU/unknown for much longer than
+        // PERMISSION_RETURN_GRACE_MS while the simulator is already receiving frames.
+        // A strict real freight list is allowed to recover foreground through that bridge,
+        // but never over a known third-party app or the real NVU MainActivity.
+        boolean permissionReturnFromNvu = (returnGrace && getPackageName().equals(foregroundPackage))
+            || hasVerifiedGtoProjectionBridge()
+            // HF30: if UsageStats is stuck on NVU after the transparent consent host, a
+            // strict GTO freight list is stronger evidence than the stale activity latch.
+            || (projectionVerifiedGtoBridgeActive && getPackageName().equals(foregroundPackage));
         if (transientForegroundSurfaceActive) return false;
         return GtoVisualForegroundPolicy.allowFreightListProof(
             waitingForFreight,
@@ -5013,6 +5793,9 @@ public class GtoObserverService extends Service {
         lastVisualGtoForegroundEvidenceAt = now;
         lastGtoForegroundEvidenceAt = Math.max(lastGtoForegroundEvidenceAt, now);
         foregroundPackage = GTO_PACKAGE;
+        // A strict freight-list frame cannot come from the NVU MainActivity. If an OEM left
+        // that lifecycle latch stale after consent, repair it from the captured evidence.
+        nvuMainActivityForeground = false;
         if (!gtoForeground) gtoForeground = true;
         if (screenAnalysisPausedOutsideGto) {
             resumeScreenAnalysisInSameState(
@@ -5022,6 +5805,7 @@ public class GtoObserverService extends Service {
         }
         prefs.edit()
             .putBoolean("gtoForeground", true)
+            .putBoolean("nvuMainActivityForeground", false)
             .putString("foregroundPackage", GTO_PACKAGE)
             .putLong("lastVisualGtoForegroundEvidenceAt", now)
             .putInt("lastVisualGtoFreightCount", Math.max(0, freightCount))
@@ -5087,14 +5871,32 @@ public class GtoObserverService extends Service {
 
             long now = System.currentTimeMillis();
             boolean freshGto = hasFreshGtoForegroundEvidence(now);
-            if (!freshGto && STATE_WAITING_FREIGHT.equals(getTripState())) {
-                // Critical OEM fallback: direct pixels are authoritative when UsageStats
-                // fails to emit the resumed GTO event after MediaProjection permission.
-                // The strict freight-list geometry prevents an arbitrary frame from
-                // qualifying the capture gate.
-                GtoFastVisualDetector.Frame visualProof = fastVisualDetector.analyze(
+
+            // HF32: the lightweight screen recognizer never waits for the stability gate.
+            // Stability controls whether evidence may drive the state machine; it must not
+            // control whether the screen is being observed. This closes a deadlock class
+            // where a capture could keep qualifying buffers forever while no classifier ran.
+            GtoFastVisualDetector.Frame visualProof = null;
+            if (captureIsNeededForCurrentState()) {
+                visualProof = fastVisualDetector.analyze(
                     image, image.getWidth(), image.getHeight(), now
                 );
+                markProjectionFrameAnalyzed(now);
+                if (now - lastScreenRecognitionTelemetryAt >= SCREEN_RECOGNITION_TELEMETRY_MS) {
+                    lastScreenRecognitionTelemetryAt = now;
+                    prefs.edit()
+                        .putLong("screenRecognitionHeartbeatAt", now)
+                        .putString("screenRecognitionObserved", visualProof != null && visualProof.hasFreightList()
+                            ? "FREIGHT_LIST_VISUAL_PRE_READY" : "GTO_FRAME_PRE_READY")
+                        .apply();
+                }
+            }
+            if (!freshGto && captureIsNeededForCurrentState()) {
+                // HF33 critical OEM fallback: direct pixels are authoritative when UsageStats
+                // fails to emit the resumed GTO event after MediaProjection permission.
+                // The strict freight-list geometry prevents an arbitrary frame from
+                // qualifying the capture gate. Recognition above is informational until
+                // this foreground proof and the stability barrier both become valid.
                 if (canUseFreightListAsVisualGtoProof(now, visualProof)) {
                     recordVisualGtoForegroundEvidence(
                         now, visualProof.buttons.size(), "capture-gate-freight-list"
@@ -5145,6 +5947,9 @@ public class GtoObserverService extends Service {
                 now,
                 freshGto
             );
+            // Stability qualification proves buffer delivery/geometry only. It is NOT a
+            // screen-recognition heartbeat. The health dot turns white only after an actual
+            // classifier pass, avoiding the old "healthy capture but blind detector" state.
 
             if (observed.becameUnready) {
                 invalidateCaptureBoundAnalysis("FOREGROUND_OR_GEOMETRY_LOST");
@@ -5190,6 +5995,12 @@ public class GtoObserverService extends Service {
             || projectionPermissionInFlight
             || mediaProjection == null
             || !captureIsNeededForCurrentState()) return;
+        if (projectionVirtualDisplayEverCreated && virtualDisplay == null) {
+            escalateProjectionToFreshAuthorization(
+                "A sessão já consumiu sua VirtualDisplay e precisa de nova autorização do Android"
+            );
+            return;
+        }
 
         DisplayMetrics metrics = realDisplayMetrics();
         int width = metrics.widthPixels;
@@ -5200,8 +6011,9 @@ public class GtoObserverService extends Service {
         // is foreground. This removes the last race where a landscape NVU host could be
         // captured instead of the simulator and then force another consent.
         boolean packageMatchesGto = GTO_PACKAGE.equals(foregroundPackage);
+        boolean trustedGtoContext = packageMatchesGto || hasVerifiedGtoProjectionBridge();
 
-        if (!packageMatchesGto || width <= 0 || height <= 0 || width <= height) {
+        if (!trustedGtoContext || width <= 0 || height <= 0 || width <= height) {
             resetPendingProjectionSurfaceStability();
             if (width > 0 && height > 0 && width <= height) {
                 projectionStatus = "WAITING_GTO_LANDSCAPE";
@@ -5245,12 +6057,31 @@ public class GtoObserverService extends Service {
 
     private void createProjectionSurface(int width, int height) {
         if (!projectionSurfacePending || projectionActive || mediaProjection == null) return;
+        if (projectionVirtualDisplayEverCreated) {
+            escalateProjectionToFreshAuthorization(
+                "Segunda VirtualDisplay bloqueada: o Android exige uma nova autorização"
+            );
+            return;
+        }
         final MediaProjection projection = mediaProjection;
         final long generation = projectionGeneration;
+        boolean virtualDisplayAttempted = false;
         try {
             captureWidth = Math.max(1, width);
             captureHeight = Math.max(1, height);
             captureDensityDpi = Math.max(1, getResources().getConfiguration().densityDpi);
+
+            // A retry before the first VirtualDisplay may leave only local consumers from
+            // the previous attempt. Recycle those without touching the still-valid grant.
+            if (imageReader != null) {
+                try { imageReader.close(); } catch (Exception ignored) {}
+                imageReader = null;
+            }
+            if (captureThread != null) {
+                try { captureThread.quitSafely(); } catch (Exception ignored) {}
+                captureThread = null;
+                captureHandler = null;
+            }
 
             captureThread = new HandlerThread("NVU-GTO-Capture");
             captureThread.start();
@@ -5265,6 +6096,10 @@ public class GtoObserverService extends Service {
             );
             imageReader.setOnImageAvailableListener(this::onImageAvailable, captureHandler);
 
+            // Android 14+ allows createVirtualDisplay() only once per MediaProjection
+            // grant. Everything before this line can be retried on the same RESULT_OK;
+            // once this call is attempted, a failure must request a fresh system grant.
+            virtualDisplayAttempted = true;
             VirtualDisplay createdDisplay = projection.createVirtualDisplay(
                 "NVU-GTO-Observer",
                 captureWidth,
@@ -5283,6 +6118,7 @@ public class GtoObserverService extends Service {
                 throw new IllegalStateException("Sessão de captura mudou durante a criação da superfície");
             }
             virtualDisplay = createdDisplay;
+            projectionVirtualDisplayEverCreated = true;
             projectionActive = true;
             projectionSurfacePending = false;
             projectionStartedAt = System.currentTimeMillis();
@@ -5306,6 +6142,7 @@ public class GtoObserverService extends Service {
                 .putBoolean("projectionActive", true)
                 .putBoolean("projectionSessionBound", true)
                 .putBoolean("projectionSurfacePending", false)
+                .putBoolean("projectionVirtualDisplayEverCreated", true)
                 .putBoolean("projectionGrantValidated", true)
                 .putString("projectionStatus", projectionStatus)
                 .putInt("captureWidth", captureWidth)
@@ -5324,19 +6161,60 @@ public class GtoObserverService extends Service {
             updateFreightTouchPulseSensor();
             if (menuView != null) mainHandler.post(this::refreshMenuContents);
         } catch (Exception ex) {
-            projectionGeneration++;
-            projectionActive = false;
-            projectionSurfacePending = false;
-            projectionSessionBoundAt = 0L;
-            resetPendingProjectionSurfaceStability();
-            projectionStatus = "START_FAILED";
             String detail = describeError(ex);
+
+            // Always discard only the local consumer objects created by this attempt.
+            // Do not release/stop MediaProjection here unless createVirtualDisplay() was
+            // already attempted and therefore the one-use Android grant may be consumed.
+            if (imageReader != null) {
+                try { imageReader.close(); } catch (Exception ignored) {}
+                imageReader = null;
+            }
+            if (captureThread != null) {
+                try { captureThread.quitSafely(); } catch (Exception ignored) {}
+                captureThread = null;
+                captureHandler = null;
+            }
+            projectionActive = false;
+            resetPendingProjectionSurfaceStability();
             resetCaptureStabilityBarrier(
                 GtoCaptureStabilityGate.INACTIVE,
                 0,
                 0,
                 "Falha ao criar captura em paisagem"
             );
+
+            boolean sameUnusedGrantCanRetry = !virtualDisplayAttempted
+                && generation == projectionGeneration
+                && mediaProjection == projection
+                && !projectionVirtualDisplayEverCreated;
+            if (sameUnusedGrantCanRetry) {
+                projectionSurfacePending = true;
+                projectionStatus = "RETRYING_FIRST_SURFACE_SAME_GRANT";
+                prefs.edit()
+                    .putBoolean("projectionActive", false)
+                    .putBoolean("projectionSessionBound", true)
+                    .putBoolean("projectionSurfacePending", true)
+                    .putBoolean("projectionGrantValidated", true)
+                    .putBoolean("captureSurfaceReady", false)
+                    .putString("projectionStatus", projectionStatus)
+                    .putString("screenState", "CAPTURE_START_RETRY")
+                    .putString("projectionError", detail)
+                    .remove("projectionReauthRequired")
+                    .remove("projectionReauthNoticeShown")
+                    .putString("lastEvent", "Falha local antes da VirtualDisplay · autorização preservada, nova tentativa automática")
+                    .apply();
+                updateNotification();
+                mainHandler.postDelayed(
+                    () -> maybeStartPendingProjectionSurface(System.currentTimeMillis()),
+                    450L
+                );
+                return;
+            }
+
+            projectionSurfacePending = false;
+            projectionSessionBoundAt = 0L;
+            projectionStatus = "FIRST_SURFACE_GRANT_CONSUMED";
             prefs.edit()
                 .putBoolean("projectionActive", false)
                 .putBoolean("projectionSessionBound", false)
@@ -5350,18 +6228,118 @@ public class GtoObserverService extends Service {
                 .putBoolean("projectionReauthAutoAllowed", true)
                 .putBoolean("projectionReauthNoticeShown", false)
                 .putBoolean("touchCaptureNeeded", false)
-                .putString("lastEvent", "Falha ao criar captura em paisagem: " + detail)
+                .putString("lastEvent", "VirtualDisplay não iniciou · renovação automática da autorização armada")
                 .apply();
-            releaseCaptureResources(true);
-            try {
-                startForegroundForTypes(false);
-            } catch (Exception ignored) {}
             updateNotification();
-            showStatusChip("A leitura não iniciou corretamente. Abra a bolinha NVU, toque em Autorizar leitura da tela e tente novamente.", 4200L);
+            // At this point Android may have consumed the one-use grant. The supervisor
+            // is allowed to stop only this terminal token and immediately reopen consent
+            // over the verified GTO context. Ordinary frame stalls never reach this path.
+            mainHandler.post(() -> escalateProjectionToFreshAuthorization(
+                "O Android não conseguiu criar a VirtualDisplay da autorização aceita"
+            ));
+        }
+    }
+
+    private boolean repairPartialProjectionSurfaceWithoutReauthorization(long now) {
+        if (!GtoProjectionContinuityPolicy.shouldRepairPartialSurface(
+            captureIsNeededForCurrentState(),
+            projectionActive,
+            mediaProjection != null,
+            virtualDisplay != null,
+            projectionSurfacePending,
+            imageReader != null,
+            captureHandler != null && captureThread != null && captureThread.isAlive()
+        )) return false;
+
+        final VirtualDisplay expectedDisplay = virtualDisplay;
+        final long expectedGeneration = projectionGeneration;
+        if (expectedDisplay == null || captureWidth <= 0 || captureHeight <= 0) return false;
+
+        ImageReader replacement = null;
+        try {
+            HandlerThread liveThread = captureThread;
+            Handler liveHandler = captureHandler;
+            if (liveThread == null || !liveThread.isAlive() || liveHandler == null) {
+                if (liveThread != null) {
+                    try { liveThread.quitSafely(); } catch (Exception ignored) {}
+                }
+                liveThread = new HandlerThread("NVU-GTO-Capture-Recovered");
+                liveThread.start();
+                liveHandler = new Handler(liveThread.getLooper());
+                captureThread = liveThread;
+                captureHandler = liveHandler;
+            }
+
+            replacement = ImageReader.newInstance(
+                captureWidth, captureHeight, PixelFormat.RGBA_8888, 3
+            );
+            replacement.setOnImageAvailableListener(this::onImageAvailable, liveHandler);
+            if (!projectionActive
+                || expectedGeneration != projectionGeneration
+                || virtualDisplay != expectedDisplay
+                || mediaProjection == null) {
+                try { replacement.close(); } catch (Exception ignored) {}
+                return false;
+            }
+
+            ImageReader previous = imageReader;
+            try { expectedDisplay.setSurface(null); } catch (Exception ignored) {}
+            expectedDisplay.setSurface(replacement.getSurface());
+            imageReader = replacement;
+            replacement = null;
+            if (previous != null) {
+                try { previous.close(); } catch (Exception ignored) {}
+            }
+
+            lastProjectionSurfaceRecoveryAt = now;
+            lastProjectionFrameAt = 0L;
+            lastProjectionAnalyzedFrameAt = 0L;
+            lastFreightProducerTimestampNs = 0L;
+            lastAnalysisProducerTimestampNs = 0L;
+            resetCaptureStabilityBarrier(
+                GtoCaptureStabilityGate.CAPTURE_WAITING_STABLE_FRAMES,
+                captureWidth,
+                captureHeight,
+                "Pipeline de captura reconstruído na mesma autorização"
+            );
+            prefs.edit()
+                .remove("projectionFirstFrameAt")
+                .putString("captureReadiness", "RECOVERING_PARTIAL_PIPELINE")
+                .putBoolean("captureReadyForAnalysis", false)
+                .putLong("projectionPartialRepairAt", now)
+                .putString("lastEvent", "ImageReader/handler reconstruído sem pedir nova autorização")
+                .apply();
+            return true;
+        } catch (Exception ex) {
+            if (replacement != null) {
+                try { replacement.close(); } catch (Exception ignored) {}
+            }
+            prefs.edit()
+                .putString("projectionError", "Partial repair: " + describeError(ex))
+                .putLong("projectionErrorAt", now)
+                .putString("lastEvent", "Falha ao reconstruir pipeline parcial; supervisor continuará tentando")
+                .apply();
+            return false;
         }
     }
 
     private void maybeRecoverProjectionFrameDelivery(long now) {
+        if (repairPartialProjectionSurfaceWithoutReauthorization(now)) return;
+
+        if (GtoProjectionContinuityPolicy.needsFreshGrant(
+            captureIsNeededForCurrentState(),
+            projectionActive,
+            mediaProjection != null,
+            virtualDisplay != null,
+            projectionSurfacePending,
+            projectionVirtualDisplayEverCreated
+        )) {
+            escalateProjectionToFreshAuthorization(
+                "A VirtualDisplay da sessão foi encerrada pelo Android; uma nova autorização é necessária"
+            );
+            return;
+        }
+
         if (!GtoCaptureHealthPolicy.shouldRecoverSurface(
             projectionActive,
             mediaProjection != null,
@@ -5383,58 +6361,28 @@ public class GtoObserverService extends Service {
             PROJECTION_SURFACE_REBIND_COOLDOWN_MS
         )) return;
 
-        // Never enter a terminal ACTIVE_NO_FRAMES state while the MediaProjection token
-        // remains valid. Rebind the ImageReader surface repeatedly, with a small cooldown,
-        // until real frames resume or Android explicitly stops the projection token.
+        // HF30 invariant: a frame stall is never permission loss. As long as the actual
+        // MediaProjection token and its single VirtualDisplay still exist, repair the
+        // ImageReader surface forever. Do NOT stop a valid grant just because N retries
+        // elapsed; only MediaProjection.Callback.onStop() or loss of the VirtualDisplay
+        // can require a fresh Android consent.
         lastProjectionSurfaceRecoveryAt = now;
         projectionSurfaceRebindAttempts = projectionSurfaceRebindAttempts == Integer.MAX_VALUE
             ? Integer.MAX_VALUE
             : projectionSurfaceRebindAttempts + 1;
+        String readiness = projectionSurfaceRebindAttempts >= PROJECTION_SURFACE_REAUTH_ESCALATION_ATTEMPTS
+            ? "RECOVERING_SURFACE_PERSISTENT"
+            : "RECOVERING_SURFACE";
         prefs.edit()
             .putInt("projectionSurfaceRebindAttempts", projectionSurfaceRebindAttempts)
             .putLong("projectionSurfaceRecoveryAt", now)
-            .putString("captureReadiness", "RECOVERING_SURFACE")
+            .putString("captureReadiness", readiness)
             .putBoolean("captureReadyForAnalysis", false)
-            .putString("lastEvent", "Captura sem quadros reais · reconectando superfície sem perder a viagem")
+            .putString("lastEvent", projectionSurfaceRebindAttempts >= PROJECTION_SURFACE_REAUTH_ESCALATION_ATTEMPTS
+                ? "Captura sem quadros · recuperação contínua na mesma autorização"
+                : "Captura sem quadros reais · reconectando superfície sem perder a viagem")
             .apply();
         rebindProjectionSurfaceWithoutReauthorization();
-
-        final int scheduledAttempts = projectionSurfaceRebindAttempts;
-        if (scheduledAttempts >= PROJECTION_SURFACE_REAUTH_ESCALATION_ATTEMPTS) {
-            mainHandler.postDelayed(() -> {
-                long checkAt = System.currentTimeMillis();
-                if (projectionSurfaceRebindAttempts < scheduledAttempts) return;
-                if (!GtoProjectionRecoveryPolicy.shouldEscalateSurfaceRecovery(
-                    projectionSurfaceRebindAttempts,
-                    gtoForeground,
-                    captureIsNeededForCurrentState(),
-                    projectionPermissionInFlight,
-                    checkAt,
-                    lastProjectionFrameAt,
-                    lastProjectionAnalyzedFrameAt,
-                    projectionStartedAt,
-                    Math.max(PROJECTION_STALE_FRAME_WATCHDOG_MS, PROJECTION_STALE_ANALYSIS_WATCHDOG_MS)
-                )) return;
-                boolean healthy = GtoCaptureHealthPolicy.isHealthy(
-                    projectionActive,
-                    mediaProjection != null,
-                    virtualDisplay != null,
-                    imageReader != null,
-                    captureHandler != null,
-                    gtoForeground,
-                    screenAnalysisPausedOutsideGto,
-                    captureStabilityGate.isReady(),
-                    checkAt,
-                    lastProjectionFrameAt,
-                    lastProjectionAnalyzedFrameAt
-                );
-                if (!healthy) {
-                    escalateProjectionToFreshAuthorization(
-                        "A leitura continuou sem quadros válidos após " + projectionSurfaceRebindAttempts + " recuperações"
-                    );
-                }
-            }, 1300L);
-        }
     }
 
     private void rebindProjectionSurfaceWithoutReauthorization() {
@@ -5451,6 +6399,11 @@ public class GtoObserverService extends Service {
             try {
                 replacement = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 3);
                 replacement.setOnImageAvailableListener(this::onImageAvailable, handler);
+                // Detach the stalled producer surface first. Several OEM display stacks do
+                // not restart buffer delivery when setSurface() is called with a replacement
+                // while the old consumer remains attached. The VirtualDisplay itself stays
+                // alive, so this does not consume a second MediaProjection session.
+                try { expectedDisplay.setSurface(null); } catch (Exception ignored) {}
                 expectedDisplay.setSurface(replacement.getSurface());
                 if (!projectionActive
                     || expectedGeneration != projectionGeneration
@@ -5464,6 +6417,8 @@ public class GtoObserverService extends Service {
                 try { expectedReader.close(); } catch (Exception ignored) {}
                 lastProjectionFrameAt = 0L;
                 lastProjectionAnalyzedFrameAt = 0L;
+                lastFreightProducerTimestampNs = 0L;
+                lastAnalysisProducerTimestampNs = 0L;
                 resetCaptureStabilityBarrier(
                     GtoCaptureStabilityGate.CAPTURE_WAITING_STABLE_FRAMES,
                     width,
@@ -5511,7 +6466,9 @@ public class GtoObserverService extends Service {
             if (manager == null) throw new IllegalStateException("MediaProjectionManager indisponível");
 
             final long generation = ++projectionGeneration;
+            projectionVirtualDisplayEverCreated = false;
             final MediaProjection projection = manager.getMediaProjection(resultCode, resultData);
+            clearStagedProjectionGrant(prefs.getLong("projectionConsentResultAt", 0L));
             if (projection == null) throw new IllegalStateException("MediaProjection não autorizado");
             mediaProjection = projection;
 
@@ -5541,6 +6498,7 @@ public class GtoObserverService extends Service {
                             : -1L;
                         projectionActive = false;
                         projectionSurfacePending = false;
+                        projectionVirtualDisplayEverCreated = false;
                         projectionSessionBoundAt = 0L;
                         resetPendingProjectionSurfaceStability();
                         projectionStatus = wasPending && activeForMs < 0L
@@ -5558,6 +6516,7 @@ public class GtoObserverService extends Service {
                             .putBoolean("projectionActive", false)
                             .putBoolean("projectionSessionBound", false)
                             .putBoolean("projectionSurfacePending", false)
+                            .putBoolean("projectionVirtualDisplayEverCreated", false)
                             .putBoolean("projectionGrantValidated", false)
                             .remove("projectionSessionBoundAt")
                             .putBoolean("captureSurfaceReady", false)
@@ -5582,6 +6541,7 @@ public class GtoObserverService extends Service {
                         }
                         stoppedEditor.apply();
                         projectionStartedAt = 0L;
+                        clearStagedProjectionGrant(0L);
                         releaseCaptureResources(false);
                         updateFreightTouchPulseSensor();
                         if (!destroying && running) {
@@ -5594,9 +6554,13 @@ public class GtoObserverService extends Service {
                                     .apply();
                             }
                             updateNotification();
-                            if (gtoForeground) {
-                                ensureProjectionAuthorizationIfNeeded(System.currentTimeMillis());
-                            }
+                            // Callback.onStop is the authoritative Android revocation. The
+                            // old token cannot be reused, but the observer immediately arms
+                            // the next consent whenever the verified GTO context is visible.
+                            mainHandler.postDelayed(
+                                () -> ensureProjectionAuthorizationIfNeeded(System.currentTimeMillis()),
+                                260L
+                            );
                         }
                     });
                 }
@@ -5610,6 +6574,15 @@ public class GtoObserverService extends Service {
             projectionActive = false;
             projectionSurfacePending = true;
             projectionPermissionInFlight = false;
+            projectionVerifiedGtoBridgeActive = true;
+            // The consent flow is launched only after GTO was positively verified. If an
+            // OEM misses MainActivity.onPause(), do not let that stale latch permanently
+            // veto the verified GTO bridge after RESULT_OK. A later real MainActivity
+            // onResume() will set it true again and immediately disable the bridge.
+            nvuMainActivityForeground = false;
+            suppressForegroundHideUntil = Math.max(
+                suppressForegroundHideUntil, System.currentTimeMillis() + 15_000L
+            );
             projectionSessionBoundAt = System.currentTimeMillis();
             resetPendingProjectionSurfaceStability();
             projectionStartedAt = 0L;
@@ -5628,6 +6601,8 @@ public class GtoObserverService extends Service {
                 .putBoolean("projectionSessionBound", true)
                 .putBoolean("projectionSurfacePending", true)
                 .putBoolean("projectionGrantValidated", true)
+                .putBoolean("projectionVerifiedGtoBridgeActive", true)
+                .putBoolean("nvuMainActivityForeground", false)
                 .putLong("projectionGrantValidatedAt", projectionSessionBoundAt)
                 .putLong("projectionSessionBoundAt", projectionSessionBoundAt)
                 .putString("projectionStatus", projectionStatus)
@@ -5670,6 +6645,21 @@ public class GtoObserverService extends Service {
                 && virtualDisplay != null
                 && imageReader != null;
             if (!started) {
+                // Failure before createVirtualDisplay() is retried on the same RESULT_OK.
+                // Failure after the one-use display attempt arms the fresh-consent path in
+                // createProjectionSurface(). Neither case should be converted into a second
+                // generic/manual failure by this outer grant binder.
+                boolean retryingSameGrant = mediaProjection == projection
+                    && projectionSurfacePending
+                    && !projectionVirtualDisplayEverCreated;
+                if (retryingSameGrant) {
+                    updateNotification();
+                    if (menuView != null) mainHandler.post(this::refreshMenuContents);
+                    return true;
+                }
+                if ("FIRST_SURFACE_GRANT_CONSUMED".equals(projectionStatus)) {
+                    return false;
+                }
                 throw new IllegalStateException("VirtualDisplay não ficou ativa após autorização");
             }
             updateNotification();
@@ -5717,7 +6707,13 @@ public class GtoObserverService extends Service {
                     .apply();
             }
             updateNotification();
-            showToast("Falha ao vincular a autorização da tela. Abra a bolinha NVU, toque em Autorizar leitura da tela e tente novamente.");
+            if (captureIsNeededForCurrentState()) {
+                mainHandler.postDelayed(
+                    () -> ensureProjectionAuthorizationIfNeeded(System.currentTimeMillis()),
+                    320L
+                );
+            }
+            showStatusChip("A autorização não vinculou. O NVU vai reabrir a confirmação automaticamente.", 3600L);
             if (menuView != null) mainHandler.post(this::refreshMenuContents);
             return false;
         }
@@ -5871,20 +6867,24 @@ public class GtoObserverService extends Service {
             if (menuView != null) mainHandler.post(this::refreshMenuContents);
         }
         if (screenAnalysisPausedOutsideGto || !gtoForeground) {
-            boolean foregroundOwnerAllowsVisualProbe = foregroundPackage == null
-                || foregroundPackage.isEmpty()
-                || GTO_PACKAGE.equals(foregroundPackage)
-                || getPackageName().equals(foregroundPackage);
-            // Permission return and an explicit NVU->GTO launch share the same bounded
-            // bridge. Do not require screenAnalysisPausedOutsideGto here: the first
-            // ImageReader callback can beat the 350 ms foreground poll. A strict real
-            // freight list is still required inside consumeCaptureStabilityFrame(), and
-            // a known third-party foreground owner is never eligible for this probe.
-            boolean trustedWaitingFreightProbe = projectionActive
-                && STATE_WAITING_FREIGHT.equals(getTripState())
-                && callbackAt < suppressForegroundHideUntil
-                && !transientForegroundSurfaceActive
-                && foregroundOwnerAllowsVisualProbe;
+            boolean packageMatchesGto = GTO_PACKAGE.equals(foregroundPackage);
+            boolean packageUnknown = foregroundPackage == null || foregroundPackage.isEmpty();
+            boolean packageIsNvu = getPackageName().equals(foregroundPackage);
+            // HF30: the MediaProjection grant was opened only after the real GTO package
+            // was verified. While WAITING_FREIGHT, keep probing strict pixels even if an
+            // OEM leaves UsageStats stuck on NVU after the transparent consent activity.
+            // The probe itself cannot select a freight; human touch + semantic row evidence
+            // remain mandatory. A positively identified unrelated app is still excluded.
+            boolean trustedWaitingFreightProbe = GtoProjectionContinuityPolicy
+                .mayProbeWaitingFreightDuringForegroundLag(
+                    projectionActive,
+                    projectionVerifiedGtoBridgeActive,
+                    captureIsNeededForCurrentState(),
+                    transientForegroundSurfaceActive,
+                    packageMatchesGto,
+                    packageUnknown,
+                    packageIsNvu
+                );
             if (trustedWaitingFreightProbe) {
                 consumeCaptureStabilityFrame(reader);
                 return;
@@ -5919,9 +6919,15 @@ public class GtoObserverService extends Service {
         try {
             image = reader.acquireLatestImage();
             if (image == null) return;
-            if (!GtoFrameFreshnessPolicy.shouldConsume(System.nanoTime(), image.getTimestamp(), false)) {
-                prefs.edit().putLong("staleAnalysisFrameDroppedAt", System.currentTimeMillis()).apply();
+            long analysisProducerTimestampNs = image.getTimestamp();
+            if (!GtoFrameFreshnessPolicy.shouldConsume(
+                lastAnalysisProducerTimestampNs, analysisProducerTimestampNs, false
+            )) {
+                prefs.edit().putLong("duplicateAnalysisFrameDroppedAt", System.currentTimeMillis()).apply();
                 return;
+            }
+            if (analysisProducerTimestampNs > 0L) {
+                lastAnalysisProducerTimestampNs = analysisProducerTimestampNs;
             }
 
             String state = getTripState();
@@ -5930,41 +6936,66 @@ public class GtoObserverService extends Service {
             long now = System.currentTimeMillis();
             boolean resultProbeOccludedByNvuMenu = false;
             boolean resultTrackingState = isResultTrackingState(state);
+            boolean resultDialogVisualPresentNow = false;
+            if (resultTrackingState && resultScreenLastSeenAt > 0L) {
+                resultDialogVisualPresentNow = resultVisualGate.looksLikeResultDialog(
+                    image, captureWidth, captureHeight
+                );
+                if (resultDialogVisualPresentNow) {
+                    resultDialogVisualAbsentFrames = 0;
+                } else {
+                    resultDialogVisualAbsentFrames = Math.min(12, resultDialogVisualAbsentFrames + 1);
+                    if (resultDialogVisualAbsentFrames == 2
+                        && prefs.getBoolean("resultCertifiedLatched", false)
+                        && !prefs.getBoolean("resultWatchedAdEvidence", false)) {
+                        // HF45 perceived-latency fix: once the certified result dialog is
+                        // visibly gone, stop instructing the driver to tap a button that no
+                        // longer exists. This is only UI truth; terminal completion still
+                        // waits for exact Receber or the guarded no-ad policy.
+                        announceDriverStage(
+                            "RESULT_EXIT_VERIFYING",
+                            "Viagem preservada ✓ · verificando conclusão…",
+                            0L,
+                            true
+                        );
+                    }
+                }
+            }
 
-            // Freight-list interpretation is state-scoped. During a confirmed route,
-            // orange scenery/HUD fragments must never become a jobs list. The freight
-            // detector is allowed to run in TRIP_IN_PROGRESS only after the driver has
-            // explicitly armed "Trocar frete atual" from the NVU overlay. Result-screen
-            // probing remains independent so completion detection stays automatic.
-            if ((isReplaceableActiveSessionState(state) || resultTrackingState)
+            // HF34 architecture: observer-scoped recognition is continuous and lifecycle events are deterministic.
+            // Every active GTO capture state receives a lightweight visual classifier pass
+            // at real-time cadence. Whether a recognized jobs list is allowed to change the
+            // trip remains controlled by the deterministic state machine below.
+            GtoFastVisualDetector.Frame continuousVisualFrame = null;
+            if (captureIsNeededForCurrentState()
                 && now - lastActiveTripVisualProbeAt >= ACTIVE_TRIP_VISUAL_PROBE_MS) {
                 lastActiveTripVisualProbeAt = now;
-                if (isReplaceableActiveSessionState(state)) {
-                    boolean explicitReplacement = isExplicitFreightReplacementActive(now);
-                    boolean mayProbeFreightList = GtoDeterministicFlowPolicy.mayProbeFreightListForCurrentState(
-                        state, explicitReplacement
-                    );
-                    // Recognition priority is broader than replacement permission. While a
-                    // trip is active we may observe a genuine list as informational context,
-                    // but the existing deterministic policy still blocks selection/replacement
-                    // unless the driver explicitly armed it.
-                    boolean informationalListProbe = STATE_TRIP_IN_PROGRESS.equals(state)
-                        && !explicitReplacement;
-                    if (mayProbeFreightList || informationalListProbe) {
-                        GtoFastVisualDetector.Frame activeFrame = fastVisualDetector.analyze(
-                            image, captureWidth, captureHeight, now
-                        );
-                        // Mark health only after a real state-scoped detector completed.
-                        markProjectionFrameAnalyzed(now);
-                        if (handleActiveTripFreightListEvidence(image, activeFrame, now)) return;
-                    } else if (STATE_TRIP_IN_PROGRESS.equals(state)) {
-                        clearActiveTripFreightListRuntime();
-                        prefs.edit()
-                            .putBoolean("activeTripFreightListVisible", false)
-                            .putInt("freightCount", 0)
-                            .putString("screenState", "TRIP")
-                            .apply();
-                    }
+                continuousVisualFrame = fastVisualDetector.analyze(
+                    image, captureWidth, captureHeight, now
+                );
+                markProjectionFrameAnalyzed(now);
+                if (now - lastScreenRecognitionTelemetryAt >= SCREEN_RECOGNITION_TELEMETRY_MS) {
+                    lastScreenRecognitionTelemetryAt = now;
+                    boolean visualFreight = continuousVisualFrame != null
+                        && continuousVisualFrame.hasFreightList();
+                    prefs.edit()
+                        .putLong("screenRecognitionHeartbeatAt", now)
+                        .putString("screenRecognitionObserved", visualFreight
+                            ? "FREIGHT_LIST_VISUAL" : "GTO_FRAME")
+                        .apply();
+                }
+
+                if (mayHandleCertifiedFreightBoundary(state)) {
+                    // HF40: the same certified-list reducer owns fresh IDLE/CANCELLED
+                    // bootstrap and active/review replacement. This closes the post-cancel
+                    // blind spot where recognition heartbeat remained alive but no state
+                    // transition or Aceitar sensor could be armed.
+                    // HF39: a semantically certified jobs list is also authoritative while
+                    // CONFIRMING_FREIGHT is already in REVIEW_REQUIRED. The HF38 exclusion
+                    // allowed a stale review card/old row (including an old monetary value)
+                    // to survive over a newly opened real freight list. Detection remains
+                    // candidate-only until same-page semantic certification succeeds.
+                    if (handleActiveTripFreightListEvidence(image, continuousVisualFrame, now)) return;
                 }
 
                 if (resultTrackingState) {
@@ -5989,8 +7020,8 @@ public class GtoObserverService extends Service {
                     // fallback and parseResultScreen() remains the sole authority through
                     // the semantic pair Concluído + monetary value. This avoids reviving
                     // the old self-interference class caused by our own dark overlay.
-                    // A state-scoped result monitor touched this live frame.
-                    markProjectionFrameAnalyzed(now);
+                    // The continuous visual pass above already advanced the recognition
+                    // heartbeat. Semantic result OCR remains the authority for completion.
                 }
             }
 
@@ -6055,6 +7086,15 @@ public class GtoObserverService extends Service {
             int analysisOffsetX = 0;
             int analysisOffsetY = 0;
             int maxWidth = MAX_ANALYSIS_WIDTH;
+            boolean postResultFullFrame = GtoResultActionFlowPolicy.useFullFramePostResult(
+                state,
+                prefs.getString("resultAction", ""),
+                prefs.getBoolean("resultReceiveLatched", false),
+                resultTouchFallbackRequired || prefs.getBoolean("resultTouchFallbackRequired", false),
+                resultExitSeenAt,
+                resultScreenLastSeenAt > 0L,
+                resultDialogVisualPresentNow
+            );
             if (STATE_WAITING_FREIGHT.equals(state)) {
                 // R3.4: use the detected Aceitar column when available. If the fast
                 // detector has not locked a column yet, deliberately use a wider right
@@ -6064,10 +7104,12 @@ public class GtoObserverService extends Service {
                 int roiWidth = source.getWidth() - analysisOffsetX;
                 analysisBitmap = Bitmap.createBitmap(source, analysisOffsetX, 0, roiWidth, source.getHeight());
                 maxWidth = MAX_FREIGHT_ANALYSIS_WIDTH;
-            } else if (resultTrackingState) {
-                // The completion dialog is central and comparatively small. Reading the
-                // central area at native resolution makes result detection faster without
-                // sacrificing the exact "Valor a receber" amount.
+            } else if (resultTrackingState && !postResultFullFrame) {
+                // Before the irreversible action, the completion dialog is central and
+                // comparatively small. After any result action (or after the first frame
+                // where the dialog disappears) use the whole display only to watch for
+                // positive ADS/reward evidence and certified next-screen boundaries. HF42
+                // deliberately does not depend on optional HUD labels such as FPS/kmh.
                 int left = clamp(Math.round(source.getWidth() * 0.245f), 0, source.getWidth() - 2);
                 int top = clamp(Math.round(source.getHeight() * 0.12f), 0, source.getHeight() - 2);
                 int right = clamp(Math.round(source.getWidth() * 0.755f), left + 1, source.getWidth());
@@ -6076,8 +7118,9 @@ public class GtoObserverService extends Service {
                 analysisOffsetY = top;
                 analysisBitmap = Bitmap.createBitmap(source, left, top, right - left, bottom - top);
             } else {
-                // After the result screen we need the whole display to distinguish normal
-                // gameplay from an advertisement/reward flow.
+                // HF42: post-result states use the whole GTO frame only for positive
+                // watched-ad evidence, ad-in-progress hold evidence and certified next
+                // screen boundaries. No device/player HUD label participates in completion.
                 analysisBitmap = Bitmap.createBitmap(source);
             }
 
@@ -6437,7 +7480,8 @@ public class GtoObserverService extends Service {
                     buttonCopy.size(), parsed.size(), semanticAnchors
                 );
                 if (semanticCertified) {
-                    markFreightPageSemanticallyCertified(generation, semanticAnchors, parsed.size());
+                    int visibleRowCount = buttonCopy.isEmpty() ? parsed.size() : buttonCopy.size();
+                    markFreightPageSemanticallyCertified(generation, semanticAnchors, visibleRowCount);
                 } else {
                     recordObserverEvent(
                         "FREIGHT_LIST_CANDIDATE_REJECTED",
@@ -6509,14 +7553,19 @@ public class GtoObserverService extends Service {
                 : reader.acquireLatestImage();
             if (image == null) return;
             boolean criticalTouchFrame = fastTouchPulseActive || selectionCoordinator.isCriticalWindow();
-            if (!GtoFrameFreshnessPolicy.shouldConsume(System.nanoTime(), image.getTimestamp(), criticalTouchFrame)) {
+            long freightProducerTimestampNs = image.getTimestamp();
+            if (!GtoFrameFreshnessPolicy.shouldConsume(
+                lastFreightProducerTimestampNs, freightProducerTimestampNs, criticalTouchFrame
+            )) {
                 prefs.edit()
-                    .putLong("staleFreightFrameDroppedAt", System.currentTimeMillis())
-                    .putBoolean("staleFreightFrameCriticalWindow", criticalTouchFrame)
+                    .putLong("duplicateFreightFrameDroppedAt", System.currentTimeMillis())
+                    .putBoolean("duplicateFreightFrameCriticalWindow", criticalTouchFrame)
                     .apply();
                 return;
             }
-            if (screenAnalysisPausedOutsideGto || !gtoForeground) return;
+            if (freightProducerTimestampNs > 0L) {
+                lastFreightProducerTimestampNs = freightProducerTimestampNs;
+            }
             if (image.getWidth() != captureWidth || image.getHeight() != captureHeight) {
                 return;
             }
@@ -6526,25 +7575,50 @@ public class GtoObserverService extends Service {
             GtoFastVisualDetector.Frame current = fastVisualDetector.analyze(image, captureWidth, captureHeight, now);
             markProjectionFrameAnalyzed(now);
             boolean hasList = current != null && current.hasFreightList();
+            if (now - lastScreenRecognitionTelemetryAt >= SCREEN_RECOGNITION_TELEMETRY_MS) {
+                lastScreenRecognitionTelemetryAt = now;
+                prefs.edit()
+                    .putLong("screenRecognitionHeartbeatAt", now)
+                    .putString("screenRecognitionObserved", hasList
+                        ? "FREIGHT_LIST_VISUAL" : "GTO_FRAME")
+                    .apply();
+            }
             int runtimeFreightCount = hasList ? stableFreightRuntimeCount(current) : 0;
             if (hasList && canUseFreightListAsVisualGtoProof(now, current)) {
                 // Keep capture qualification alive even when an OEM never emits a fresh
                 // UsageEvent after returning from the projection permission activity.
+                // This also closes the capture-thread race where the main foreground poll
+                // pauses analysis between onImageAvailable() and this ordered frame path.
                 recordVisualGtoForegroundEvidence(now, runtimeFreightCount, "live-freight-list");
             }
-            if (!gtoForeground || !isCaptureReadyForAnalysis(now)) return;
+            if (screenAnalysisPausedOutsideGto || !gtoForeground || !isCaptureReadyForAnalysis(now)) return;
             long sequence = selectionCoordinator.onFrameProcessed();
 
             if (hasList) {
+                recordFastFreightFrame(current, sequence);
+                cacheFastFreightPanel(image, current, now);
                 boolean semanticList = isFreightPageSemanticallyCertified(freightPageGeneration);
+                boolean strongVisualList = current.buttons != null && current.buttons.size() >= 2;
                 if (semanticList) onFreightListVisibleAgain(now);
                 lastFreightListSeenAt = now;
                 fastMissingListFrames = 0;
-                lastScreenState = semanticList ? "FREIGHT_LIST" : "FREIGHT_LIST_CANDIDATE";
-                persistFreightRuntimeStatus(lastScreenState, semanticList ? runtimeFreightCount : 0, now, sequence);
-
-                recordFastFreightFrame(current, sequence);
-                cacheFastFreightPanel(image, current, now);
+                lastScreenState = semanticList
+                    ? "FREIGHT_LIST"
+                    : (strongVisualList ? "FREIGHT_LIST_VISUAL" : "FREIGHT_LIST_CANDIDATE");
+                if (strongVisualList) {
+                    prefs.edit()
+                        .putInt("freightVisualCount", runtimeFreightCount)
+                        .putLong("freightVisualDetectedAt", now)
+                        .apply();
+                }
+                persistFreightRuntimeStatus(
+                    lastScreenState, semanticList ? runtimeFreightCount : 0, now, sequence
+                );
+                if (semanticList && strongVisualList) {
+                    updateStickyFreightListMessageFromLiveCount(
+                        runtimeFreightCount, now, criticalTouchFrame
+                    );
+                }
 
                 // A touch can arrive before the very first structural pass. Because the
                 // touch marker is serialized on this Handler, any pre-touch callbacks
@@ -6674,6 +7748,7 @@ public class GtoObserverService extends Service {
 
             if (now - lastFreightListSeenAt > 380L) {
                 markFreightListClosed(now);
+                prefs.edit().putInt("freightVisualCount", 0).apply();
                 persistFreightRuntimeStatus("OTHER", 0, now, sequence);
             }
 
@@ -6722,6 +7797,7 @@ public class GtoObserverService extends Service {
             FreightOption frozenBaseline = stableFreightForRow(rowIndex);
             if (frozenBaseline != null) {
                 frozenBaseline = copyFreightOption(frozenBaseline);
+                recoverMissingOriginFromCurrentPage(frozenBaseline);
                 markFrozenTouchBaselineEvidence(frozenBaseline);
             }
             return new FreightSelectionTransaction(
@@ -6860,6 +7936,12 @@ public class GtoObserverService extends Service {
         // HF26: list exit confirms the driver's action, but semantic freight evidence
         // still has to certify the frozen row before identity becomes CONFIRMED.
         persistSelectionIdentity(row, "TOUCH_LOCKED", transaction.source);
+        announceDriverStage(
+            "FREIGHT_SELECTED",
+            "Frete selecionado ✓ · confirmando dados…",
+            0L,
+            true
+        );
         runPreciseSelectedRowOcr(transaction);
     }
 
@@ -6874,12 +7956,6 @@ public class GtoObserverService extends Service {
             pendingSelectionTransaction = null;
         }
         clearFastTouchPulse(false);
-    }
-
-    private boolean shouldAnalyzeState(String state) {
-        return STATE_TRIP_IN_PROGRESS.equals(state)
-            || STATE_RESULT_DETECTED.equals(state)
-            || STATE_AWAITING_BONUS.equals(state);
     }
 
     private long analysisIntervalForState(String state) {
@@ -6942,110 +8018,23 @@ public class GtoObserverService extends Service {
         long now
     ) {
         String activeState = getTripState();
-        if (!isReplaceableActiveSessionState(activeState)) return false;
+        if (!mayHandleCertifiedFreightBoundary(activeState)) return false;
         boolean unresolvedResult = STATE_RESULT_DETECTED.equals(activeState) || STATE_AWAITING_BONUS.equals(activeState);
-        boolean freightList = frame != null && frame.hasFreightList();
-        boolean explicitReplacement = isExplicitFreightReplacementActive(now);
+        boolean freightListVisualCandidate = frame != null && frame.hasFreightList();
 
-        // HF16 cancellation/reselection rule: when a real freight list reappears
-        // during TRIP_IN_PROGRESS, treat it as a possible in-simulator cancellation.
-        // The current freight remains durable until the driver actually touches a new
-        // Aceitar row. This prevents a false list candidate from erasing a valid trip,
-        // while allowing the next accepted freight to replace the cancelled one.
-        if (STATE_TRIP_IN_PROGRESS.equals(activeState) && !explicitReplacement) {
-            if (!freightList) {
-                if (replacementFreightPressedRow >= 0
-                    && replacementFreightTouchPending
-                    && now - replacementFreightTouchAt <= CRITICAL_TOUCH_WINDOW_MS + 260L) {
-                    return promoteReplacementFreightCandidateToWaiting(true);
-                }
-                if (replacementFreightCandidateArmed
-                    && now - replacementFreightCandidateAt <= CRITICAL_TOUCH_WINDOW_MS + 260L) {
-                    return false;
-                }
-                clearActiveTripFreightListRuntime();
-                clearReplacementFreightCandidate();
-                prefs.edit()
-                    .putBoolean("activeTripFreightListVisible", false)
-                    .putInt("freightCount", 0)
-                    .putString("screenState", "TRIP")
-                    .apply();
-                return false;
-            }
-
-            armOrRefreshReplacementFreightCandidate(image, frame, now);
-            if (activeTripFreightListSeenSince == 0L) activeTripFreightListSeenSince = now;
-            activeTripFreightListFrames++;
-            int count = frame.buttons == null ? 0 : frame.buttons.size();
-            boolean stableList = GtoSimpleScreenDetectionPolicy.isStableFreightListReturn(
-                activeState, true, activeTripFreightListFrames, now - activeTripFreightListSeenSince
-            );
-            activeTripFreightListVisible = stableList;
-            // Visual geometry alone is only a candidate while a trip is active. Do not
-            // announce or expose a freight list until a human action starts replacement;
-            // the normal page OCR will then semantically certify Aceitar + value.
-            prefs.edit()
-                .putBoolean("activeTripFreightListVisible", stableList)
-                .putInt("freightCount", 0)
-                .putString("screenState", stableList ? "FREIGHT_LIST_CANDIDATE_AFTER_TRIP" : "TRIP")
-                .apply();
-            if (stableList) mainHandler.post(this::updateFreightTouchPulseSensor);
-
-            if (replacementFreightTouchPending
-                && now - replacementFreightTouchAt <= CRITICAL_TOUCH_WINDOW_MS + 260L
-                && (stableList || replacementFreightPressedRow >= 0)) {
-                return promoteReplacementFreightCandidateToWaiting(true);
-            }
-            // Detection has priority, but state replacement waits for the driver's new
-            // Aceitar. Merely reopening the list never discards the previous freight.
-            return stableList;
-        }
-
-        // A result already detected cannot be discarded by merely seeing the freight
-        // list. Only an observed Receber action may finalize it; otherwise the result
-        // remains preserved for explicit recovery.
-        if (unresolvedResult && freightList) {
-            int count = frame.buttons == null ? 0 : frame.buttons.size();
-            prefs.edit()
-                .putString("screenState", "FREIGHT_LIST_AFTER_RESULT")
-                .putInt("freightCount", Math.max(0, count))
-                .putString("lastEvent", "Lista detectada após resultado · entrega anterior preservada")
-                .apply();
-            if (hasRecentNormalResultActionEvidence(now)) {
-                mainHandler.post(this::confirmNormalResultAutomatically);
-            } else if ((resultTouchFallbackRequired || prefs.getBoolean("resultTouchFallbackRequired", false))
-                && !(resultTouchFallbackContinuityBroken || prefs.getBoolean("resultTouchFallbackContinuityBroken", false))) {
-                armResultTouchFallbackReady("FREIGHT_LIST_AFTER_RESULT");
-            }
-            return true;
-        }
-        if (unresolvedResult && !freightList) {
-            activeTripFreightListSeenSince = 0L;
-            activeTripFreightListFrames = 0;
-            clearReplacementFreightCandidate();
-            return false;
-        }
-
-        if (!freightList) {
-            // If a real touch was already observed and the row-specific pressed state was
-            // captured just before the list closed, that pair is stronger than waiting
-            // for four static frames. Promote now and let the normal confirmation path
-            // consume the preserved pre-touch snapshot.
-            if (replacementFreightPressedRow >= 0
+        if (!freightListVisualCandidate) {
+            // A visually disappearing list after an exact Aceitar touch is expected, but
+            // even that touch cannot destroy the old trip until the saved pre-touch page
+            // has been semantically certified as the real GTO jobs list.
+            if (isReplacementFreightSemanticFresh(now)
+                && replacementFreightPressedRow >= 0
                 && replacementFreightTouchPending
                 && now - replacementFreightTouchAt <= CRITICAL_TOUCH_WINDOW_MS + 260L) {
-                // The row transition itself is sufficient evidence that the list was
-                // acted on. Keep the clean pre-press snapshot and bootstrap the session
-                // before the screen disappears completely.
                 return promoteReplacementFreightCandidateToWaiting(true);
             }
-
             activeTripFreightListSeenSince = 0L;
             activeTripFreightListFrames = 0;
-
-            // A tap can close the jobs list before the main-thread ACTION_OUTSIDE marker
-            // reaches the capture thread. Keep the pre-armed snapshot briefly so that the
-            // marker can still promote the stale route and correlate the selected row.
+            activeTripFreightListVisible = false;
             if (replacementFreightCandidateArmed
                 && now - replacementFreightCandidateAt <= CRITICAL_TOUCH_WINDOW_MS + 260L) {
                 return false;
@@ -7055,78 +8044,74 @@ public class GtoObserverService extends Service {
         }
 
         armOrRefreshReplacementFreightCandidate(image, frame, now);
-
+        scheduleReplacementFreightSemanticCertification(now);
         if (activeTripFreightListSeenSince == 0L) activeTripFreightListSeenSince = now;
         activeTripFreightListFrames++;
-        int observedFreightCount = STATE_TRIP_IN_PROGRESS.equals(activeState)
-            ? stableActiveTripFreightCount(frame)
-            : (frame.buttons == null ? 0 : frame.buttons.size());
+        activeTripFreightListVisible = true;
+        int observedFreightCount = stableActiveTripFreightCount(frame);
+        boolean semanticBoundary = isReplacementFreightSemanticFresh(now);
         prefs.edit()
-            .putString("screenState", "FREIGHT_LIST_DURING_TRIP")
-            .putInt("freightCount", Math.max(0, observedFreightCount))
+            .putString("screenState", semanticBoundary ? "FREIGHT_LIST_REOPENED_CERTIFIED" : "FREIGHT_LIST_VISUAL_CANDIDATE")
+            .putInt("freightCount", semanticBoundary ? Math.max(0, observedFreightCount) : 0)
             .putInt("activeTripFreightListEvidenceFrames", activeTripFreightListFrames)
             .putLong("activeTripFreightListEvidenceSince", activeTripFreightListSeenSince)
             .putBoolean("replacementFreightCandidateArmed", replacementFreightCandidateArmed)
+            .putBoolean("replacementFreightSemanticCertified", semanticBoundary)
+            .putString("lastEvent", semanticBoundary
+                ? "Lista de fretes confirmada · encerrando contexto anterior e preparando novo frete"
+                : "Estrutura semelhante à lista detectada · validando texto do GTO antes de alterar a viagem")
             .apply();
 
-        if (replacementFreightTouchPending
-            && now - replacementFreightTouchAt <= CRITICAL_TOUCH_WINDOW_MS + 260L
-            && (activeTripFreightListFrames >= 2 || replacementFreightTouchPending)) {
-            return promoteReplacementFreightCandidateToWaiting(true);
-        }
+        // HF45: do not seal the old result here. The semantically certified NEW page
+        // must remain attached until the old result is durably queued and the replacement
+        // session is created atomically. promoteReplacementFreightCandidateToWaiting()
+        // owns that boundary; sealing here could move to RESULT_CONFIRMED and make the
+        // still-visible list unreachable by mayHandleCertifiedFreightBoundary().
+        boolean stableReturnedList = GtoSimpleScreenDetectionPolicy.isCertifiedFreightListReturn(
+            activeState,
+            freightListVisualCandidate,
+            semanticBoundary,
+            activeTripFreightListFrames,
+            now - activeTripFreightListSeenSince
+        ) || GtoFreightLifecycleBoundaryPolicy.mustClearStaleReviewOnCertifiedList(
+            activeState,
+            STATE_CONFIRMING_FREIGHT.equals(activeState) && isFreightReviewPending(),
+            semanticBoundary,
+            activeTripFreightListFrames,
+            now - activeTripFreightListSeenSince
+        );
+        boolean fastHumanBoundary = replacementFreightTouchPending || replacementFreightPressedRow >= 0;
+        if (!semanticBoundary || (!stableReturnedList && !fastHumanBoundary)) return false;
 
-        int confirmFrames;
-        long confirmMs;
-        if (STATE_IDLE.equals(activeState) || STATE_CANCELLED.equals(activeState)) {
-            confirmFrames = UNARMED_FREIGHT_LIST_CONFIRM_FRAMES;
-            confirmMs = UNARMED_FREIGHT_LIST_CONFIRM_MS;
-        } else {
-            confirmFrames = unresolvedResult ? RESULT_FREIGHT_LIST_CONFIRM_FRAMES : ACTIVE_TRIP_FREIGHT_LIST_CONFIRM_FRAMES;
-            confirmMs = unresolvedResult ? RESULT_FREIGHT_LIST_CONFIRM_MS : ACTIVE_TRIP_FREIGHT_LIST_CONFIRM_MS;
-        }
-        if (activeTripFreightListFrames < confirmFrames
-            || now - activeTripFreightListSeenSince < confirmMs) {
-            return false;
-        }
-
-        if (unresolvedResult && hasRecentNormalResultActionEvidence(now)) {
-            // A real result action was observed, no ADS evidence appeared, and GTO has
-            // already reached its jobs list. The loading/logo screen duration is irrelevant.
-            mainHandler.post(this::confirmNormalResultAutomatically);
-            return true;
-        }
-
-        if (unresolvedResult
-            && (resultTouchFallbackRequired || prefs.getBoolean("resultTouchFallbackRequired", false))
-            && !(resultTouchFallbackContinuityBroken || prefs.getBoolean("resultTouchFallbackContinuityBroken", false))) {
-            // This OEM refused the independent outside-touch sensor. A stable jobs list
-            // proves the result dialog was dismissed, but cannot distinguish Receber from
-            // an unobserved alternate action with enough integrity to auto-register. Hold
-            // the previous delivery and expose an explicit, non-silent choice instead of
-            // either losing it or inventing a successful Receive.
-            armResultTouchFallbackReady("FREIGHT_LIST_AFTER_RESULT");
-            return true;
-        }
-
-        // Fresh IDLE/CANCELLED sessions may bootstrap from a stable list. A confirmed
-        // active route is stricter: even after the explicit "Trocar frete atual" arm,
-        // the old immutable freight is not discarded until the new Aceitar action is
-        // evidenced by a touch marker or an isolated pressed-row transition.
-        if (STATE_TRIP_IN_PROGRESS.equals(activeState)) {
-            if (!explicitReplacement) return true;
-            boolean selectedNewRow = replacementFreightTouchPending;
-            if (!selectedNewRow) return true;
-            return promoteReplacementFreightCandidateToWaiting(true);
-        }
-        boolean touchEvidence = replacementFreightTouchPending;
-        return promoteReplacementFreightCandidateToWaiting(touchEvidence);
+        // HF35 canonical lifecycle: the previous trip is discarded only after two
+        // independent layers agree: strict visual repetition + same-page semantic OCR.
+        return promoteReplacementFreightCandidateToWaiting(fastHumanBoundary);
     }
 
     private boolean isReplaceableActiveSessionState(String state) {
-        // Historical method name retained to avoid widening the patch surface. R3.26
-        // intentionally excludes CONFIRMING_FREIGHT: confirmation owns its frozen
-        // transaction and no live list frame may restart or replace it.
-        return GtoDeterministicFlowPolicy.mayObserveFreightListOutsideWaiting(state);
+        // HF39 canonical boundary: active trips/results are replaceable by a certified
+        // freight list, and an unresolved manual review is replaceable as well. A review
+        // card can never coexist authoritatively with a real jobs list because that would
+        // let stale selected-row data leak into the next freight. CONFIRMING_FREIGHT that
+        // is still doing automatic OCR (no review yet) remains protected by its frozen
+        // transaction and cannot be restarted by the original pre-close list frame.
+        return GtoFreightLifecycleBoundaryPolicy.mayReplaceCurrentContext(
+            state,
+            STATE_CONFIRMING_FREIGHT.equals(state) && isFreightReviewPending()
+        );
+    }
+
+    private boolean mayHandleCertifiedFreightBoundary(String state) {
+        // HF40 root-cause fix: IDLE/CANCELLED are not "active replacement" states, but
+        // they still own the same certified-list boundary. HF39 kept capture alive in
+        // these states yet routed the real-time list detector only through
+        // isReplaceableActiveSessionState(), creating a blind reducer: pixels were seen,
+        // but no session was created and the invisible Aceitar touch sensor stayed off.
+        // Centralize fresh bootstrap + active replacement behind one authority.
+        return GtoFreightLifecycleBoundaryPolicy.mayHandleCertifiedFreightBoundary(
+            state,
+            STATE_CONFIRMING_FREIGHT.equals(state) && isFreightReviewPending()
+        );
     }
 
     private boolean hasRecentNormalResultActionEvidence(long now) {
@@ -7162,25 +8147,25 @@ public class GtoObserverService extends Service {
             replacementFreightPressedScore = 0f;
             replacementFreightTouchPending = false;
             replacementFreightTouchAt = 0L;
+            replacementFreightCandidateGeneration++;
+            resetReplacementFreightSemanticEvidence();
             captureReplacementFreightPanel(image, frame);
             mainHandler.post(this::updateFreightTouchPulseSensor);
             return;
         }
 
-        // Keep the grace window anchored to the most recent visible list frame. This
-        // matters when the driver browses for several seconds and then taps quickly.
         replacementFreightCandidateAt = now;
 
         if (replacementFreightBaseline != null
             && !fastVisualDetector.samePage(replacementFreightBaseline, frame)) {
-            // The driver changed freight pages while the old route was stale. Use the
-            // newest clean page as baseline instead of carrying geometry from page N.
             replacementFreightCandidateAt = now;
             replacementFreightBaseline = frame;
             replacementFreightPressedRow = -1;
             replacementFreightPressedScore = 0f;
             replacementFreightTouchPending = false;
             replacementFreightTouchAt = 0L;
+            replacementFreightCandidateGeneration++;
+            resetReplacementFreightSemanticEvidence();
             captureReplacementFreightPanel(image, frame);
             return;
         }
@@ -7217,54 +8202,225 @@ public class GtoObserverService extends Service {
         for (Rect rect : frame.buttons) replacementFreightButtons.add(new Rect(rect));
     }
 
-    private boolean isExplicitFreightReplacementActive(long now) {
-        if (!freightReplacementExplicitlyArmed) return false;
-        if (!STATE_TRIP_IN_PROGRESS.equals(getTripState())) {
-            clearExplicitFreightReplacement();
-            return false;
-        }
-        if (freightReplacementExplicitlyArmedAt <= 0L
-            || now - freightReplacementExplicitlyArmedAt > EXPLICIT_FREIGHT_REPLACEMENT_TIMEOUT_MS) {
-            clearExplicitFreightReplacement();
-            return false;
-        }
-        return true;
+    private void resetReplacementFreightSemanticEvidence() {
+        replacementFreightSemanticCertified = false;
+        replacementFreightSemanticCertifiedAt = 0L;
+        replacementFreightSemanticAnchorRows = 0;
+        replacementFreightSemanticCompleteRows = 0;
+        replacementFreightCertifiedOptions.clear();
+        lastReplacementFreightSemanticOcrAt = 0L;
+        replacementFreightSemanticRejectedAt = 0L;
     }
 
-    private void armExplicitFreightReplacement() {
-        if (!STATE_TRIP_IN_PROGRESS.equals(getTripState())) return;
-        // Arm intent first, then allow the detector to observe a jobs list. Requiring a
-        // detected list before arming would reintroduce the same false-positive path this
-        // guard is designed to eliminate.
-        freightReplacementExplicitlyArmed = true;
-        freightReplacementExplicitlyArmedAt = System.currentTimeMillis();
-        clearReplacementFreightCandidate();
-        prefs.edit()
-            .putBoolean("freightReplacementExplicitlyArmed", true)
-            .putLong("freightReplacementExplicitlyArmedAt", freightReplacementExplicitlyArmedAt)
-            .putString("freightReplacementStatus", "PENDING")
-            .putString("lastEvent", "Troca de frete autorizada explicitamente pelo motorista")
-            .apply();
-        recordObserverEvent("FREIGHT_REPLACEMENT_PENDING", "Aguardando novo toque em Aceitar");
-        closeMenu();
-        announceDriverStage(
-            "FREIGHT_REPLACEMENT_ARMED",
-            "Troca de frete autorizada. Abra a lista e selecione o novo frete.",
-            3200L,
-            true
-        );
+    private boolean isReplacementFreightSemanticFresh(long now) {
+        return replacementFreightSemanticCertified
+            && replacementFreightSemanticCertifiedAt > 0L
+            && now >= replacementFreightSemanticCertifiedAt
+            && now - replacementFreightSemanticCertifiedAt <= ACTIVE_TRIP_FREIGHT_SEMANTIC_FRESH_MS;
     }
 
-    private void clearExplicitFreightReplacement() {
-        freightReplacementExplicitlyArmed = false;
-        freightReplacementExplicitlyArmedAt = 0L;
-        if (prefs != null) {
+    private int semanticFreightCompleteAnchorRows(List<FreightOption> options) {
+        if (options == null || options.isEmpty()) return 0;
+        int anchors = 0;
+        for (FreightOption option : options) {
+            if (option == null || option.acceptRect == null || !option.acceptTextEvidence) continue;
+            boolean money = GtoFreightReviewPolicy.isManualValueValid(
+                GtoFreightReviewPolicy.VALUE, option.offeredValue
+            );
+            boolean distance = GtoFreightReviewPolicy.isManualValueValid(
+                GtoFreightReviewPolicy.DISTANCE, option.km
+            );
+            if (money && distance) anchors++;
+        }
+        return anchors;
+    }
+
+    private void scheduleReplacementFreightSemanticCertification(long now) {
+        if (!replacementFreightCandidateArmed || textRecognizer == null) return;
+        if (replacementFreightPanelFrame == null || replacementFreightPanelFrame.isRecycled()) return;
+        if (isReplacementFreightSemanticFresh(now)) return;
+        if (replacementFreightSemanticRejectedAt > 0L
+            && now - replacementFreightSemanticRejectedAt < ACTIVE_TRIP_FREIGHT_SEMANTIC_REJECT_BACKOFF_MS) return;
+        if (lastReplacementFreightSemanticOcrAt > 0L
+            && now - lastReplacementFreightSemanticOcrAt < ACTIVE_TRIP_FREIGHT_SEMANTIC_RETRY_MS) return;
+        // Serialize with all other ML Kit work. If result OCR currently owns the slot,
+        // the 32 ms visual loop retries immediately instead of building an OCR backlog.
+        if (!ocrBusy.compareAndSet(false, true)) return;
+
+        Bitmap panelCopy = replacementFreightPanelFrame.copy(Bitmap.Config.ARGB_8888, false);
+        if (panelCopy == null) {
+            ocrBusy.set(false);
+            return;
+        }
+        lastReplacementFreightSemanticOcrAt = now;
+        final long generation = replacementFreightCandidateGeneration;
+        final int panelOffsetX = replacementFreightPanelOffsetX;
+        final List<Rect> buttonCopy = new ArrayList<>();
+        for (Rect rect : replacementFreightButtons) buttonCopy.add(new Rect(rect));
+        buttonCopy.sort(Comparator.comparingInt(Rect::centerY));
+
+        textRecognizer.process(InputImage.fromBitmap(panelCopy, 0))
+            .addOnSuccessListener(text -> {
+                if (!replacementFreightCandidateArmed || generation != replacementFreightCandidateGeneration) return;
+                if (!mayHandleCertifiedFreightBoundary(getTripState())) return;
+
+                List<OcrLine> lines = new ArrayList<>();
+                for (Text.TextBlock block : text.getTextBlocks()) {
+                    for (Text.Line line : block.getLines()) {
+                        Rect box = line.getBoundingBox();
+                        if (box == null || line.getText() == null) continue;
+                        String value = line.getText().trim();
+                        if (value.isEmpty()) continue;
+                        Rect mapped = new Rect(
+                            panelOffsetX + box.left,
+                            box.top,
+                            panelOffsetX + box.right,
+                            box.bottom
+                        );
+                        lines.add(new OcrLine(value, mapped, line.getConfidence()));
+                    }
+                }
+
+                List<FreightOption> parsed = parseFreightOptions(lines, buttonCopy);
+                int semanticAnchors = semanticFreightAnchorRows(parsed);
+                int completeAnchors = semanticFreightCompleteAnchorRows(parsed);
+                boolean certified = GtoFreightSemanticCertificationPolicy.isCertifiedLifecycleBoundaryPage(
+                    buttonCopy.size(), parsed.size(), semanticAnchors, completeAnchors
+                );
+                long certifiedNow = System.currentTimeMillis();
+                if (!certified) {
+                    replacementFreightSemanticCertified = false;
+                    replacementFreightSemanticCertifiedAt = 0L;
+                    replacementFreightSemanticAnchorRows = semanticAnchors;
+                    replacementFreightSemanticCompleteRows = completeAnchors;
+                    replacementFreightCertifiedOptions.clear();
+                    replacementFreightSemanticRejectedAt = certifiedNow;
+                    prefs.edit()
+                        .putBoolean("replacementFreightSemanticCertified", false)
+                        .putInt("replacementFreightSemanticAnchorRows", semanticAnchors)
+                        .putInt("replacementFreightSemanticCompleteRows", completeAnchors)
+                        .putString("screenState", "FREIGHT_LIST_VISUAL_CANDIDATE_REJECTED")
+                        .putString("lastEvent", "Tela semelhante à lista rejeitada · faltou assinatura textual Aceitar + Km + valor")
+                        .apply();
+                    recordObserverEvent(
+                        "FREIGHT_LIST_LIFECYCLE_CANDIDATE_REJECTED",
+                        "visualRows=" + buttonCopy.size() + " parsedRows=" + parsed.size()
+                            + " semantic=" + semanticAnchors + " complete=" + completeAnchors
+                    );
+                    return;
+                }
+
+                replacementFreightSemanticCertified = true;
+                replacementFreightSemanticCertifiedAt = certifiedNow;
+                replacementFreightSemanticAnchorRows = semanticAnchors;
+                replacementFreightSemanticCompleteRows = completeAnchors;
+                replacementFreightCertifiedOptions.clear();
+                for (FreightOption option : parsed) {
+                    if (option == null) continue;
+                    FreightOption certifiedOption = copyFreightOption(option);
+                    certifiedOption.origin = certifiedOption.originCompany == null
+                        ? "" : certifiedOption.originCompany.trim();
+                    replacementFreightCertifiedOptions.add(certifiedOption);
+                }
+                replacementFreightSemanticRejectedAt = 0L;
+                prefs.edit()
+                    .putBoolean("replacementFreightSemanticCertified", true)
+                    .putLong("replacementFreightSemanticCertifiedAt", certifiedNow)
+                    .putInt("replacementFreightSemanticAnchorRows", semanticAnchors)
+                    .putInt("replacementFreightSemanticCompleteRows", completeAnchors)
+                    .putString("screenState", "FREIGHT_LIST_REOPENED_CERTIFIED")
+                    .putString("lastEvent", "Lista de fretes confirmada semanticamente · aplicando novo ciclo")
+                    .apply();
+                recordObserverEvent(
+                    "FREIGHT_LIST_LIFECYCLE_CERTIFIED",
+                    "visualRows=" + buttonCopy.size() + " parsedRows=" + parsed.size()
+                        + " semantic=" + semanticAnchors + " complete=" + completeAnchors
+                );
+
+                boolean stableReturnedList = activeTripFreightListSeenSince > 0L
+                    && activeTripFreightListFrames >= ACTIVE_TRIP_FREIGHT_LIST_CONFIRM_FRAMES
+                    && certifiedNow - activeTripFreightListSeenSince >= ACTIVE_TRIP_FREIGHT_LIST_CONFIRM_MS;
+                boolean touchBoundary = replacementFreightTouchPending || replacementFreightPressedRow >= 0;
+                if (stableReturnedList || touchBoundary) {
+                    promoteReplacementFreightCandidateToWaiting(touchBoundary);
+                }
+            })
+            .addOnFailureListener(error -> {
+                if (generation != replacementFreightCandidateGeneration) return;
+                prefs.edit()
+                    .putString("lastFreightBoundaryOcrError", error.getClass().getSimpleName())
+                    .apply();
+            })
+            .addOnCompleteListener(task -> {
+                if (!panelCopy.isRecycled()) panelCopy.recycle();
+                ocrBusy.set(false);
+            });
+    }
+
+    private boolean sealCertifiedResultForReplacementBoundary(String replacedState, String completedSessionId) {
+        boolean resultBoundary = STATE_RESULT_DETECTED.equals(replacedState)
+            || STATE_AWAITING_BONUS.equals(replacedState);
+        if (!resultBoundary) return true;
+
+        boolean certified = prefs.getBoolean("resultCertifiedLatched", false)
+            || GtoResultProofStore.hasCertified(this, completedSessionId);
+        boolean watchedAd = prefs.getBoolean("resultWatchedAdEvidence", false)
+            || GtoResultProofStore.hasWatchedAdEvidence(this, completedSessionId);
+        if (!certified) return true;
+        if (watchedAd) return false;
+        if (!GtoResultCompletionPolicy.shouldSealAtCertifiedFreightBoundary(certified, watchedAd)) return false;
+
+        boolean receivePersisted = prefs.edit()
+            .putBoolean("resultReceiveLatched", true)
+            .putString("resultAction", "RECEIVE_CERTIFIED_LIST_BOUNDARY")
+            .putString("resultActionSource", "certified-freight-list-after-result")
+            .putString("completionStatus", "RECEIVE_LATCHED")
+            .putString("lastEvent", "Nova lista real confirmou o fim da entrega preservada · selando viagem antes do próximo frete")
+            .commit();
+        if (!receivePersisted) return false;
+
+        boolean previousDefer = deferAutoNextPreparationForCertifiedListBoundary;
+        deferAutoNextPreparationForCertifiedListBoundary = true;
+        try {
+            confirmNormalResultAutomatically();
+        } finally {
+            deferAutoNextPreparationForCertifiedListBoundary = previousDefer;
+        }
+        return STATE_RESULT_CONFIRMED.equals(getTripState())
+            && GtoAutoTripSync.hasPendingSession(this, completedSessionId);
+    }
+
+    private boolean startWaitingFreightSessionAfterSealedResult(String completedSessionId) {
+        String completedSession = completedSessionId == null ? "" : completedSessionId.trim();
+        if (completedSession.isEmpty()
+            || !GtoAutoTripSync.hasPendingSession(this, completedSession)
+            || isOperationClosedForNewTrip()) return false;
+
+        String nextSessionId = GtoAutoTripSync.newSessionId();
+        long now = System.currentTimeMillis();
+        boolean persisted = prefs.edit()
+            .putString("gtoTripSessionId", nextSessionId)
+            .putLong("gtoTripSessionStartedAt", now)
+            .putString("gtoTripSyncStatus", GtoAutoTripSync.STATUS_IN_PROGRESS)
+            .putString("gtoTripIntegrityStatus", "CREATING_SNAPSHOT")
+            .putString("gtoPreviousQueuedSessionId", completedSession)
+            .putLong("gtoAutoNextTripPreparedAt", now)
+            .remove("gtoRegisteredTripId")
+            .remove("gtoTripSyncError")
+            .remove("gtoTripIntegrityError")
+            .commit();
+        if (!persisted || !GtoAutoTripSync.beginSessionSnapshot(this, prefs, nextSessionId)) {
             prefs.edit()
-                .putBoolean("freightReplacementExplicitlyArmed", false)
-                .remove("freightReplacementExplicitlyArmedAt")
-                .remove("freightReplacementStatus")
+                .remove("gtoTripSessionId")
+                .remove("gtoTripSessionStartedAt")
+                .putString("gtoTripSyncStatus", GtoAutoTripSync.STATUS_REJECTED)
+                .putString("lastEvent", "Entrega anterior está segura, mas a nova sessão da lista não pôde ser criada")
                 .apply();
+            return false;
         }
+        setTripState(STATE_WAITING_FREIGHT,
+            "Nova lista certificada assumiu o fluxo; entrega anterior segue em envio");
+        return STATE_WAITING_FREIGHT.equals(getTripState());
     }
 
     private boolean promoteReplacementFreightCandidateToWaiting(boolean fromTouch) {
@@ -7279,26 +8435,40 @@ public class GtoObserverService extends Service {
         float localY
     ) {
         String replacedState = getTripState();
-        if (!isReplaceableActiveSessionState(replacedState) || !replacementFreightCandidateArmed) return false;
+        if (!mayHandleCertifiedFreightBoundary(replacedState) || !replacementFreightCandidateArmed) return false;
+        long promotionNow = System.currentTimeMillis();
+        // HF35 destructive invariant: visual geometry, elapsed time and even an exact
+        // touch are insufficient unless the saved page itself was semantically certified.
+        if (!isReplacementFreightSemanticFresh(promotionNow)) return false;
         if (STATE_TRIP_IN_PROGRESS.equals(replacedState)
-            && !isExplicitFreightReplacementActive(System.currentTimeMillis())) {
-            long now = System.currentTimeMillis();
-            boolean stableReturnedList = GtoSimpleScreenDetectionPolicy.isStableFreightListReturn(
-                replacedState,
-                replacementFreightCandidateArmed,
-                activeTripFreightListFrames,
-                activeTripFreightListSeenSince > 0L ? now - activeTripFreightListSeenSince : 0L
-            );
+            || STATE_RESULT_DETECTED.equals(replacedState)
+            || STATE_AWAITING_BONUS.equals(replacedState)) {
+            long now = promotionNow;
+            boolean stableReturnedList = activeTripFreightListSeenSince > 0L
+                && activeTripFreightListFrames >= ACTIVE_TRIP_FREIGHT_LIST_CONFIRM_FRAMES
+                && now - activeTripFreightListSeenSince >= ACTIVE_TRIP_FREIGHT_LIST_CONFIRM_MS;
             boolean exactNewAccept = fromTouch && replacementFreightPressedRow >= 0;
-            boolean newAcceptEvidence = fromTouch || replacementFreightTouchPending;
-            if (!GtoSimpleScreenDetectionPolicy.mayReplaceCancelledTripOnNewAccept(
-                replacedState, replacementFreightCandidateArmed, stableReturnedList, newAcceptEvidence, exactNewAccept
-            )) {
-                return false;
-            }
+            if (!stableReturnedList && !exactNewAccept && !replacementFreightTouchPending) return false;
         }
 
-        // Detach the candidate resources before clearTripAnalysis(), which intentionally
+        String previousSessionId = prefs.getString("gtoTripSessionId", "");
+        boolean sealedCompletedResultBoundary = (STATE_RESULT_DETECTED.equals(replacedState)
+            || STATE_AWAITING_BONUS.equals(replacedState))
+            && prefs.getBoolean("resultCertifiedLatched", false)
+            && !prefs.getBoolean("resultWatchedAdEvidence", false);
+        if (sealedCompletedResultBoundary
+            && !sealCertifiedResultForReplacementBoundary(replacedState, previousSessionId)) {
+            // Keep the certified NEW list candidate intact. The result proof/value recovery
+            // can retry on the next frame; destroying this page here recreates the HF44
+            // dead-end where the list is visible but RESULT_DETECTED remains authoritative.
+            prefs.edit()
+                .putString("lastEvent", "Nova lista confirmada · entrega anterior ainda sendo selada, página preservada")
+                .apply();
+            return false;
+        }
+
+        // Detach the candidate resources only after a protected result has been sealed.
+        // The detached objects belong to the NEW freight page and survive old-session reset.
         // destroys every old-session visual buffer. These detached objects belong to the
         // new freight page and are restored after beginTrip(false).
         GtoFastVisualDetector.Frame savedBaseline = replacementFreightBaseline;
@@ -7306,6 +8476,10 @@ public class GtoObserverService extends Service {
         int savedOffset = replacementFreightPanelOffsetX;
         List<Rect> savedButtons = new ArrayList<>();
         for (Rect rect : replacementFreightButtons) savedButtons.add(new Rect(rect));
+        List<FreightOption> savedCertifiedOptions = new ArrayList<>();
+        for (FreightOption option : replacementFreightCertifiedOptions) {
+            if (option != null) savedCertifiedOptions.add(copyFreightOption(option));
+        }
         int savedPressedRow = replacementFreightPressedRow;
         float savedPressedScore = replacementFreightPressedScore;
         long savedAt = replacementFreightCandidateAt > 0L
@@ -7321,27 +8495,50 @@ public class GtoObserverService extends Service {
         replacementFreightPressedScore = 0f;
         replacementFreightTouchPending = false;
         replacementFreightTouchAt = 0L;
-        if (STATE_TRIP_IN_PROGRESS.equals(replacedState)) clearExplicitFreightReplacement();
+        replacementFreightSemanticCertified = false;
+        replacementFreightSemanticCertifiedAt = 0L;
+        replacementFreightSemanticAnchorRows = 0;
+        replacementFreightSemanticCompleteRows = 0;
+        replacementFreightCertifiedOptions.clear();
+        lastReplacementFreightSemanticOcrAt = 0L;
+        replacementFreightSemanticRejectedAt = 0L;
 
-        String cancelledSessionId = prefs.getString("gtoTripSessionId", "");
+        String cancelledSessionId = previousSessionId;
         String cancelledSummary = prefs.getString("selectedFreightSummary", "");
         long cancelledAt = System.currentTimeMillis();
         boolean hadActiveSession = !STATE_IDLE.equals(replacedState) && !STATE_CANCELLED.equals(replacedState);
-        GtoAutoTripSync.discardSessionSnapshot(this, cancelledSessionId);
-        clearTripAnalysis();
+        boolean replacedPendingReview = GtoFreightLifecycleBoundaryPolicy.isPendingFreightReviewReplacement(
+            replacedState,
+            STATE_CONFIRMING_FREIGHT.equals(replacedState) && isFreightReviewPending()
+        );
+        if (!clearTripAnalysis()) {
+            // If this was a certified result, sealing should already have made the durable
+            // queue authoritative. Any failure here is non-destructive: preserve the NEW
+            // page candidate for a retry instead of falling back to stale result UI.
+            if (savedPanel != null && !savedPanel.isRecycled()) savedPanel.recycle();
+            return false;
+        }
+        if (!sealedCompletedResultBoundary) {
+            GtoAutoTripSync.discardSessionSnapshot(this, cancelledSessionId);
+        }
 
-        if (hadActiveSession) {
+        if (hadActiveSession && !sealedCompletedResultBoundary) {
             prefs.edit()
-                .putString("completionStatus", "CANCELLED_IN_GAME")
+                .putString("completionStatus", replacedPendingReview ? "SELECTION_REPLACED" : "CANCELLED_IN_GAME")
                 .putString("lastCancelledSessionId", cancelledSessionId)
                 .putString("lastCancelledFreightSummary", cancelledSummary)
                 .putLong("lastCancelledAt", cancelledAt)
-                .putString("lastCancellationReason", (STATE_RESULT_DETECTED.equals(replacedState) || STATE_AWAITING_BONUS.equals(replacedState))
-                    ? "UNRESOLVED_RESULT_FREIGHT_LIST_RETURNED"
+                .putString("lastCancellationReason", replacedPendingReview
+                    ? "PENDING_FREIGHT_REVIEW_REPLACED_BY_CERTIFIED_LIST"
                     : (fromTouch ? "FREIGHT_LIST_TOUCH_DURING_STALE_ROUTE" : "FREIGHT_LIST_RETURNED"))
-                .putString("lastEvent", (STATE_RESULT_DETECTED.equals(replacedState) || STATE_AWAITING_BONUS.equals(replacedState))
-                    ? "Entrega anterior não pôde ser confirmada · nova lista detectada"
+                .putString("lastEvent", replacedPendingReview
+                    ? "Seleção anterior descartada · nova lista de fretes confirmada"
                     : "Viagem anterior encerrada no GTO · preparando novo frete")
+                .apply();
+        } else if (sealedCompletedResultBoundary) {
+            prefs.edit()
+                .putString("lastCompletedBoundarySessionId", cancelledSessionId)
+                .putString("lastEvent", "Entrega concluída selada ✓ · nova lista assumindo o fluxo")
                 .apply();
         } else {
             prefs.edit()
@@ -7349,8 +8546,19 @@ public class GtoObserverService extends Service {
                 .apply();
         }
 
-        beginTrip(false);
-        recordObserverEvent("FREIGHT_REPLACEMENT_COMMITTED", "discardedSession=" + cancelledSessionId + " source=" + (fromTouch ? "touch" : "list-return"));
+        if (sealedCompletedResultBoundary) {
+            if (!startWaitingFreightSessionAfterSealedResult(cancelledSessionId)) {
+                if (savedPanel != null && !savedPanel.isRecycled()) savedPanel.recycle();
+                return false;
+            }
+        } else {
+            beginTrip(false);
+        }
+        recordObserverEvent(
+            "FREIGHT_REPLACEMENT_COMMITTED",
+            (sealedCompletedResultBoundary ? "completedSession=" : "discardedSession=")
+                + cancelledSessionId + " source=" + (fromTouch ? "touch" : "list-return")
+        );
 
         if (!STATE_WAITING_FREIGHT.equals(getTripState())) {
             if (savedPanel != null && !savedPanel.isRecycled()) savedPanel.recycle();
@@ -7382,14 +8590,52 @@ public class GtoObserverService extends Service {
             fastPreviousFreightSequence = baselineSequence;
             recordFastFreightFrame(savedBaseline, baselineSequence);
             freightPageGeneration++;
+
+            // HF37 root-cause fix: the same OCR pass that certified this replacement
+            // page already produced row-level cargo/route/km/value data. HF36 discarded
+            // those rows while clearTripAnalysis() cancelled the previous trip, leaving
+            // the new session temporarily dependent on a second asynchronous page OCR.
+            // A fast Aceitar could therefore reach selected-row OCR with no frozen
+            // semantic baseline and fall into unnecessary manual review. Seed the NEW
+            // session from the certified NEW page immediately; no data from the cancelled
+            // session is reused.
+            if (!savedCertifiedOptions.isEmpty()) {
+                synchronized (freightOptions) {
+                    freightOptions.clear();
+                    for (FreightOption option : savedCertifiedOptions) {
+                        freightOptions.add(copyFreightOption(option));
+                    }
+                }
+                int semanticAnchors = semanticFreightAnchorRows(savedCertifiedOptions);
+                prefs.edit()
+                    .putString("freightOptions", freightOptionsToJson(savedCertifiedOptions))
+                    .putLong("freightTextGeneration", freightPageGeneration)
+                    .putLong("freightTextAt", System.currentTimeMillis())
+                    .putString("lastEvent", "Nova lista assumiu a sessão · dados da página certificada prontos para seleção")
+                    .apply();
+                markFreightPageSemanticallyCertified(
+                    freightPageGeneration,
+                    semanticAnchors,
+                    savedCertifiedOptions.size()
+                );
+            }
             scheduleFreightPageOcr(
                 freightPageGeneration, savedPanel, savedOffset, savedButtons, System.currentTimeMillis()
             );
-            prefs.edit()
-                .putString("screenState", "FREIGHT_LIST_CANDIDATE")
-                .putInt("freightCount", 0)
-                .putLong("freightStructureAt", savedAt)
-                .apply();
+            // Do not downgrade a page that was already semantically certified above.
+            // HF36 reset freightCount/screenState to CANDIDATE immediately after restoring
+            // the new page, creating a second short-lived contradiction for a fast Accept.
+            // When certified rows were preserved, keep FREIGHT_LIST + real row count as
+            // the authoritative new-session baseline; only an uncertified fallback page may
+            // remain CANDIDATE while the background OCR completes.
+            android.content.SharedPreferences.Editor restoredPageEditor = prefs.edit()
+                .putLong("freightStructureAt", savedAt);
+            if (savedCertifiedOptions.isEmpty()) {
+                restoredPageEditor
+                    .putString("screenState", "FREIGHT_LIST_CANDIDATE")
+                    .putInt("freightCount", 0);
+            }
+            restoredPageEditor.apply();
         } else if (savedPanel != null && !savedPanel.isRecycled()) {
             savedPanel.recycle();
         }
@@ -7438,12 +8684,20 @@ public class GtoObserverService extends Service {
         replacementFreightTouchPending = false;
         replacementFreightTouchAt = 0L;
         replacementFreightButtons.clear();
+        replacementFreightCandidateGeneration++;
+        resetReplacementFreightSemanticEvidence();
         if (replacementFreightPanelFrame != null && !replacementFreightPanelFrame.isRecycled()) {
             replacementFreightPanelFrame.recycle();
         }
         replacementFreightPanelFrame = null;
         replacementFreightPanelOffsetX = 0;
-        prefs.edit().remove("replacementFreightCandidateArmed").apply();
+        prefs.edit()
+            .remove("replacementFreightCandidateArmed")
+            .remove("replacementFreightSemanticCertified")
+            .remove("replacementFreightSemanticCertifiedAt")
+            .remove("replacementFreightSemanticAnchorRows")
+            .remove("replacementFreightSemanticCompleteRows")
+            .apply();
         mainHandler.post(this::updateFreightTouchPulseSensor);
     }
 
@@ -7480,8 +8734,30 @@ public class GtoObserverService extends Service {
         }
     }
 
+    private void clearStickyFreightListMessage() {
+        if (prefs == null) return;
+        String code = prefs.getString("driverStageCode", "");
+        if (!"FREIGHT_LIST_DETECTED".equals(code)) return;
+        mainHandler.post(() -> {
+            if (prefs == null || !"FREIGHT_LIST_DETECTED".equals(prefs.getString("driverStageCode", ""))) return;
+            hideStatusChip();
+            // Reopening the same list in the same trip is a new visible lifecycle edge;
+            // allow the sticky detection confirmation to be shown again.
+            resetLiveFreightMessageCandidate();
+            prefs.edit()
+                .remove("driverStageShownKey")
+                .remove("driverStagePendingKey")
+                .remove("driverStagePendingDurationMs")
+                .remove("driverStagePendingAt")
+                .remove("driverStageFreightCount")
+                .putString("driverStageCode", "")
+                .apply();
+        });
+    }
+
     private void markFreightListClosed(long now) {
         if (projectionPermissionInFlight || !freightListCycleSeen) return;
+        clearStickyFreightListMessage();
         if (!freightListCycleClosed) {
             freightListCycleClosed = true;
             freightListCycleClosedAt = now;
@@ -7530,8 +8806,8 @@ public class GtoObserverService extends Service {
         if (isOperationClosedForNewTrip()) return false;
 
         String previousSessionId = prefs.getString("gtoTripSessionId", "");
+        if (!clearTripAnalysis()) return false;
         GtoAutoTripSync.discardSessionSnapshot(this, previousSessionId);
-        clearTripAnalysis();
 
         String newSessionId = GtoAutoTripSync.newSessionId();
         long startedAt = System.currentTimeMillis();
@@ -8150,6 +9426,34 @@ public class GtoObserverService extends Service {
         return null;
     }
 
+    private void recoverMissingOriginFromCurrentPage(FreightOption option) {
+        if (option == null || looksLikeEntityName(option.originCompany)) return;
+        List<String> origins = new ArrayList<>();
+        int visibleRows;
+        synchronized (freightOptions) {
+            visibleRows = freightOptions.size();
+            for (FreightOption candidate : freightOptions) {
+                if (candidate == null || candidate.rowIndex == option.rowIndex) continue;
+                if (looksLikeEntityName(candidate.originCompany)) origins.add(candidate.originCompany);
+            }
+        }
+        String consensus = GtoFreightContextPolicy.unanimousOrigin(origins, visibleRows);
+        if (consensus.isEmpty()) return;
+        option.originCompany = consensus;
+        option.origin = consensus;
+        option.originCompanyVotes = Math.max(option.originCompanyVotes, 2);
+        option.originCompanyEvidenceSource = "PAGE_UNANIMOUS_ROUTE_CONTEXT";
+        option.companyRoute = consensus
+            + (option.destinationCompany == null || option.destinationCompany.isEmpty()
+                ? "" : " > " + option.destinationCompany);
+        if (prefs != null) {
+            prefs.edit()
+                .putString("lastOriginExtractionSource", "PAGE_UNANIMOUS_ROUTE_CONTEXT")
+                .putLong("lastOriginExtractionAt", System.currentTimeMillis())
+                .apply();
+        }
+    }
+
     private int semanticFreightAnchorRows(List<FreightOption> options) {
         if (options == null || options.isEmpty()) return 0;
         int anchors = 0;
@@ -8164,26 +9468,87 @@ public class GtoObserverService extends Service {
         return anchors;
     }
 
+    private String freightListDetectedMessage(int rowCount) {
+        int safeCount = Math.max(1, rowCount);
+        return "Lista de fretes detectada ✓ · " + safeCount + " opção" + (safeCount == 1 ? "" : "ões") + ".";
+    }
+
+    private void resetLiveFreightMessageCandidate() {
+        liveFreightMessageCandidateCount = 0;
+        liveFreightMessageCandidateFrames = 0;
+        liveFreightMessageCandidateSince = 0L;
+    }
+
+    private void updateStickyFreightListMessageFromLiveCount(
+        int rowCount, long now, boolean criticalTouchFrame
+    ) {
+        if (prefs == null || rowCount <= 0 || criticalTouchFrame) return;
+        if (!isFreightPageSemanticallyCertified(freightPageGeneration)) return;
+        if (!"FREIGHT_LIST_DETECTED".equals(prefs.getString("driverStageCode", ""))) return;
+
+        int displayedCount = prefs.getInt("driverStageFreightCount", 0);
+        if (displayedCount == rowCount) {
+            resetLiveFreightMessageCandidate();
+            return;
+        }
+        if (liveFreightMessageCandidateCount != rowCount) {
+            liveFreightMessageCandidateCount = rowCount;
+            liveFreightMessageCandidateFrames = 1;
+            liveFreightMessageCandidateSince = now;
+            return;
+        }
+        liveFreightMessageCandidateFrames++;
+        if (liveFreightMessageCandidateFrames < LIVE_FREIGHT_COUNT_CONFIRM_FRAMES
+            || now - liveFreightMessageCandidateSince < LIVE_FREIGHT_COUNT_CONFIRM_MS) return;
+
+        final String message = freightListDetectedMessage(rowCount);
+        prefs.edit()
+            .putInt("driverStageFreightCount", rowCount)
+            .putString("driverStageMessage", message)
+            .putLong("driverStageAt", now)
+            .apply();
+        resetLiveFreightMessageCandidate();
+
+        mainHandler.post(() -> {
+            if (prefs == null || !"FREIGHT_LIST_DETECTED".equals(prefs.getString("driverStageCode", ""))) return;
+            if (statusChipView != null && statusChipIsDriverStage) {
+                // Update the same sticky TextView in place: no hide/recreate flicker and no
+                // old stage key can leave the previous page count painted on screen.
+                statusChipView.setText(message);
+                statusChipShownAt = System.currentTimeMillis();
+                return;
+            }
+            announceDriverStage("FREIGHT_LIST_DETECTED", message, 0L, true);
+        });
+    }
+
     private void markFreightPageSemanticallyCertified(long generation, int anchorRows, int rowCount) {
         if (generation <= 0L || generation != freightPageGeneration) return;
         boolean firstCertificationForGeneration = !isFreightPageSemanticallyCertified(generation);
         freightSemanticCertifiedGeneration = generation;
         freightSemanticCertifiedAt = System.currentTimeMillis();
         freightSemanticAnchorRows = Math.max(0, anchorRows);
+        int safeRowCount = Math.max(0, rowCount);
         prefs.edit()
             .putLong("freightSemanticCertifiedGeneration", generation)
             .putLong("freightSemanticConfirmedAt", freightSemanticCertifiedAt)
             .putInt("freightSemanticAnchorRows", freightSemanticAnchorRows)
-            .putInt("freightCount", Math.max(0, rowCount))
+            .putInt("freightCount", safeRowCount)
+            .putInt("freightVisualCount", safeRowCount)
             .putString("screenState", "FREIGHT_LIST")
             .apply();
         if (!firstCertificationForGeneration) return;
         onFreightListVisibleAgain(freightSemanticCertifiedAt);
+        resetLiveFreightMessageCandidate();
+        prefs.edit().putInt("driverStageFreightCount", safeRowCount).apply();
+        // A new page generation is a new visible truth even though the journey/session
+        // id and stage code are unchanged. Force replacement so page N cannot leave its
+        // stale option count painted over page N+1.
         announceDriverStage(
             "FREIGHT_LIST_DETECTED",
-            "Lista de fretes detectada · " + Math.max(1, rowCount) + " opção" + (rowCount == 1 ? "" : "ões") + ".",
-            2600L,
-            false
+            freightListDetectedMessage(safeRowCount),
+            0L,
+            true
         );
     }
 
@@ -8225,6 +9590,14 @@ public class GtoObserverService extends Service {
         persistSelectionIdentity(row, "CONFIRMED", safeSource);
         if (!STATE_CONFIRMING_FREIGHT.equals(getTripState())) {
             setTripState(STATE_CONFIRMING_FREIGHT, "Frete identificado · validando dados");
+        }
+        if (!"FREIGHT_SELECTED".equals(prefs.getString("driverStageCode", ""))) {
+            announceDriverStage(
+                "FREIGHT_SELECTED",
+                "Frete selecionado ✓ · confirmando dados…",
+                0L,
+                true
+            );
         }
         return true;
     }
@@ -8334,6 +9707,49 @@ public class GtoObserverService extends Service {
         return draft;
     }
 
+    private void enrichSelectedFreightFromFreshSameRow(FreightOption candidate, int rowIndex) {
+        if (candidate == null || rowIndex < 0) return;
+        long now = System.currentTimeMillis();
+        if (freightSemanticCertifiedAt <= 0L || now - freightSemanticCertifiedAt > 5000L) return;
+        FreightOption stable = stableFreightForRow(rowIndex);
+        if (stable == null || stable.rowIndex != rowIndex) return;
+        if (differentNumericValue(candidate.km, stable.km)
+            || differentMoneyValue(candidate.offeredValue, stable.offeredValue)) return;
+
+        if (!GtoFreightReviewPolicy.isAutomaticTextUsable(candidate.cargo)
+            && GtoFreightReviewPolicy.isAutomaticTextUsable(stable.cargo)) {
+            candidate.cargo = stable.cargo;
+            candidate.cargoVotes = Math.max(candidate.cargoVotes, Math.max(2, stable.cargoVotes));
+        }
+        if (!looksLikeEntityName(candidate.originCompany) && looksLikeEntityName(stable.originCompany)) {
+            candidate.originCompany = stable.originCompany;
+            candidate.origin = stable.originCompany;
+            candidate.originCompanyVotes = Math.max(candidate.originCompanyVotes, Math.max(2, stable.originCompanyVotes));
+            candidate.originCompanySelectedRowEvidence = true;
+            candidate.originCompanyEvidenceSource = "FRESH_CERTIFIED_SAME_ROW";
+        }
+        if (!GtoFreightReviewPolicy.isAutomaticTextUsable(candidate.destination)
+            && GtoFreightReviewPolicy.isAutomaticTextUsable(stable.destination)) {
+            candidate.destination = stable.destination;
+            candidate.destinationVotes = Math.max(candidate.destinationVotes, Math.max(2, stable.destinationVotes));
+        }
+        if (candidate.km == null || candidate.km.trim().isEmpty()) {
+            candidate.km = stable.km;
+            candidate.kmVotes = Math.max(candidate.kmVotes, Math.max(2, stable.kmVotes));
+        }
+        if (candidate.offeredValue == null || candidate.offeredValue.trim().isEmpty()) {
+            candidate.offeredValue = stable.offeredValue;
+            candidate.valueVotes = Math.max(candidate.valueVotes, Math.max(2, stable.valueVotes));
+        }
+        if ((candidate.destinationCompany == null || candidate.destinationCompany.trim().isEmpty())
+            && stable.destinationCompany != null) {
+            candidate.destinationCompany = stable.destinationCompany;
+        }
+        candidate.companyRoute = (candidate.originCompany == null ? "" : candidate.originCompany)
+            + ((candidate.destinationCompany == null || candidate.destinationCompany.isEmpty())
+                ? "" : " > " + candidate.destinationCompany);
+    }
+
     private void clearReviewField(FreightOption draft, String field) {
         if (draft == null || field == null) return;
         if (GtoFreightReviewPolicy.CARGO.equals(field)) draft.cargo = "";
@@ -8379,11 +9795,45 @@ public class GtoObserverService extends Service {
             return;
         }
         if (!STATE_CONFIRMING_FREIGHT.equals(getTripState())) {
-            setTripState(STATE_CONFIRMING_FREIGHT, "Frete selecionado · revisando dado pendente");
+            setTripState(STATE_CONFIRMING_FREIGHT, "Frete selecionado · validando dados automaticamente");
         }
+        // Before exposing any manual field, fuse the immutable selected-row read with
+        // the last semantically certified copy of the SAME row. This is not a guess: row
+        // identity is already human-backed, numeric identity may not conflict, and the
+        // page evidence must still be fresh. It fixes cases where ML Kit drops only the
+        // small route separator while cargo/destination/km/value remain perfectly visible.
+        enrichSelectedFreightFromFreshSameRow(candidate, rowIndex);
+        recoverMissingOriginFromCurrentPage(candidate);
         FreightOption draft = trustedReviewDraft(candidate, rowIndex);
         if (forcedField != null && !forcedField.isEmpty()) clearReviewField(draft, forcedField);
         String required = forcedField != null && !forcedField.isEmpty() ? forcedField : firstReviewField(draft);
+
+        // HF33: a missing origin is usually a lost separator/route glyph, not missing
+        // information. Re-read the immutable touched row automatically before asking the
+        // driver. Page OCR may finish concurrently and provide unanimous route context on
+        // the next pass. Manual origin is therefore a true last-resort path.
+        if (GtoFreightReviewPolicy.ORIGIN_COMPANY.equals(required)
+            && freightEvidenceRetryCount < 3) {
+            String source = prefs.getString("selectionIdentitySource", prefs.getString("selectionSource", ""));
+            if (GtoSelectionEvidencePolicy.isHumanBackedSource(source)) {
+                FreightSelectionTransaction retry = buildSelectionTransaction(
+                    rowIndex, source + "+origin-auto-retry"
+                );
+                if (retry != null) {
+                    freightEvidenceRetryCount++;
+                    prefs.edit()
+                        .putString("selectionConfirmationStatus", "AUTO_RECOVERING_ORIGIN")
+                        .putString("lastEvent", "Origem parcialmente lida · relendo automaticamente a linha selecionada")
+                        .apply();
+                    recordObserverEvent(
+                        "ORIGIN_AUTO_RETRY",
+                        "row=" + (rowIndex + 1) + " attempt=" + freightEvidenceRetryCount
+                    );
+                    mainHandler.postDelayed(() -> runPreciseSelectedRowOcr(retry), 110L);
+                    return;
+                }
+            }
+        }
 
         // HF26: REVIEW_REQUIRED is a last-mile correction path, never a way to build an
         // almost-empty freight by hand. If more than two operational fields are still
@@ -8640,8 +10090,8 @@ public class GtoObserverService extends Service {
         setTripState(STATE_TRIP_IN_PROGRESS, "Frete confirmado com sucesso");
         announceDriverStage(
             "TRIP_IN_PROGRESS",
-            "Frete identificado. Tudo preparado, podemos partir!",
-            4200L,
+            "Frete confirmado ✓ · viagem em andamento.",
+            2600L,
             true
         );
         promotePendingResultAfterFreightReview();
@@ -8649,9 +10099,25 @@ public class GtoObserverService extends Service {
 
     private void promotePendingResultAfterFreightReview() {
         if (!STATE_TRIP_IN_PROGRESS.equals(getTripState())) return;
+        // pendingBonusDuringFreightReview is now reserved for POSITIVE watched-ad/reward
+        // evidence only. An exact ADS button touch uses the separate pendingAdsAction key
+        // and may never reject a certified delivery by itself.
         if (prefs.getBoolean("pendingBonusDuringFreightReview", false)) {
-            prefs.edit().putBoolean("pendingBonusDuringFreightReview", false).apply();
-            setTripState(STATE_REJECTED_BONUS, "Entrega com anúncio/bônus detectada");
+            prefs.edit()
+                .putBoolean("pendingBonusDuringFreightReview", false)
+                .putBoolean("pendingAdsActionDuringFreightReview", false)
+                .putBoolean("pendingResultDuringFreightReview", false)
+                .apply();
+            setTripState(STATE_REJECTED_BONUS, "Anúncio/bônus assistido comprovado durante a revisão do frete");
+            return;
+        }
+        if (prefs.getBoolean("pendingAdsActionDuringFreightReview", false)) {
+            prefs.edit()
+                .putBoolean("pendingAdsActionDuringFreightReview", false)
+                .putBoolean("pendingResultDuringFreightReview", false)
+                .putString("lastEvent", "Opção ADS preservada após revisão · aguardando somente evidência real de anúncio assistido")
+                .apply();
+            setTripState(STATE_AWAITING_BONUS, "Opção ADS preservada · aguardando evidência real do anúncio");
             return;
         }
         if (!prefs.getBoolean("pendingResultDuringFreightReview", false)) return;
@@ -8728,11 +10194,11 @@ public class GtoObserverService extends Service {
                 true
             );
         }
-        // ML Kit can run two recognizers in parallel, but that creates memory pressure
-        // and a race between page stabilization and row confirmation on weak devices.
-        // Serialize both passes; the frozen selection bitmap remains owned by the
-        // transaction while we wait.
-        if (preciseSelectionOcrBusy || focusedFreightConflictRetryBusy || ocrBusy.get()) {
+        // HF33: selected-row OCR is latency-critical and already owns a dedicated recognizer
+        // plus a small immutable crop. Do not queue it behind a full-page OCR pass: that
+        // old serialization could delay an accepted freight for seconds on weak devices.
+        // We still serialize selected-row/retry work against itself to bound memory.
+        if (preciseSelectionOcrBusy || focusedFreightConflictRetryBusy) {
             long waitedMs = System.currentTimeMillis() - transaction.createdAt;
             if (waitedMs >= PRECISE_OCR_BUSY_WAIT_TIMEOUT_MS) {
                 int row = transaction.rowIndex;
@@ -8878,7 +10344,7 @@ public class GtoObserverService extends Service {
                         lines.add(new OcrLine(value, mapped, line.getConfidence()));
                         if (!geometricOriginFallback.strong) {
                             float relY = (mapped.centerY() - top) / (float) Math.max(1, bottom - top);
-                            if (relY >= 0.30f && relY <= 0.68f
+                            if (relY >= 0.36f && relY <= 0.62f
                                 && extractKmDigits(value).isEmpty()
                                 && extractMoneyValue(value).isEmpty()
                                 && !normalize(value).contains("aceitar")) {
@@ -8911,8 +10377,14 @@ public class GtoObserverService extends Service {
                         );
                         return;
                     }
-                    enterFreightReview(frozen, exactRow,
-                        "A linha selecionada ficou parcialmente ilegível ou encoberta; a seleção foi preservada.", "");
+                    // HF37: an empty first selected-row parse is a sensor miss, not a
+                    // reason to involve the driver. Reuse the existing focused two-scale
+                    // reread on the immutable touched row before REVIEW_REQUIRED.
+                    scheduleFocusedFreightConflictRetry(
+                        bitmapForOcr, scale, screenLeft, screenTop, exactButton, exactRow,
+                        top, bottom, null, frozen,
+                        scheduledSelectionGeneration, scheduledSelectionSessionId
+                    );
                     return;
                 } else {
                     selected.rowIndex = exactRow;
@@ -8921,7 +10393,6 @@ public class GtoObserverService extends Service {
                     selected.rowTop = top;
                     selected.rowBottom = bottom;
                     refinePreciseRowFields(selected, lines, top, bottom);
-                    markSelectedRowFieldEvidence(selected);
                     if (geometricOriginFallback.strong
                         && looksLikeEntityName(geometricOriginFallback.value)
                         && (selected.originCompany.isEmpty()
@@ -8944,6 +10415,12 @@ public class GtoObserverService extends Service {
                             .apply();
                     }
 
+                    // If the selected route glyph itself was partially lost, use
+                    // same-page context only when every readable peer row agrees on the
+                    // same source company. A conflict leaves the field unresolved.
+                    recoverMissingOriginFromCurrentPage(selected);
+                    markSelectedRowFieldEvidence(selected);
+
                     if (!ensureHumanSelectionConfirmedForFreight(
                         exactRow, transactionSource, transactionPageGeneration, selected
                     )) {
@@ -8962,22 +10439,38 @@ public class GtoObserverService extends Service {
 
                     FreightOption stableSamePage = frozenSelectedPageBaseline == null
                         ? null : copyFreightOption(frozenSelectedPageBaseline);
-                    if (stableSamePage == null && isStableFreightSafeToCommit(selected)) {
+                    // HF28: after human-backed row selection, the official/trusted GTO city
+                    // universe may canonicalize a destination only when the OCR maps to one
+                    // unique city. This safely fixes variants such as Itopetuna -> Itapetuna
+                    // without allowing a dictionary to choose between conflicting reads.
+                    canonicalizeOfficialSelectedDestination(selected, stableSamePage);
+                    boolean knownDestinationVerification = destinationNeedsKnownVerification(selected, stableSamePage);
+                    if (stableSamePage == null && isStableFreightSafeToCommit(selected)
+                        && !knownDestinationVerification) {
                         commitPreciseFreight(selected);
                         return;
                     }
                     FreightOption canonicalCandidate = mergeVerifiedPreciseWithStable(selected, stableSamePage);
-                    boolean initialConflict = stableSamePage != null
-                        && (hasUnresolvedDestinationOneEditConflict(selected, stableSamePage)
-                            || hasCriticalFreightConflict(selected, stableSamePage));
-                    if (initialConflict) {
-                        // HF25: a disagreement no longer jumps straight to driver review.
-                        // Re-read the immutable selected-row ROI (up to two image scales),
-                        // and accept a literal field only when the retry agrees with one of
-                        // the two initial reads. This applies equally to cargo, origin,
-                        // destination, distance and value; no fuzzy correction is introduced.
+                    boolean canonicalSafe = isStableFreightSafeToCommit(canonicalCandidate);
+                    String automaticGap = firstReviewField(canonicalCandidate);
+                    boolean initialConflict = knownDestinationVerification
+                        || (stableSamePage != null
+                            && (hasUnresolvedDestinationOneEditConflict(selected, stableSamePage)
+                                || hasCriticalFreightConflict(selected, stableSamePage)));
+                    boolean missingOperationalField = !automaticGap.isEmpty()
+                        && !GtoFreightReviewPolicy.LOCAL_INTEGRITY.equals(automaticGap);
+                    if (initialConflict || missingOperationalField || !canonicalSafe) {
+                        // HF36: manual review is a last resort. The exact user incident was
+                        // a selected row where origin/destination/km/value were recovered but
+                        // cargo was temporarily missed by the first ML Kit pass. HF35 only
+                        // retried disagreements; a field missing in both initial sources went
+                        // directly to "confirme carga" even though the immutable selected-row
+                        // bitmap was still available. Re-read that SAME row at two scales before
+                        // involving the driver. The retry cannot choose another row and cannot
+                        // invent a value: it is accepted only by the ordinary field validators.
                         prefs.edit()
                             .putString("lastFreightSecondaryReadDiff", freightConflictSummary(selected, stableSamePage))
+                            .putString("lastFreightAutoRecoveryField", automaticGap)
                             .putLong("lastFreightSecondaryReadDiffAt", System.currentTimeMillis())
                             .apply();
                         scheduleFocusedFreightConflictRetry(
@@ -8988,7 +10481,6 @@ public class GtoObserverService extends Service {
                         return;
                     }
 
-                    boolean canonicalSafe = isStableFreightSafeToCommit(canonicalCandidate);
                     if (!GtoFreightSelectionPolicy.canCommitCanonicalRow(
                         exactRow,
                         canonicalCandidate.rowIndex,
@@ -9040,8 +10532,13 @@ public class GtoObserverService extends Service {
                     );
                     return;
                 }
-                enterFreightReview(frozen, exactRow,
-                    "Falha temporária de OCR (" + error.getClass().getSimpleName() + "); a linha selecionada foi preservada.", "");
+                // A transient ML Kit failure still has the same immutable selected-row
+                // bitmap. Give the focused reread its normal bounded attempts first.
+                scheduleFocusedFreightConflictRetry(
+                    bitmapForOcr, scale, screenLeft, screenTop, exactButton, exactRow,
+                    top, bottom, null, frozen,
+                    scheduledSelectionGeneration, scheduledSelectionSessionId
+                );
             })
             .addOnCompleteListener(task -> {
                 if (!bitmapForOcr.isRecycled()) bitmapForOcr.recycle();
@@ -9062,8 +10559,10 @@ public class GtoObserverService extends Service {
         List<GtoOriginGeometryPolicy.RowLine> rowLines = new ArrayList<>();
         for (OcrLine line : lines) {
             if (line == null || line.rect == null || line.text == null) continue;
+            String textual = cleanOcrLabel(GtoFreightMixedLinePolicy.textualRemainder(line.text));
+            if (textual.isEmpty()) continue;
             rowLines.add(new GtoOriginGeometryPolicy.RowLine(
-                cleanOcrLabel(line.text),
+                textual,
                 line.rect.top,
                 line.rect.bottom,
                 line.rect.left,
@@ -9158,11 +10657,11 @@ public class GtoObserverService extends Service {
         List<OcrLine> plain = new ArrayList<>();
         for (OcrLine line : lines) {
             if (line.confidence > 0f && line.confidence < 0.34f) continue;
-            String n = normalize(line.text);
-            if (n.contains("aceitar")) continue;
-            if (!extractKmDigits(line.text).isEmpty() || !extractMoneyValue(line.text).isEmpty()) continue;
-            String cleaned = cleanOcrLabel(line.text);
-            if (!cleaned.isEmpty()) plain.add(new OcrLine(cleaned, line.rect));
+            // HF38: ML Kit may merge horizontally aligned cargo+Km or route+R$ into
+            // one Text.Line. Strip only the operational token and keep the literal
+            // textual remainder instead of discarding the entire line.
+            String cleaned = cleanOcrLabel(GtoFreightMixedLinePolicy.textualRemainder(line.text));
+            if (!cleaned.isEmpty()) plain.add(new OcrLine(cleaned, line.rect, line.confidence));
         }
         plain.sort((a, b) -> Integer.compare(a.rect.centerY(), b.rect.centerY()));
         if (plain.isEmpty()) return;
@@ -9332,6 +10831,9 @@ public class GtoObserverService extends Service {
         if (sourceRow == null || sourceRow.isRecycled() || selectionTextRecognizer == null) {
             FreightOption draft = mergeVerifiedPreciseWithStable(exact, frozen);
             clearConflictingFreightFields(draft, exact, frozen);
+            if (destinationNeedsKnownVerification(exact, frozen)) {
+                clearReviewField(draft, GtoFreightReviewPolicy.DESTINATION);
+            }
             enterFreightReview(draft, exactRow,
                 "As leituras do frete divergiram e a releitura focalizada ficou indisponível.", firstReviewField(draft));
             return;
@@ -9340,6 +10842,9 @@ public class GtoObserverService extends Service {
         if (retryBase == null) {
             FreightOption draft = mergeVerifiedPreciseWithStable(exact, frozen);
             clearConflictingFreightFields(draft, exact, frozen);
+            if (destinationNeedsKnownVerification(exact, frozen)) {
+                clearReviewField(draft, GtoFreightReviewPolicy.DESTINATION);
+            }
             enterFreightReview(draft, exactRow,
                 "As leituras do frete divergiram e a imagem de confirmação ficou indisponível.", firstReviewField(draft));
             return;
@@ -9404,6 +10909,9 @@ public class GtoObserverService extends Service {
                     rowTop, rowBottom, frozen == null ? "" : frozen.destinationCompany
                 );
                 FreightOption resolved = resolveFreightConflictsAfterRetry(exact, frozen, retry);
+                boolean knownDestinationVerified = applyKnownDestinationVerificationAfterRetry(
+                    resolved, exact, frozen, retry
+                );
                 String unresolved = firstReviewField(resolved);
                 boolean safe = isStableFreightSafeToCommit(resolved);
                 if (unresolved.isEmpty() && safe) {
@@ -9417,11 +10925,30 @@ public class GtoObserverService extends Service {
                     return;
                 }
 
-                if (attempt < 2 && hasCriticalFreightConflict(exact, frozen)) {
+                if (attempt < 2 && (!unresolved.isEmpty()
+                    || hasCriticalFreightConflict(exact, frozen)
+                    || !knownDestinationVerified
+                    || destinationNeedsKnownVerification(exact, frozen))) {
                     mainHandler.post(() -> runFocusedFreightConflictRetry(
                         retryBase, baseScale, screenLeft, screenTop, exactButton, exactRow,
                         rowTop, rowBottom, exact, frozen, selectionGeneration, selectionSessionId, attempt + 1
                     ));
+                    return;
+                }
+
+                // HF39: cargo is visually isolated in the upper-left band of the exact
+                // selected row. If both generic row passes still miss only cargo, perform
+                // one final cargo-only OCR on that immutable band before exposing manual
+                // review. This cannot select another freight and cannot invent a label.
+                if (GtoFreightReviewPolicy.CARGO.equals(unresolved)) {
+                    prefs.edit()
+                        .putInt("lastFocusedFreightRetryAttempt", attempt)
+                        .putString("lastEvent", "Carga ainda ilegível · executando leitura exclusiva da carga na mesma linha")
+                        .apply();
+                    runFocusedCargoOnlyRecovery(
+                        retryBase, resolved, exactRow,
+                        selectionGeneration, selectionSessionId, 1
+                    );
                     return;
                 }
 
@@ -9452,6 +10979,9 @@ public class GtoObserverService extends Service {
                 }
                 FreightOption draft = mergeVerifiedPreciseWithStable(exact, frozen);
                 clearConflictingFreightFields(draft, exact, frozen);
+                if (destinationNeedsKnownVerification(exact, frozen)) {
+                    clearReviewField(draft, GtoFreightReviewPolicy.DESTINATION);
+                }
                 String required = firstReviewField(draft);
                 retryBase.recycle();
                 finishFocusedFreightRetry();
@@ -9463,6 +10993,153 @@ public class GtoObserverService extends Service {
             })
             .addOnCompleteListener(task -> {
                 if (attemptBitmap != retryBase && !attemptBitmap.isRecycled()) attemptBitmap.recycle();
+            });
+    }
+
+    private void runFocusedCargoOnlyRecovery(
+        Bitmap retryBase,
+        FreightOption resolved,
+        int exactRow,
+        long selectionGeneration,
+        String selectionSessionId,
+        int attempt
+    ) {
+        if (retryBase == null || retryBase.isRecycled() || selectionTextRecognizer == null) {
+            if (retryBase != null && !retryBase.isRecycled()) retryBase.recycle();
+            finishFocusedFreightRetry();
+            enterFreightReview(
+                resolved, exactRow,
+                "A leitura exclusiva da carga ficou indisponível; os demais campos permanecem preservados.",
+                GtoFreightReviewPolicy.CARGO
+            );
+            return;
+        }
+        if (!isCurrentPreciseSelectionOcr(selectionGeneration, selectionSessionId)
+            || !hasConfirmedSelectionIdentity()
+            || prefs.getInt("selectedFreightRow", -1) != exactRow
+            || !STATE_CONFIRMING_FREIGHT.equals(getTripState())) {
+            retryBase.recycle();
+            finishFocusedFreightRetry();
+            return;
+        }
+
+        int width = retryBase.getWidth();
+        int height = retryBase.getHeight();
+        int left = clamp(Math.round(width * 0.18f), 0, Math.max(0, width - 2));
+        int right = clamp(Math.round(width * 0.72f), left + 2, width);
+        int top = 0;
+        int bottom = clamp(Math.round(height * 0.40f), 2, height);
+        if (right - left < 2 || bottom - top < 2) {
+            retryBase.recycle();
+            finishFocusedFreightRetry();
+            enterFreightReview(
+                resolved, exactRow,
+                "A região visual da carga ficou inválida; os demais campos permanecem preservados.",
+                GtoFreightReviewPolicy.CARGO
+            );
+            return;
+        }
+
+        Bitmap cargoBand = Bitmap.createBitmap(retryBase, left, top, right - left, bottom - top);
+        float scale = attempt <= 1 ? 1.85f : 2.30f;
+        Bitmap cargoOcr = Bitmap.createScaledBitmap(
+            cargoBand,
+            Math.max(1, Math.round(cargoBand.getWidth() * scale)),
+            Math.max(1, Math.round(cargoBand.getHeight() * scale)),
+            true
+        );
+        if (cargoOcr != cargoBand && !cargoBand.isRecycled()) cargoBand.recycle();
+
+        final Bitmap bitmapForCargo = cargoOcr;
+        selectionTextRecognizer.process(InputImage.fromBitmap(bitmapForCargo, 0))
+            .addOnSuccessListener(text -> {
+                if (!isCurrentPreciseSelectionOcr(selectionGeneration, selectionSessionId)
+                    || !STATE_CONFIRMING_FREIGHT.equals(getTripState())
+                    || prefs.getInt("selectedFreightRow", -1) != exactRow) {
+                    if (!retryBase.isRecycled()) retryBase.recycle();
+                    finishFocusedFreightRetry();
+                    return;
+                }
+                List<String> literalLines = new ArrayList<>();
+                if (text != null) {
+                    for (Text.TextBlock block : text.getTextBlocks()) {
+                        for (Text.Line line : block.getLines()) {
+                            if (line != null && line.getText() != null && !line.getText().trim().isEmpty()) {
+                                literalLines.add(line.getText().trim());
+                            }
+                        }
+                    }
+                }
+                String cargo = GtoCargoTextRecoveryPolicy.bestLiteralCandidate(literalLines);
+                if (!cargo.isEmpty() && GtoFreightReviewPolicy.isAutomaticTextUsable(cargo)) {
+                    resolved.cargo = cargo;
+                    resolved.cargoSelectedRowEvidence = true;
+                    resolved.cargoVotes = Math.max(resolved.cargoVotes, 1);
+                    prefs.edit()
+                        .putString("lastCargoAutoRecoverySource", "SELECTED_ROW_CARGO_BAND")
+                        .putString("lastCargoAutoRecoveryValue", cargo)
+                        .putInt("lastCargoAutoRecoveryAttempt", attempt)
+                        .putLong("lastCargoAutoRecoveryAt", System.currentTimeMillis())
+                        .putString("lastEvent", "Carga recuperada automaticamente da própria linha selecionada")
+                        .apply();
+                    if (!retryBase.isRecycled()) retryBase.recycle();
+                    finishFocusedFreightRetry();
+                    if (isStableFreightSafeToCommit(resolved)) {
+                        commitPreciseFreight(resolved);
+                    } else {
+                        enterFreightReview(
+                            resolved, exactRow,
+                            "A carga foi recuperada; falta somente um campo que permaneceu sem evidência suficiente.",
+                            firstReviewField(resolved)
+                        );
+                    }
+                    return;
+                }
+
+                if (attempt < 2) {
+                    mainHandler.post(() -> runFocusedCargoOnlyRecovery(
+                        retryBase, resolved, exactRow,
+                        selectionGeneration, selectionSessionId, attempt + 1
+                    ));
+                    return;
+                }
+
+                if (!retryBase.isRecycled()) retryBase.recycle();
+                finishFocusedFreightRetry();
+                prefs.edit()
+                    .putInt("lastCargoAutoRecoveryAttempt", attempt)
+                    .putLong("lastCargoAutoRecoveryAt", System.currentTimeMillis())
+                    .putString("lastEvent", "Carga não ficou legível após leitura exclusiva da própria linha")
+                    .apply();
+                enterFreightReview(
+                    resolved, exactRow,
+                    "A carga não ficou legível mesmo após as leituras automáticas da própria linha.",
+                    GtoFreightReviewPolicy.CARGO
+                );
+            })
+            .addOnFailureListener(error -> {
+                if (!isCurrentPreciseSelectionOcr(selectionGeneration, selectionSessionId)) {
+                    if (!retryBase.isRecycled()) retryBase.recycle();
+                    finishFocusedFreightRetry();
+                    return;
+                }
+                if (attempt < 2) {
+                    mainHandler.post(() -> runFocusedCargoOnlyRecovery(
+                        retryBase, resolved, exactRow,
+                        selectionGeneration, selectionSessionId, attempt + 1
+                    ));
+                    return;
+                }
+                if (!retryBase.isRecycled()) retryBase.recycle();
+                finishFocusedFreightRetry();
+                enterFreightReview(
+                    resolved, exactRow,
+                    "Falha temporária na leitura exclusiva da carga; os demais campos permanecem preservados.",
+                    GtoFreightReviewPolicy.CARGO
+                );
+            })
+            .addOnCompleteListener(task -> {
+                if (!bitmapForCargo.isRecycled()) bitmapForCargo.recycle();
             });
     }
 
@@ -9572,11 +11249,15 @@ public class GtoObserverService extends Service {
         String frozen,
         String retry
     ) {
-        if (target == null || !GtoFreightFieldConflictPolicy.needsRetry(field, exact, frozen)) return;
+        if (target == null) return;
+        boolean conflictingInitialReads = GtoFreightFieldConflictPolicy.needsRetry(field, exact, frozen);
         GtoFreightFieldConflictPolicy.Resolution resolution =
             GtoFreightFieldConflictPolicy.resolve(field, exact, frozen, retry);
         if (!resolution.resolved) {
-            clearReviewField(target, field);
+            // Preserve an already valid non-conflicting field. Clear only a real conflict;
+            // when both initial reads missed the field, leaving it empty lets the second
+            // focused pass or the final review policy decide without corrupting good data.
+            if (conflictingInitialReads) clearReviewField(target, field);
             return;
         }
         String value = resolution.value;
@@ -9616,6 +11297,82 @@ public class GtoObserverService extends Service {
 
     private void finishFocusedFreightRetry() {
         focusedFreightConflictRetryBusy = false;
+    }
+
+    private boolean canonicalizeOfficialSelectedDestination(FreightOption exact, FreightOption stable) {
+        String exactBefore = exact == null ? "" : exact.destination;
+        String stableBefore = stable == null ? "" : stable.destination;
+        GtoKnownDestinationPolicy.Resolution resolution = GtoKnownDestinationPolicy.resolveSelectedRow(
+            exactBefore, stableBefore, currentTrustedGtoCities()
+        );
+        if (!resolution.resolved || resolution.value.isEmpty()) return false;
+
+        if (exact != null && exactBefore != null && !exactBefore.trim().isEmpty()) {
+            exact.destination = resolution.value;
+            exact.destinationSelectedRowEvidence = true;
+        }
+        if (stable != null && stableBefore != null && !stableBefore.trim().isEmpty()) {
+            stable.destination = resolution.value;
+            stable.destinationSelectedRowEvidence = true;
+        }
+        if (prefs != null) {
+            prefs.edit()
+                .putString("lastDestinationCanonicalValue", resolution.value)
+                .putString("lastDestinationCanonicalSource", resolution.source)
+                .putString("lastDestinationCanonicalFromPrecise", exactBefore == null ? "" : exactBefore)
+                .putString("lastDestinationCanonicalFromFrozen", stableBefore == null ? "" : stableBefore)
+                .putLong("lastDestinationCanonicalAt", System.currentTimeMillis())
+                .apply();
+        }
+        return true;
+    }
+
+    private String knownDestinationVerificationCandidate(FreightOption exact, FreightOption stable) {
+        List<String> trusted = currentTrustedGtoCities();
+        String exactValue = exact == null ? "" : exact.destination;
+        String frozenValue = stable == null ? "" : stable.destination;
+        String exactCandidate = GtoCityTextResolver.uniqueOfficialCanonicalCandidate(exactValue, trusted);
+        String frozenCandidate = GtoCityTextResolver.uniqueOfficialCanonicalCandidate(frozenValue, trusted);
+
+        // Already-canonical exact values need no focused verification.
+        if (!exactCandidate.isEmpty() && GtoFreightTextGuard.sameVisibleText(exactValue, exactCandidate)) {
+            exactCandidate = "";
+        }
+        if (!frozenCandidate.isEmpty() && GtoFreightTextGuard.sameVisibleText(frozenValue, frozenCandidate)) {
+            frozenCandidate = "";
+        }
+        if (!exactCandidate.isEmpty() && !frozenCandidate.isEmpty()
+            && !GtoFreightTextGuard.sameVisibleText(exactCandidate, frozenCandidate)) return "";
+        return !exactCandidate.isEmpty() ? exactCandidate : frozenCandidate;
+    }
+
+    private boolean destinationNeedsKnownVerification(FreightOption exact, FreightOption stable) {
+        return !knownDestinationVerificationCandidate(exact, stable).isEmpty();
+    }
+
+    private boolean applyKnownDestinationVerificationAfterRetry(
+        FreightOption resolved, FreightOption exact, FreightOption stable, FreightOption retry
+    ) {
+        String candidate = knownDestinationVerificationCandidate(exact, stable);
+        if (candidate.isEmpty()) return true;
+        String retryValue = retry == null ? "" : retry.destination;
+        GtoKnownDestinationPolicy.Resolution retryResolution = GtoKnownDestinationPolicy.resolveRetry(
+            retryValue, candidate, currentTrustedGtoCities()
+        );
+        if (retryResolution.resolved) {
+            resolved.destination = retryResolution.value;
+            resolved.destinationSelectedRowEvidence = true;
+            if (prefs != null) {
+                prefs.edit()
+                    .putString("lastDestinationVerifiedCanonical", retryResolution.value)
+                    .putString("lastDestinationVerificationSource", retryResolution.source)
+                    .putLong("lastDestinationVerificationAt", System.currentTimeMillis())
+                    .apply();
+            }
+            return true;
+        }
+        clearReviewField(resolved, GtoFreightReviewPolicy.DESTINATION);
+        return false;
     }
 
     private boolean hasUnresolvedDestinationOneEditConflict(FreightOption exact, FreightOption stable) {
@@ -9829,9 +11586,39 @@ public class GtoObserverService extends Service {
         return cropped;
     }
 
+    private boolean ocrLineBelongsToOwnOverlay(Rect lineRect) {
+        if (lineRect == null || lineRect.width() <= 0 || lineRect.height() <= 0) return false;
+        return ocrLineOverlapsView(lineRect, menuView)
+            || ocrLineOverlapsView(lineRect, statusChipView)
+            || ocrLineOverlapsView(lineRect, bubbleView);
+    }
+
+    private boolean ocrLineOverlapsView(Rect lineRect, View view) {
+        if (view == null || !view.isAttachedToWindow() || view.getWidth() <= 0 || view.getHeight() <= 0) return false;
+        int[] location = new int[2];
+        try {
+            view.getLocationOnScreen(location);
+        } catch (Exception ignored) {
+            return false;
+        }
+        Rect viewRect = new Rect(
+            location[0], location[1],
+            location[0] + view.getWidth(), location[1] + view.getHeight()
+        );
+        int centerX = lineRect.centerX();
+        int centerY = lineRect.centerY();
+        if (viewRect.contains(centerX, centerY)) return true;
+        Rect overlap = new Rect(lineRect);
+        if (!overlap.intersect(viewRect)) return false;
+        long lineArea = Math.max(1L, (long) lineRect.width() * lineRect.height());
+        long overlapArea = Math.max(0L, (long) overlap.width() * overlap.height());
+        return overlapArea * 100L >= lineArea * 45L;
+    }
+
     private void handleOcrResult(Text text, float analysisScale, int analysisOffsetX, int analysisOffsetY, Bitmap fullFrame) {
         List<OcrLine> lines = new ArrayList<>();
         StringBuilder allText = new StringBuilder();
+        StringBuilder gtoText = new StringBuilder();
 
         for (Text.TextBlock block : text.getTextBlocks()) {
             for (Text.Line line : block.getLines()) {
@@ -9845,14 +11632,24 @@ public class GtoObserverService extends Service {
                 );
                 String value = line.getText() == null ? "" : line.getText().trim();
                 if (value.isEmpty()) continue;
-                lines.add(new OcrLine(value, screenBox, line.getConfidence()));
                 if (allText.length() > 0) allText.append('\n');
                 allText.append(value);
+                // HF45: semantic GTO state must be derived only from pixels that belong
+                // to the simulator. NVU's own sticky banner/menu contains words such as
+                // "Viagem concluída", "ADS" and monetary values and must never feed the
+                // result/list state machine back into itself.
+                if (ocrLineBelongsToOwnOverlay(screenBox)) continue;
+                lines.add(new OcrLine(value, screenBox, line.getConfidence()));
+                if (gtoText.length() > 0) gtoText.append('\n');
+                gtoText.append(value);
             }
         }
 
-        String normalized = normalize(allText.toString());
-        prefs.edit().putString("lastOcrText", truncate(allText.toString(), 1800)).apply();
+        String normalized = normalize(gtoText.toString());
+        prefs.edit()
+            .putString("lastOcrText", truncate(allText.toString(), 1800))
+            .putString("lastGtoOcrText", truncate(gtoText.toString(), 1800))
+            .apply();
         String flowState = getTripState();
         boolean freightReviewPending = STATE_CONFIRMING_FREIGHT.equals(flowState) && isFreightReviewPending();
 
@@ -9863,10 +11660,16 @@ public class GtoObserverService extends Service {
                     .putString("screenState", lastScreenState)
                     .putBoolean("pendingBonusDuringFreightReview", true)
                     .putBoolean("pendingResultDuringFreightReview", true)
+                    .putBoolean("resultWatchedAdEvidence", true)
                     .putString("completionStatus", "REJECTED_BONUS_PENDING_FREIGHT_REVIEW")
                     .putLong("completionDetectedAt", System.currentTimeMillis())
-                    .putString("lastEvent", "ADS/bônus detectado · seleção preservada até concluir a revisão do frete")
+                    .putString("lastEvent", "ADS/bônus assistido comprovado · seleção preservada até concluir a revisão do frete")
                     .apply();
+                if (prefs.getBoolean("resultCertifiedLatched", false)) {
+                    GtoResultProofStore.markWatchedAd(
+                        this, prefs.getString("gtoTripSessionId", ""), truncate(normalized, 260)
+                    );
+                }
                 updateNotification();
                 return;
             }
@@ -9878,9 +11681,13 @@ public class GtoObserverService extends Service {
             prefs.edit().putString("screenState", lastScreenState).apply();
             persistArrivalCityFromSelectedFreight();
             prefs.edit()
+                .putBoolean("resultWatchedAdEvidence", true)
                 .putString("completionStatus", "REJECTED_BONUS")
                 .putLong("completionDetectedAt", System.currentTimeMillis())
                 .apply();
+            GtoResultProofStore.markWatchedAd(
+                this, prefs.getString("gtoTripSessionId", ""), truncate(normalized, 260)
+            );
             setTripState(STATE_REJECTED_BONUS, "Bônus de vídeo detectado; viagem bloqueada");
             announceDriverStage(
                 "REJECTED_BONUS",
@@ -9906,31 +11713,76 @@ public class GtoObserverService extends Service {
             receiveRect = resultScreen.receiveRect;
             doubleValueRect = resultScreen.doubleValueRect;
             String previouslyStableValue = prefs.getString("resultValueConsensusStable", "");
-            detectedResultValue = observeResultValueCandidate(
-                resultScreen.value,
-                "live-" + System.currentTimeMillis() + "-" + (++resultEvidenceSequence)
+            String resultCompatibilityIssue = GtoMoneyValue.finalValueCompatibilityIssue(
+                prefs.getString("selectedValue", ""),
+                resultScreen.value
             );
+            if (resultCompatibilityIssue == null) {
+                detectedResultValue = observeResultValueCandidate(
+                    resultScreen.value,
+                    "live-" + System.currentTimeMillis() + "-" + (++resultEvidenceSequence)
+                );
+            } else {
+                // HF45: the real Concluído screen still proves the trip, but a monetary
+                // OCR outlier (notably ~100x separator shifts) must not become the durable
+                // payout or poison the queue. Preserve the screenshot/result proof and
+                // retry value OCR from fresh/snapshot frames instead.
+                detectedResultValue = "";
+                prefs.edit()
+                    .remove("resultValueEvidence")
+                    .remove("resultValueConsensusStable")
+                    .remove("resultValue")
+                    .putString("resultRecognitionStatus", "VALUE_RECOVERY_PENDING")
+                    .putString("resultReviewRequiredField", GtoFreightReviewPolicy.VALUE)
+                    .putString("resultValueRejectedRaw", resultScreen.value == null ? "" : resultScreen.value)
+                    .putString("resultValueRejectedReason", resultCompatibilityIssue)
+                    .putLong("resultValueRejectedAt", System.currentTimeMillis())
+                    .putString("lastEvent", "Tela Concluído certificada · valor OCR incompatível descartado e relendo automaticamente")
+                    .commit();
+            }
             resultScreenLastSeenAt = System.currentTimeMillis();
             resultExitSeenAt = 0L;
-            if (detectedResultValue == null || detectedResultValue.trim().isEmpty()) {
-                if (prefs.getString("resultSnapshotPath", "").isEmpty()) {
-                    persistResultSnapshot(fullFrame);
-                }
-            } else {
-                deleteResultSnapshot();
-                if (previouslyStableValue.isEmpty()) {
-                }
+            resultDialogVisualAbsentFrames = 0;
+            // HF42 result-proof invariant: the semantic pair Concluído + monetary value
+            // is durable proof that the delivery happened. Preserve one immutable screenshot
+            // until the trip is either queued normally or positively rejected by watched-ad
+            // evidence. A stable value is not a reason to delete the only visual proof.
+            if (prefs.getString("resultSnapshotPath", "").isEmpty()) {
+                persistResultSnapshot(fullFrame);
             }
             gameplayFramesAfterResult = 0;
             String latchedResultAction = prefs.getString("resultAction", "");
             boolean receiveAlreadyLatched = prefs.getBoolean("resultReceiveLatched", false)
                 && latchedResultAction != null
                 && latchedResultAction.startsWith("RECEIVE");
+            // Escrow is written before any branch can return. This covers the race where
+            // a very fast Receber touch is observed before the OCR callback finishes.
+            boolean proofEscrowed = GtoResultProofStore.certify(
+                this,
+                prefs.getString("gtoTripSessionId", ""),
+                resultCompatibilityIssue == null
+                    ? (resultScreen.value == null || resultScreen.value.trim().isEmpty() ? detectedResultValue : resultScreen.value)
+                    : "",
+                prefs.getString("resultSnapshotPath", ""),
+                resultScreenLastSeenAt
+            );
+            if (!proofEscrowed) {
+                prefs.edit()
+                    .putString("gtoTripIntegrityError", "Tela Concluído detectada, mas o cofre local do resultado não pôde ser persistido.")
+                    .putString("lastEvent", "Entrega detectada · repetindo persistência do comprovante local")
+                    .apply();
+                scheduleCertifiedResultProofEscrowRetry(
+                    prefs.getString("gtoTripSessionId", ""), resultScreenLastSeenAt, 0
+                );
+            }
             SharedPreferences.Editor resultEditor = prefs.edit()
                 .putString("screenState", lastScreenState)
                 .putString("resultValue", detectedResultValue)
+                .putBoolean("resultCertifiedLatched", true)
+                .putLong("resultCertifiedAt", resultScreenLastSeenAt)
+                .putString("resultCertifiedSessionId", prefs.getString("gtoTripSessionId", ""))
                 .putString("resultRecognitionStatus", detectedResultValue == null || detectedResultValue.trim().isEmpty()
-                    ? "REVIEW_REQUIRED" : "CONFIRMED")
+                    ? "VALUE_RECOVERY_PENDING" : "CONFIRMED")
                 .putString("resultReviewRequiredField", detectedResultValue == null || detectedResultValue.trim().isEmpty()
                     ? GtoFreightReviewPolicy.VALUE : "")
                 .putBoolean("resultConfirmationFallbackNeeded", false);
@@ -9962,7 +11814,7 @@ public class GtoObserverService extends Service {
                 return;
             }
             boolean resultPersisted = resultEditor
-                .putString("completionStatus", "RESULT_SCREEN")
+                .putString("completionStatus", "RESULT_CERTIFIED_PENDING_ACTION")
                 .putBoolean("touchCaptureNeeded", true)
                 .commit();
             if (!resultPersisted) {
@@ -9992,14 +11844,18 @@ public class GtoObserverService extends Service {
             }
 
             if (STATE_TRIP_IN_PROGRESS.equals(getTripState())) {
+                // HF41: the game result dialog owns an irreversible action. Remove the
+                // expanded NVU card before inviting the driver to tap Receber; the passive
+                // 1px observer remains attached and the bubble itself stays available.
+                if (menuView != null) closeMenu();
                 setTripState(STATE_RESULT_DETECTED, "Entrega concluída detectada: " + detectedResultValue);
                 mainHandler.post(this::updateFreightTouchPulseSensor);
                 announceDriverStage(
                     "RESULT_DETECTED",
                     detectedResultValue.isEmpty()
-                        ? "Entrega detectada · toque em Receber."
-                        : "Entrega detectada · " + detectedResultValue + ". Toque em Receber.",
-                    3600L,
+                        ? "Viagem concluída ✓ · toque em Receber."
+                        : "Viagem concluída ✓ · " + detectedResultValue + " · toque em Receber.",
+                    0L,
                     false
                 );
             }
@@ -10048,17 +11904,25 @@ public class GtoObserverService extends Service {
                 if (pendingReviewedResult) {
                     prefs.edit()
                         .putBoolean("pendingBonusDuringFreightReview", true)
+                        .putBoolean("resultWatchedAdEvidence", true)
                         .putString("completionStatus", "REJECTED_BONUS_PENDING_FREIGHT_REVIEW")
                         .putLong("completionDetectedAt", now)
-                        .putString("lastEvent", "Fluxo ADS/bônus detectado · frete preservado até concluir revisão")
+                        .putString("lastEvent", "ADS/bônus assistido comprovado · frete preservado até concluir revisão")
                         .apply();
+                    GtoResultProofStore.markWatchedAd(
+                        this, prefs.getString("gtoTripSessionId", ""), truncate(normalized, 260)
+                    );
                     return;
                 }
                 persistArrivalCityFromSelectedFreight();
                 prefs.edit()
+                    .putBoolean("resultWatchedAdEvidence", true)
                     .putString("completionStatus", "REJECTED_BONUS")
                     .putLong("completionDetectedAt", now)
                     .apply();
+                GtoResultProofStore.markWatchedAd(
+                    this, prefs.getString("gtoTripSessionId", ""), truncate(normalized, 260)
+                );
                 setTripState(STATE_REJECTED_BONUS, "Fluxo de anúncio/bônus detectado após a entrega; viagem bloqueada");
                 announceDriverStage(
                     "REJECTED_BONUS",
@@ -10070,40 +11934,63 @@ public class GtoObserverService extends Service {
             }
 
             if (resultExitSeenAt == 0L) resultExitSeenAt = now;
-            if (looksLikeGameplay(normalized)) {
-                gameplayFramesAfterResult++;
-                boolean actionBackedReturn = hasRecentNormalResultActionEvidence(now);
-                if (!actionBackedReturn
-                    && gameplayFramesAfterResult >= 2
-                    && (resultTouchFallbackRequired || prefs.getBoolean("resultTouchFallbackRequired", false))
-                    && !(resultTouchFallbackContinuityBroken || prefs.getBoolean("resultTouchFallbackContinuityBroken", false))) {
-                    armResultTouchFallbackReady("GAMEPLAY_AFTER_RESULT");
-                }
-                // R3.6: normal completion requires an observed action on the result
-                // screen. There is no elapsed-time limit after that action. A mere HUD
-                // return without a result-screen action can no longer complete a trip.
-                if (gameplayFramesAfterResult >= 2
-                    && now - resultExitSeenAt >= 120L
-                    && actionBackedReturn) {
-                    if (pendingReviewedResult) {
-                        prefs.edit()
-                            .putBoolean("resultReceiveLatched", true)
-                            .putString("resultAction", "RECEIVE_TRANSITION_CONFIRMED")
-                            .putString("completionStatus", "RECEIVE_LATCHED")
-                            .putString("lastEvent", "Retorno ao jogo confirmou recebimento · aguardando revisão do frete")
-                            .apply();
-                        return;
-                    }
-                    confirmNormalResultAutomatically();
+            gameplayFramesAfterResult = 0;
+            boolean certifiedResult = prefs.getBoolean("resultCertifiedLatched", false);
+            boolean receiveLatched = prefs.getBoolean("resultReceiveLatched", false);
+            String action = prefs.getString("resultAction", "");
+            boolean watchedAdEvidence = containsPostResultAdEvidence(normalized);
+            boolean adInProgressEvidence = GtoResultCompletionPolicy.isAdInProgressEvidence(normalized);
+            if (adInProgressEvidence) {
+                resultAdUiLastSeenAt = now;
+                prefs.edit()
+                    .putLong("resultAdUiLastSeenAt", now)
+                    .putString("resultTerminalStatus", "AD_UI_OBSERVED_NOT_REJECTED")
+                    .putString("lastEvent", "Possível anúncio em andamento · entrega preservada; aguardando prova de conclusão ou retorno normal")
+                    .apply();
+            }
+            long adUiLastSeenAgeMs = resultAdUiLastSeenAt > 0L
+                ? Math.max(0L, now - resultAdUiLastSeenAt) : Long.MAX_VALUE;
+
+            // HF42: never depend on FPS, km/h, "Desligado" or any other optional HUD text.
+            // Those labels belong to a device/player configuration, not to the GTO state
+            // machine. If the semantically certified result dialog has really disappeared,
+            // exact Receber remains instant; when an OEM drops the touch callback we wait a
+            // conservative no-ad grace and then infer the only non-ADS terminal action.
+            if (GtoResultCompletionPolicy.shouldInferReceiveFromCertifiedExit(
+                getTripState(),
+                certifiedResult,
+                receiveLatched,
+                action,
+                watchedAdEvidence,
+                adInProgressEvidence,
+                adUiLastSeenAgeMs,
+                resultDialogVisualAbsentFrames,
+                now - resultExitSeenAt
+            )) {
+                boolean receiveTransitionPersisted = prefs.edit()
+                    .putBoolean("resultReceiveLatched", true)
+                    .putString("resultAction", "RECEIVE_CERTIFIED_EXIT")
+                    .putString("resultActionSource", "certified-result-exit-no-ad")
+                    .putString("completionStatus", "RECEIVE_LATCHED")
+                    .putString("lastEvent", pendingReviewedResult
+                        ? "Resultado preservado · saída normal confirmada, aguardando revisão do frete"
+                        : "Resultado preservado · saída normal confirmada, enviando a viagem")
+                    .commit();
+                if (!receiveTransitionPersisted) {
+                    prefs.edit()
+                        .putString("gtoTripIntegrityError", "Resultado certificado, mas o latch de saída normal não pôde ser persistido.")
+                        .putString("lastEvent", "Resultado continua preservado; persistência da saída pendente")
+                        .apply();
                     return;
                 }
-            } else {
-                gameplayFramesAfterResult = 0;
-                // Unknown/post-result intermediary screens are neutral. They may be a
-                // loading screen, menu, notification, animation or a future GTO screen.
-                // No state transition is inferred until a recognized action/screen appears.
-                recordNeutralScreenObservation("UNKNOWN_AFTER_RESULT", normalized);
+                if (pendingReviewedResult) return;
+                confirmNormalResultAutomatically();
+                return;
             }
+
+            // The delivery is already durable. Unknown/loading/intermediate screens are
+            // neutral and can never discard it; only positive watched-ad evidence rejects.
+            recordNeutralScreenObservation("CERTIFIED_RESULT_PENDING_TERMINAL_ACTION", normalized);
         }
 
         if (!STATE_WAITING_FREIGHT.equals(getTripState())) {
@@ -10165,7 +12052,7 @@ public class GtoObserverService extends Service {
             markFreightPageSemanticallyCertified(
                 freightPageGeneration > 0L ? freightPageGeneration : Math.max(1, freightPage),
                 semanticAnchors,
-                stableOptions.size()
+                visualButtons == null || visualButtons.isEmpty() ? stableOptions.size() : visualButtons.size()
             );
             prefs.edit()
                 .putString("screenState", lastScreenState)
@@ -10386,13 +12273,14 @@ public class GtoObserverService extends Service {
             // belongs to the destination company name (e.g. "Fazenda" + "Areia Dourada").
             List<OcrLine> plain = new ArrayList<>();
             for (OcrLine line : cardLines) {
-                String n = normalize(line.text);
-                if (n.contains("aceitar")) continue;
-                if (bestKm == line || bestMoney == line) continue;
-                if (!extractKmDigits(line.text).isEmpty()) continue;
-                if (!extractMoneyValue(line.text).isEmpty()) continue;
-                String cleaned = line.text.trim();
-                if (!cleaned.isEmpty()) plain.add(line);
+                // HF38 root-cause fix: the GTO layout places cargo on the same horizontal
+                // band as Km and route on the same band as R$. ML Kit can legitimately
+                // emit "Tijolos Maciços 600Km" (or route + value) as one Text.Line.
+                // Older code discarded the whole line whenever Km/R$ was present, so all
+                // automatic rereads repeated the exact same cargo-loss bug. Preserve the
+                // text remainder while numeric/action extraction continues independently.
+                String cleaned = cleanOcrLabel(GtoFreightMixedLinePolicy.textualRemainder(line.text));
+                if (!cleaned.isEmpty()) plain.add(new OcrLine(cleaned, line.rect, line.confidence));
             }
 
             if (!plain.isEmpty()) option.cargo = cleanOcrLabel(plain.get(0).text);
@@ -10435,13 +12323,60 @@ public class GtoObserverService extends Service {
                     option.companyRoute = option.originCompany + (option.destinationCompany.isEmpty() ? "" : " > " + option.destinationCompany);
                 }
             } else if (plain.size() >= 3) {
-                // Rare fallback when OCR drops the separator glyph. The second line is
-                // still the company route in the fixed GTO card layout. We keep only a
-                // plausible left-hand company token and never invent a city/name.
-                String destinationCandidate = cleanOcrLabel(plain.get(plain.size() - 1).text);
+                // Separator glyphs are often the first thing ML Kit loses. Preserve the
+                // fixed row semantics through geometry instead of sending the driver to
+                // manual origin entry. Cargo is the first line and destination city the
+                // last; the route band is everything between them. If source and target
+                // companies are emitted as separate horizontal boxes, the left box is
+                // the literal source company. A single merged phrase remains unresolved.
+                int destinationIndex = plain.size() - 1;
+                String destinationCandidate = cleanOcrLabel(plain.get(destinationIndex).text);
                 if (looksLikePlaceName(destinationCandidate)) {
                     option.destination = destinationCandidate;
-                    option.destinationOcrConfidence = plain.get(plain.size() - 1).confidence;
+                    option.destinationOcrConfidence = plain.get(destinationIndex).confidence;
+                }
+                List<OcrLine> routeParts = new ArrayList<>();
+                for (int t = 1; t < destinationIndex; t++) {
+                    OcrLine part = plain.get(t);
+                    if (looksLikeEntityName(cleanOcrLabel(part.text))) routeParts.add(part);
+                }
+                if (routeParts.size() >= 2) {
+                    routeParts.sort((a, b) -> {
+                        int dy = Integer.compare(a.rect.centerY(), b.rect.centerY());
+                        return Math.abs(a.rect.centerY() - b.rect.centerY()) <= Math.max(3, (bottom - top) / 10)
+                            ? Integer.compare(a.rect.left, b.rect.left) : dy;
+                    });
+                    OcrLine leftPart = null;
+                    OcrLine rightPart = null;
+                    int maxDy = Math.max(3, (bottom - top) / 10);
+                    for (OcrLine a : routeParts) {
+                        for (OcrLine b : routeParts) {
+                            if (a == b || b.rect.left <= a.rect.left) continue;
+                            if (Math.abs(a.rect.centerY() - b.rect.centerY()) > maxDy) continue;
+                            if (leftPart == null || a.rect.left < leftPart.rect.left) {
+                                leftPart = a;
+                                rightPart = b;
+                            }
+                        }
+                    }
+                    if (leftPart != null && rightPart != null) {
+                        String origin = cleanOcrLabel(leftPart.text);
+                        if (looksLikeEntityName(origin)) option.originCompany = origin;
+                        StringBuilder targetCompany = new StringBuilder();
+                        routeParts.sort(Comparator.comparingInt(a -> a.rect.left));
+                        boolean afterOrigin = false;
+                        for (OcrLine part : routeParts) {
+                            if (part == leftPart) { afterOrigin = true; continue; }
+                            if (!afterOrigin) continue;
+                            String textPart = cleanOcrLabel(part.text);
+                            if (textPart.isEmpty()) continue;
+                            if (targetCompany.length() > 0) targetCompany.append(' ');
+                            targetCompany.append(textPart);
+                        }
+                        option.destinationCompany = targetCompany.toString().trim();
+                        option.companyRoute = option.originCompany
+                            + (option.destinationCompany.isEmpty() ? "" : " > " + option.destinationCompany);
+                    }
                 }
             }
 
@@ -11165,8 +13100,9 @@ public class GtoObserverService extends Service {
         if (resultActionCanBeObserved(state)) {
             // Some Android builds redact ACTION_OUTSIDE coordinates as (0,0). At the
             // result screen we therefore treat the outside touch only as evidence that
-            // the driver acted, then let OCR decide whether the next screen is normal
-            // gameplay (Receber) or an advertisement/bonus flow (Dobrar valor).
+            // the driver acted. Exact geometry resolves Receber/ADS when available; when
+            // coordinates are redacted, the certified result remains durable while the
+            // observer waits for positive watched-ad evidence or a safe normal exit.
             {
                 resultActionTouchAt = lastOutsideTouchAt;
                 resultExitSeenAt = 0L;
@@ -11413,8 +13349,7 @@ public class GtoObserverService extends Service {
         return best;
     }
 
-    private GtoCityTextResolver.Resolution resolveTrustedDestination(String destination) {
-        String expected = prefs == null ? "" : prefs.getString("expectedGtoDestination", "").trim();
+    private List<String> currentTrustedGtoCities() {
         String json = prefs == null ? "" : prefs.getString("trustedGtoCitiesJson", "");
         if (!json.equals(trustedGtoCitiesCacheJson)) {
             List<String> parsed = new ArrayList<>();
@@ -11430,10 +13365,15 @@ public class GtoObserverService extends Service {
             trustedGtoCitiesCacheJson = json == null ? "" : json;
             trustedGtoCitiesCache = parsed;
         }
+        return trustedGtoCitiesCache;
+    }
+
+    private GtoCityTextResolver.Resolution resolveTrustedDestination(String destination) {
+        String expected = prefs == null ? "" : prefs.getString("expectedGtoDestination", "").trim();
         GtoCityTextResolver.Resolution resolution = GtoCityTextResolver.resolveTrusted(
             destination,
             expected,
-            trustedGtoCitiesCache
+            currentTrustedGtoCities()
         );
         if (prefs != null && !resolution.source.isEmpty()) {
             prefs.edit()
@@ -11457,32 +13397,13 @@ public class GtoObserverService extends Service {
     }
 
     private boolean containsBonusVideo(String normalized) {
-        boolean bonus = normalized.contains("bonus") || normalized.contains("bonificacao") || normalized.contains("recompensa");
-        boolean video = normalized.contains("video") || normalized.contains("anuncio") || normalized.contains("assistiu");
-        return bonus && video;
+        // HF42: legacy name retained for compatibility, but its meaning is now deliberately
+        // strict. Merely seeing an ad button/screen is not proof that the driver watched it.
+        return GtoResultCompletionPolicy.isWatchedAdEvidence(normalized);
     }
 
     private boolean containsPostResultAdEvidence(String normalized) {
-        if (normalized == null || normalized.isEmpty()) return false;
-        return containsBonusVideo(normalized)
-            || normalized.contains("anuncio")
-            || normalized.contains("advertisement")
-            || normalized.contains("rewarded")
-            || normalized.contains("recompensa")
-            || normalized.contains("assistir video")
-            || normalized.contains("watch video")
-            || normalized.contains("skip ad")
-            || normalized.contains("pular anuncio");
-    }
-
-    private boolean looksLikeGameplay(String normalized) {
-        if (normalized == null || normalized.isEmpty()) return false;
-        boolean hud = normalized.contains("km/h")
-            || normalized.contains("km h")
-            || normalized.contains("fps")
-            || normalized.contains("desligado");
-        boolean resultWords = normalized.contains("valor a receber") || normalized.contains("concluido");
-        return hud && !resultWords && !containsPostResultAdEvidence(normalized);
+        return GtoResultCompletionPolicy.isWatchedAdEvidence(normalized);
     }
 
     private boolean isAllowedTripTransition(String from, String to) {
@@ -11667,13 +13588,16 @@ public class GtoObserverService extends Service {
     private String statusLabel(String state) {
         if (STATE_WAITING_FREIGHT.equals(state)) {
             int detected = prefs == null ? 0 : prefs.getInt("freightCount", 0);
-            return detected > 0 ? "Lista de fretes detectada" : "Escolha seu frete";
+            int visualDetected = prefs == null ? 0 : prefs.getInt("freightVisualCount", 0);
+            if (detected > 0) return "Lista de fretes detectada";
+            if (visualDetected >= 2) return "Lista de fretes localizada";
+            return "Escolha seu frete";
         }
         if (STATE_CONFIRMING_FREIGHT.equals(state)) {
-            return isFreightReviewPending() ? "Frete selecionado · revisão necessária" : "Confirmando frete";
+            return isFreightReviewPending() ? "Frete selecionado · revisão necessária" : "Frete selecionado · confirmando dados";
         }
         if (STATE_TRIP_IN_PROGRESS.equals(state)) return "";
-        if (STATE_RESULT_DETECTED.equals(state)) return "Entrega concluída";
+        if (STATE_RESULT_DETECTED.equals(state)) return "Viagem concluída ✓";
         if (STATE_AWAITING_BONUS.equals(state)) return "Validando o recebimento";
         return state;
     }
@@ -12032,6 +13956,7 @@ public class GtoObserverService extends Service {
         projectionGeneration++;
         projectionActive = false;
         projectionSurfacePending = false;
+        projectionVirtualDisplayEverCreated = false;
         projectionSessionBoundAt = 0L;
         resetPendingProjectionSurfaceStability();
         projectionStartedAt = 0L;
@@ -12054,6 +13979,7 @@ public class GtoObserverService extends Service {
             .putBoolean("projectionActive", false)
             .putBoolean("projectionSessionBound", false)
             .putBoolean("projectionSurfacePending", false)
+            .putBoolean("projectionVirtualDisplayEverCreated", false)
             .putBoolean("projectionGrantValidated", false)
             .remove("projectionSessionBoundAt")
             .putBoolean("captureSurfaceReady", false)
@@ -12088,6 +14014,9 @@ public class GtoObserverService extends Service {
 
     @Override
     public void onTaskRemoved(Intent rootIntent) {
+        // Task removal may tear down the input channel without a terminal touch event.
+        // The observer remains sticky, but no destructive drag helper may survive it.
+        cancelBubbleGesture("TASK_REMOVED", true);
         if (prefs != null) {
             prefs.edit()
                 .putLong("observerTaskRemovedAt", System.currentTimeMillis())
@@ -12109,6 +14038,8 @@ public class GtoObserverService extends Service {
     public void onDestroy() {
         destroying = true;
         running = false;
+        projectionVerifiedGtoBridgeActive = false;
+        nvuMainActivityForeground = false;
         mainHandler.removeCallbacks(foregroundPoll);
         stopProjection();
         hideOverlays();
@@ -12137,6 +14068,8 @@ public class GtoObserverService extends Service {
             .putBoolean("touchCaptureNeeded", false)
             .putBoolean("projectionPermissionInFlight", false)
             .putBoolean("overlayVisible", false)
+            .remove("projectionVerifiedGtoBridgeActive")
+            .putBoolean("nvuMainActivityForeground", false)
             .putLong("serviceHeartbeatAt", 0L)
             .apply();
         instance = null;
@@ -12284,7 +14217,8 @@ public class GtoObserverService extends Service {
                                 .remove("gtoTripIntegrityError")
                                 .putString("lastEvent", "Valor final confirmado pela captura local preservada")
                                 .apply();
-                            deleteResultSnapshot();
+                            // Keep the immutable result screenshot until the completed FIX18
+                            // payload has been durably sealed in the local queue.
                             mainHandler.post(this::confirmNormalResultAutomatically);
                         } else {
                             prefs.edit()
@@ -12342,6 +14276,40 @@ public class GtoObserverService extends Service {
         return "";
     }
 
+    private void scheduleCertifiedResultProofEscrowRetry(String sessionId, long certifiedAt, int attempt) {
+        final String expectedSession = sessionId == null ? "" : sessionId.trim();
+        if (expectedSession.isEmpty() || attempt >= 8) return;
+        long delay = attempt <= 0 ? 240L : Math.min(5000L, 450L * (1L << Math.min(3, attempt)));
+        mainHandler.postDelayed(() -> {
+            if (destroying || prefs == null) return;
+            String currentSession = prefs.getString("gtoTripSessionId", "");
+            String certifiedSession = prefs.getString("resultCertifiedSessionId", currentSession);
+            if (!expectedSession.equals(currentSession) && !expectedSession.equals(certifiedSession)) return;
+            if (prefs.getBoolean("resultWatchedAdEvidence", false)
+                || GtoAutoTripSync.hasPendingSession(this, expectedSession)
+                || GtoAutoTripSync.STATUS_SYNCED.equals(prefs.getString("gtoTripSyncStatus", ""))) return;
+            if (GtoResultProofStore.hasCertified(this, expectedSession)) return;
+            boolean stored = GtoResultProofStore.certify(
+                this, expectedSession, prefs.getString("resultValue", ""),
+                prefs.getString("resultSnapshotPath", ""),
+                certifiedAt > 0L ? certifiedAt : prefs.getLong("resultCertifiedAt", System.currentTimeMillis())
+            );
+            if (stored) {
+                prefs.edit()
+                    .putString("gtoTripIntegrityStatus", "RESULT_PROOF_ESCROWED")
+                    .remove("gtoTripIntegrityError")
+                    .putString("lastEvent", "Comprovante da entrega protegido no cofre local")
+                    .apply();
+                return;
+            }
+            prefs.edit()
+                .putLong("resultProofEscrowRetryAt", System.currentTimeMillis())
+                .putInt("resultProofEscrowRetryAttempt", attempt + 1)
+                .apply();
+            scheduleCertifiedResultProofEscrowRetry(expectedSession, certifiedAt, attempt + 1);
+        }, delay);
+    }
+
     private void confirmNormalResultAutomatically() {
         String currentState = getTripState();
         if (screenAnalysisPausedOutsideGto || !gtoForeground) {
@@ -12355,6 +14323,20 @@ public class GtoObserverService extends Service {
         }
         if (STATE_RESULT_CONFIRMED.equals(currentState)) return;
         if (!STATE_RESULT_DETECTED.equals(currentState) && !STATE_AWAITING_BONUS.equals(currentState)) return;
+        // HF42 completion invariant: a certified result is immutable delivery proof. Network
+        // completion occurs only after its terminal path resolves to normal and no positive
+        // watched-ad evidence exists. Missing OEM touch callbacks can never lose the proof.
+        boolean certifiedProof = prefs.getBoolean("resultCertifiedLatched", false);
+        boolean receiveLatch = prefs.getBoolean("resultReceiveLatched", false);
+        boolean watchedAdEvidence = prefs.getBoolean("resultWatchedAdEvidence", false);
+        if (!receiveLatch || !certifiedProof || watchedAdEvidence) {
+            prefs.edit()
+                .putString("lastEvent", watchedAdEvidence
+                    ? "Resultado preservado, mas anúncio assistido foi comprovado · registro normal bloqueado"
+                    : "Resultado certificado preservado · aguardando resolução segura do Receber")
+                .apply();
+            return;
+        }
         if (detectedResultValue == null || detectedResultValue.trim().isEmpty()) {
             // resultValue is display data; only the dedicated immutable consensus key
             // is authoritative for completing/syncing a trip.
@@ -12404,21 +14386,35 @@ public class GtoObserverService extends Service {
             showStatusChip("Entrega concluída · falha de persistência local. A viagem continua preservada.", 4600L);
             return;
         }
-        deleteResultSnapshot();
         setTripState(STATE_RESULT_CONFIRMED, "Entrega finalizada e recebimento normal confirmado: " + detectedResultValue);
         announceDriverStage(
             "SYNCING",
-            "Enviando viagem automaticamente...",
-            4200L,
-            false
+            "Viagem salva ✓ · enviando automaticamente…",
+            0L,
+            true
         );
         String completedSessionId = prefs.getString("gtoTripSessionId", "");
         boolean queued = GtoAutoTripSync.enqueueConfirmedTrip(this, prefs, automaticTripSyncListener());
-        if (queued && prepareNextFreightFromSealedQueue(completedSessionId)) {
+        if (queued) {
+            // Only the sealed FIX18 queue is stronger than the local result-proof escrow.
+            // Never delete the screenshot/proof before enqueueConfirmedTrip() commits the
+            // completed payload; a disk/network/auth failure must leave recovery material.
+            GtoResultProofStore.markNormalResolved(this, completedSessionId, prefs.getString("resultActionSource", "normal"));
+            deleteResultSnapshot();
+            GtoResultProofStore.clear(this, completedSessionId);
+        } else {
+            prefs.edit()
+                .putString("gtoTripIntegrityStatus", "RESULT_PROOF_ESCROWED_PENDING_QUEUE")
+                .putString("lastEvent", "Entrega concluída preservada localmente · aguardando selar a fila de envio")
+                .apply();
+        }
+        if (queued
+            && !deferAutoNextPreparationForCertifiedListBoundary
+            && prepareNextFreightFromSealedQueue(completedSessionId)) {
             announceDriverStage(
                 "QUEUED_NEXT_READY",
-                "Enviando viagem automaticamente... Próximo frete liberado.",
-                4200L,
+                "Viagem salva ✓ · enviando em segundo plano. Próximo frete liberado.",
+                0L,
                 true
             );
             updateNotification();
@@ -12444,8 +14440,8 @@ public class GtoObserverService extends Service {
                                 .apply();
                             announceDriverStage(
                                 "SYNCED_BACKGROUND",
-                                "Viagem enviada com sucesso!",
-                                3600L,
+                                "Viagem enviada ✓",
+                                2600L,
                                 true
                             );
                             updateNotification();
@@ -12457,8 +14453,8 @@ public class GtoObserverService extends Service {
                     if (operationClosed) {
                         announceDriverStage(
                             "SYNCED",
-                            "Viagem enviada com sucesso!",
-                            4400L,
+                            "Viagem enviada ✓",
+                            2800L,
                             true
                         );
                     } else if (GtoDeterministicFlowPolicy.shouldAutoPrepareNextFreightAfterSync(
@@ -12478,23 +14474,23 @@ public class GtoObserverService extends Service {
                                 .apply();
                             announceDriverStage(
                                 "SYNCED_NEXT_READY",
-                                "Viagem enviada com sucesso!",
-                                4200L,
+                                "Viagem enviada ✓",
+                                2800L,
                                 true
                             );
                         } else {
                             announceDriverStage(
                                 "SYNCED",
-                                "Viagem enviada com sucesso!",
-                                3600L,
+                                "Viagem enviada ✓",
+                                2600L,
                                 true
                             );
                         }
                     } else {
                         announceDriverStage(
                             "SYNCED",
-                            "Viagem enviada com sucesso!",
-                            3600L,
+                            "Viagem enviada ✓",
+                            2600L,
                             true
                         );
                     }

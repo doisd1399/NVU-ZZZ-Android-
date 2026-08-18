@@ -55,15 +55,18 @@ check("OCR failure preserves row for review instead of auto-committing page hist
     && !precise.includes("if (isStableFreightSafeToCommit(stable)) {\n                    commitPreciseFreight(stable);"));
 check("timeout cannot auto-lock a live page-history row",
   precise.includes("Do not commit a live page-history row after a timeout"));
-check("result OCR fallback is slower during normal gameplay",
-  service.includes("ACTIVE_TRIP_RESULT_FALLBACK_OCR_MS = 1800L"));
+const resultFallbackMs = Number((service.match(/ACTIVE_TRIP_RESULT_FALLBACK_OCR_MS = (\d+)L/) || [])[1] || 0);
+check("result OCR fallback remains bounded during normal gameplay",
+  resultFallbackMs >= 180 && resultFallbackMs <= 1800);
 check("result state remains semantic-only with no pixel/color wake-up gate",
   !imageFlow.includes("tripResultCandidate = resultVisualGate.looksLikeResultDialog")
     && imageFlow.includes("semantic pair Concluído + monetary value")
     && imageFlow.includes("tripCandidateOcrDue = false"));
-check("slower OCR cadence reduces route-time OCR without reviving overlay self-interference",
-  service.includes("ACTIVE_TRIP_RESULT_FALLBACK_OCR_MS = 1800L")
-    && !imageFlow.includes("resultVisualGate.looksLikeResultDialog"));
+check("bounded OCR cadence avoids per-frame OCR and post-result visual exit cannot wake a result",
+  resultFallbackMs >= 180
+    && imageFlow.includes("if (resultTrackingState && resultScreenLastSeenAt > 0L)")
+    && imageFlow.includes("resultVisualGate.looksLikeResultDialog")
+    && !imageFlow.includes("tripResultCandidate = resultVisualGate.looksLikeResultDialog"));
 
 // Behavioral model of the exact bug reported from page 2, row 3.
 const exactRow3 = {

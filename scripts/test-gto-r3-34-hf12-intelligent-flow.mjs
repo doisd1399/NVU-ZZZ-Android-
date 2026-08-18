@@ -19,7 +19,7 @@ const gradle = read("android/app/build.gradle");
 check("HF13+ Android identity remains at or above 1.0.65 / 65", Number((gradle.match(/versionCode\s+(\d+)/) || [])[1] || 0) >= 65 && Number((gradle.match(/versionName\s+"1\.0\.(\d+)"/) || [])[1] || 0) >= 65);
 check("list detection uses one strong same-row Aceitar + freight-info anchor", detector.includes("GtoFreightListEvidencePolicy.isPlausibleSimpleList") && detector.includes("acceptAndInfoAnchorRows") && !detector.includes("orangeRatios[i] < 0.14f"));
 check("legacy result visual gate is no longer on the active decision path", resultGate.includes("GtoResultEvidencePolicy.isPlausibleResult") && !service.includes("tripResultCandidate = resultVisualGate.looksLikeResultDialog"));
-check("ordered freight queue drops stale frames but preserves critical touch window", service.includes("GtoFrameFreshnessPolicy.shouldConsume") && service.includes("criticalTouchFrame"));
+check("ordered freight queue guards producer order without cross-timebase wall-clock math", service.includes("GtoFrameFreshnessPolicy.shouldConsume") && service.includes("criticalTouchFrame"));
 check("touch-row identity invariant is explicit", service.includes("GtoSelectionIdentityPolicy.resolveRow") && service.includes("exactConsistentRowFromOutsideTouch"));
 check("field review preserves confirmed human-backed selection", service.includes('persistSelectionIdentity(selected.rowIndex, "CONFIRMED", reviewedIdentitySource)') && service.includes('putString("selectionConfirmationStatus", "REVIEW_REQUIRED")') && service.includes("enterFreightReview"));
 check("manual field provenance is persisted", service.includes('"MANUAL_DRIVER"') && service.includes('"reviewDestinationSource"') && service.includes('"selectedDestinationSource"'));

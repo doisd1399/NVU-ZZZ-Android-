@@ -1,0 +1,144 @@
+NVU R3.34 PC-HF30 — Android 1.0.82 / versionCode 82
+Data da auditoria: 2026-08-16
+Base: HF29
+
+STATUS
+- HF29 NÃO é considerada aprovada fisicamente para continuidade de MediaProjection.
+- HF30 é a candidata de correção para o novo teste físico.
+- Não declarar produção aprovada até o APK assinado passar no aparelho real.
+
+RELATO FÍSICO QUE ORIGINOU A HF30
+O usuário aceitou o compartilhamento de tela, porém em execuções reais o GTO Observe ainda podia ficar sem detecção durante Star Games, tela preta/FPS 0, painel de notificações ou já na garagem. O serviço/notificação podia continuar existindo enquanto a bolinha indicava ausência de pipeline real ou o card permanecia em "Autorização em andamento".
+
+CAUSAS/INCONSISTÊNCIAS ENCONTRADAS
+1. O watchdog de recuperação ainda dependia de gtoForeground/analysisPaused em parte do caminho, embora entrega de frames deva ser independente de UsageStats.
+2. Após tentativas de rebind, um stall de frames ainda podia escalar para nova autorização, derrubando voluntariamente um grant que podia continuar válido.
+3. Perda parcial de ImageReader/Handler podia ser tratada como perda da sessão inteira.
+4. RESULT_OK da Activity de permissão podia chegar antes do binding normal do serviço e ficar em corrida com o retorno ao GTO.
+5. O host de consentimento tinha janela curta (3,2 s / 40 tentativas), vulnerável a OEM lento.
+6. O retorno visual da bolha tinha um caminho antigo capaz de causar divergência entre prefs e estado em memória da permissão.
+7. A saúde da bolinha estava acoplada a foreground/estabilidade semântica, em vez de representar somente frames reais recebidos + processados.
+8. Se o processo/serviço fosse recriado enquanto apenas aguardava frete, WAITING_FREIGHT podia voltar a IDLE.
+9. Falha transitória ao promover o Foreground Service para mediaProjection podia encerrar o serviço.
+10. Android 14+ permite uma única criação de VirtualDisplay por grant; qualquer tentativa de reutilização incorreta do grant precisava ser bloqueada explicitamente.
+11. Três gates legados de teste ainda codificavam comportamento antigo incompatível com a nova regra de continuidade: R3.26 (checagem por texto de implementação), HF13 (saúde falsa fora do foreground) e HF24 (nome/expectativa de escalada por número de tentativas). Eles foram atualizados para testar as invariantes atuais sem reduzir a proteção contra terceiros.
+
+CORREÇÕES HF30
+A) SUPERVISOR DE CONTINUIDADE DA MEDIAPROJECTION
+- Enquanto MediaProjection + sua VirtualDisplay válida existirem, falta de frames não significa perda de autorização.
+- Rebind de Surface/ImageReader é repetido na MESMA autorização, sem limite que force reconsentimento.
+- ImageReader/capture thread/handler ausentes são reconstruídos sem destruir token/VirtualDisplay.
+- Falta de frames dispara recuperação independentemente de UsageStats/foreground.
+- Analysis-only stall permanece neutro quando a análise está intencionalmente pausada fora do GTO.
+
+B) RESULT_OK / BINDING IMEDIATO
+- O grant RESULT_OK é staged de forma segura.
+- A PermissionActivity tenta resgatar o serviço em processo imediatamente e também envia ACTION_START_PROJECTION como caminho autoritativo/recriável.
+- O serviço tem grace de binding para não declarar falha enquanto o Intent ainda está em trânsito.
+- Se o callback do consentimento se perder e o GTO retornar, o observador identifica o estado e reabre a autorização automaticamente.
+
+C) OEM LENTO
+- HANDOFF_MAX_AGE_MS: 9000 ms.
+- MAX_ATTEMPTS: 80.
+- O host transparente permanece em paisagem e espera estabilização por mais tempo antes de concluir que o handoff falhou.
+
+D) FOREGROUND/BRIDGE SEGURO
+- GTO exato é evidência forte mesmo quando um latch antigo de MainActivity ficou stale.
+- Bridge verificado aceita GTO/unknown/NVU transparente, mas NÃO aceita app terceiro conhecido nem SystemUI transient.
+- Uma lista estrita real pode restabelecer a evidência de GTO durante atraso do UsageStats sem poder selecionar frete sozinha.
+
+E) SERVIÇO STICKY
+- WAITING_FREIGHT é restaurado após recriação do serviço.
+- Falha de promoção do FGS mediaProjection preserva o serviço START_STICKY e arma recuperação, em vez de stopSelf().
+- stopSelf() permanece reservado ao ACTION_STOP explícito e ao gesto "Remover e parar NVU".
+
+F) UMA VIRTUALDISPLAY POR GRANT
+- Segunda createVirtualDisplay() no mesmo grant é bloqueada.
+- Se a primeira VirtualDisplay foi realmente perdida/consumida pelo Android, é uma perda terminal daquele grant e nova autorização é necessária.
+- Uma falha antes de consumir a primeira VirtualDisplay pode tentar novamente na mesma autorização.
+
+G) SAÚDE DA BOLINHA
+- Branco = recursos de projeção presentes + frame real recente + frame processado/analisado recente.
+- A cor não depende de UsageStats reconhecer o GTO.
+- Tela de carregamento pode ficar branca quando o pipeline real estiver fluindo, mesmo antes da lista existir.
+
+LIMITAÇÃO NÃO CONTORNÁVEL DO ANDROID
+O aplicativo não pode possuir permanentemente um MediaProjection após o próprio Android revogar o token, matar o processo ou invalidar a sessão. Quando MediaProjection.Callback.onStop() ocorre, uma nova confirmação do sistema é obrigatória. A HF30 abre a confirmação automaticamente quando o GTO está em contexto seguro; o usuário ainda precisa tocar no botão de compartilhamento do Android. Nenhum app comum pode legalmente confirmar esse diálogo pelo usuário. A promessa operacional da HF30 é: enquanto o token concedido continuar válido, um simples stall de frames NÃO derruba voluntariamente a autorização.
+
+FIXTURES FÍSICAS HF30
+scripts/fixtures/gto-hf30/01-star-games-loading.png
+SHA-256 1856b4fb5245e2ca0da852aeee5232dca5ba0ee3e7972292ff4b2abd1f577ad9
+Esperado: neutro / não é lista.
+
+scripts/fixtures/gto-hf30/02-notification-shade.png
+SHA-256 d5034cae4ccb185ff1de679243e5fa45c6a52d108cd277e9503b4c457fa29ffd
+Esperado: neutro / SystemUI não controla viagem.
+
+scripts/fixtures/gto-hf30/03-black-loading-fps0.png
+SHA-256 236622f03f8215cff67802a2e6caedd173641242028c1f5d753c244297582ebe
+Esperado: neutro / não é lista.
+
+scripts/fixtures/gto-hf30/04-garage-auth-stale.png
+SHA-256 a8f1ae004ae12ff7b8fa652ee1701d836bac6b59fb6892db94e2110dc11a0389
+Esperado: neutro / não é lista de fretes; não deve fabricar seleção.
+
+A captura positiva HF29 de uma lista real com 5 fretes continua no classificador e deve ser reconhecida exatamente como 5.
+
+TESTES APÓS A CORREÇÃO
+- JavaSyntaxCheck: PASS — 42 fontes.
+- HF30 continuous projection: 24/24 PASS.
+- R3.26 deterministic flow: 21/21 PASS após alinhar o gate legado à bridge segura atual.
+- HF13 capture/origin: 16/16 PASS após alinhar saúde ao significado real de frame+análise.
+- HF24 resilience: 16/16 PASS; stall repetido testa recuperação na mesma autorização, não escalada por contador.
+- HF29 post-consent/list recovery: 11/11 PASS.
+- HF28 destination/Windows guards: 13/13 PASS.
+- HF27 capture/destination: 16/16 PASS.
+- HF26 human evidence: 20/20 PASS, incluindo 3.080 assertions.
+- R3.29 strict screen: 15/15 PASS.
+- R3.27 runtime flow: 31/31 PASS.
+- R3.21 capture stability: 13/13 PASS.
+- PC hotfix: 24/24 PASS.
+- HF10 projection/runtime: 33/33 PASS.
+- HF12 intelligent flow: 20/20 PASS.
+- HF14: 14/14 PASS.
+- HF15: 13/13 PASS.
+- HF16: 12/12 PASS.
+- HF17: 12/12 PASS.
+- HF18: 16/16 PASS.
+- HF19: 24/24 PASS.
+- HF20: 19/19 PASS.
+- HF21: 13/13 PASS.
+- HF23 production-flow MODEL: 10/10 PASS, 5/5 jornadas determinísticas.
+- YAML do workflow GitHub: PASS.
+
+REGRESSÃO COMPLETA
+O comando monolítico npm run verify:release foi executado novamente. Após corrigir um gate legado R3.26, uma nova execução passou todos os blocos até R3.27 e entrou em R3.28 antes de atingir o limite de tempo do executor. Os blocos posteriores foram executados separadamente. Durante essa segunda metade, um teste legado HF13 ainda esperava que saúde visual ficasse falsa fora de foreground; ele foi corrigido para a nova definição segura e novamente passou. O gate HF24 também foi renomeado/alinhado para impedir futura expectativa de escalada por contador. Todos os blocos relevantes HF14->HF30 foram então executados em sequência e passaram.
+
+GRADLE REAL NESTE AMBIENTE
+Não é possível declarar compilação Gradle Android real neste container porque não há Android SDK local. Uma tentativa de instalar dependências ficou parcial/limitada pelo ambiente; ela não é tratada como certificação Android. O arquivo PREPARAR-ANDROID-WINDOWS.bat executa :app:compileDebugJavaWithJavac com JDK 21 no PC, e o GitHub Actions executa o build Release real. Estes permanecem gates obrigatórios.
+
+HOTFIXES DE BUILD PRESERVADOS
+- javac direto usa -encoding UTF-8.
+- JavaCompile Gradle usa UTF-8.
+- MainActivity.onResume/onPause são public para Capacitor 8.
+- workflow conserva parser apksigner V3 e identidade de assinatura esperada.
+
+IDENTIDADE HF30
+applicationId: com.nvu.operacional
+versionName: 1.0.82
+versionCode: 82
+artifact GitHub esperado: NVU-R3.34-PC-HF30-release
+
+TESTE FÍSICO BLOQUEADOR
+1. Instalar APK HF30 assinado.
+2. Abrir o GTO pelo fluxo NVU e tocar Compartilhar UMA vez.
+3. Deixar Star Games/tela preta/FPS 0 carregar sem sair/forçar app, inclusive por mais de 10 s.
+4. A bolinha branca deve refletir frames reais assim que o pipeline estiver fluindo; falta de lista não deve matar captura.
+5. Entrar na garagem, abrir a lista e confirmar reconhecimento.
+6. Abrir/fechar painel de notificações e retornar; o observador deve retomar sozinho.
+7. Sair do GTO e retornar; o estado deve permanecer.
+8. Selecionar frete real, conferir linha/dados e seguir até resultado -> Receber -> fila -> ACK.
+9. Se o sistema Android realmente revogar MediaProjection, a tela de consentimento deve reaparecer automaticamente sobre contexto seguro do GTO; confirmar Compartilhar e verificar retomada.
+
+CONCLUSÃO
+HF30 transforma recuperação de captura em supervisor contínuo. Stall de frames, atraso do UsageStats, perda de ImageReader/handler e retorno de overlays deixam de ser motivos para matar um grant ainda válido. A nova autorização fica reservada a perda terminal real do token/VirtualDisplay ou processo Android, condição em que o sistema operacional exige novo consentimento humano.

@@ -26,7 +26,7 @@ check("manual review does not fabricate consensus or votes", !reviewed.includes(
 check("both confirmation paths share one trip-start transition", (service.match(/transitionConfirmedFreightToTripInProgress\(\);/g)||[]).length >= 2 && service.includes("Tudo preparado, podemos partir!"));
 const watchdog = method(service,"private void armFreightConfirmationWatchdog","private boolean canonicalSyncCallbackIsCurrent");
 check("confirmed touch identity survives OCR watchdog timeout", watchdog.includes("hasConfirmedSelectionIdentity()") && watchdog.includes("enterFreightReview") && watchdog.includes("Nenhum frete foi confirmado"));
-const clear = method(service,"private void clearTripAnalysis","private void openOperationalPanel");
+const clear = method(service, service.includes("private boolean clearTripAnalysis") ? "private boolean clearTripAnalysis" : "private void clearTripAnalysis", "private void openOperationalPanel");
 check("trip reset clears review and selection identity residue", clear.includes('remove("pendingFreightReview")') && clear.includes('remove("reviewOriginCompany")') && clear.includes('remove("selectionIdentityStatus")'));
 check("destination company conflict cannot force review", !method(service,"private boolean hasCriticalFreightConflict","private boolean hasIndependentVisibleAgreement").includes("destinationCompany"));
 check("empty manual field cannot submit", service.includes("save.setEnabled(false)") && service.includes("addTextChangedListener(new TextWatcher()"));

@@ -1,0 +1,43 @@
+NVU R3.34-PC-HF35 — Windows
+Android 1.0.87 / versionCode 87
+
+Use somente a pasta extraída do ZIP HF35. Não misture arquivos de builds anteriores.
+
+VALIDAR FONTE
+npm run test:gto-r3.34-hf34-deterministic-lifecycle
+npm run test:gto-r3.34-hf35-freight-list-authority
+npm run verify:release
+
+PREPARAR WEB/CAPACITOR/ANDROID
+PREPARAR-ANDROID-WINDOWS.bat
+
+DEPLOY WEB / RUNTIME REMOTO
+- A HF35 altera somente o Android nativo. O Web/Netlify permanece exatamente no alinhamento da HF34.
+- Não é necessário novo deploy Web apenas por causa da HF35.
+- Firebase Functions também não mudou na HF35.
+
+GERAR APK RELEASE
+cd android
+gradlew.bat assembleRelease
+
+IDENTIDADE ESPERADA
+applicationId com.nvu.operacional
+versionCode 87
+versionName 1.0.87
+
+LÓGICA CANÔNICA HF35
+- GTO Observe é o proprietário da captura. Estado de viagem não pode desligar MediaProjection/reconhecimento.
+- Classificador visual leve trabalha continuamente (~32 ms) enquanto Observe está habilitado e há contexto GTO confiável.
+- Lista real/certificada em IDLE ou CANCELLED inicia automaticamente WAITING_FREIGHT. Não existe botão manual de nova viagem.
+- Lista reaparecendo em TRIP_IN_PROGRESS só encerra a viagem anterior depois de dupla autoridade: assinatura visual repetida + certificação semântica da mesma página (Aceitar + valor em múltiplas linhas e pelo menos uma linha completa Aceitar + Km + valor).
+- Estrutura parecida com lista no HUB/HUD é apenas candidato visual e nunca altera a viagem. Novo frete continua exigindo evidência humana real do toque em Aceitar + identidade visual/semântica da mesma linha.
+- Em RESULT_DETECTED/AWAITING_BONUS, se houver evidência durável de Receber, o resultado concluído é selado antes do novo ciclo; sem essa evidência, o retorno estável à lista abandona o resultado não confirmado e abre o novo ciclo.
+- OCR da linha selecionada é prioritário/dedicado; não espera OCR geral da página.
+- Carga, origem, destino, km e valor são recuperados automaticamente da linha tocada, snapshot imutável, geometria de tokens, mesma linha semântica e consenso seguro da página.
+- Origem ambígua não é inventada. Revisão humana só aparece depois que os caminhos automáticos seguros se esgotarem.
+- OCR semântico de resultado permanece ativo também em RESULT_DETECTED/AWAITING_BONUS (~220 ms), evitando estado de resultado congelado.
+- Mensagem de etapa representa o estado atual imediatamente; mensagens antigas não entram em fila e não atrasam o fluxo.
+- Supervisor MediaProjection HF30 e lifecycle fail-safe da bolinha HF31 permanecem.
+
+GATE FÍSICO OBRIGATÓRIO
+Gere/instale o APK 1.0.87 no mesmo aparelho que reprovou a HF32. Valide lista -> Aceitar -> dados -> viagem -> resultado/Receber -> sincronização e também viagem ativa -> reabrir lista -> novo frete. Só promova a produção após o APK assinado passar no aparelho real.

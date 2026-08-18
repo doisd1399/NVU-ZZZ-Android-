@@ -1,0 +1,158 @@
+NVU R3.34-PC-HF41 — VALIDATION REPORT
+Android 1.0.93 / versionCode 93
+Date: 2026-08-17
+Base: R3.34-PC-HF40
+Scope: Android native GTO Observe only. Web/Netlify/Functions unchanged.
+
+PHYSICAL INCIDENT REPRODUCED
+- GTO result modal was recognized: “Concluído / Valor a receber / Receber / Dobrar valor (ADS)”.
+- NVU announced “Entrega detectada · toque em Receber.”
+- Driver tapped Receber once; GTO immediately closed the irreversible result modal and returned to gameplay.
+- NVU remained in RESULT_DETECTED and continued saying “Toque em Receber para concluir a viagem”.
+- The trip therefore never crossed the local durable completion gate and was not enqueued for automatic sync.
+
+ROOT CAUSES CONFIRMED IN HF40
+1) POST-RESULT OCR VIEWPORT CONTRADICTION
+   HF40 kept result-state semantic OCR cropped to the central result region. After Receber closed the modal,
+   the transition resolver called looksLikeGameplay(), whose strongest HUD anchors (FPS, km/h, Desligado)
+   are on the far-left side of the GTO display. The crop made those anchors invisible. A valid Receber action
+   could therefore leave RESULT_DETECTED permanently after the one-time result screen disappeared.
+
+2) IRREVERSIBLE INPUT OBSERVER ARMING RACE
+   The independent 1px ACTION_OUTSIDE observer was attached only after entering a result/selection state and
+   after state/UI work was posted. A fast driver tap on Receber could happen before that tiny observer existed.
+   Because the GTO result modal cannot be reopened after Receber, losing this event is unrecoverable unless the
+   subsequent visual transition is itself a valid recovery signal.
+
+3) TRANSITION-CONFIRMED RECEIVE WAS NOT DURABLY LATCHED BEFORE COMPLETION
+   One gameplay-return path could call confirmNormalResultAutomatically() without first synchronously storing
+   resultReceiveLatched=true. The irreversible external action therefore did not have a guaranteed durable local
+   commit boundary before completion/sync side effects.
+
+4) RESULT INPUT WAS OVER-BLOCKED BY NVU MENU STATE
+   Result touch handling could be suppressed merely because menuView existed, even when the physical touch was
+   outside the NVU card. Only a touch provably inside the NVU card may be ignored.
+
+HF41 ARCHITECTURAL CORRECTION
+- Passive 1px outside-touch observer stays pre-armed for the entire enabled + GTO-foreground + overlay-allowed
+  session. It is independent of ImageReader/capture-stability recovery.
+- Freight mutation remains capture-stability-gated; pre-arming the observer does NOT allow unstable freight
+  selection.
+- When a semantic result is detected, an expanded NVU menu is closed so it cannot cover Receber.
+- Before result action/exit, semantic result OCR keeps the fast central crop.
+- After TOUCH_PENDING / exact Receive / durable latch / result exit / certified result-dialog disappearance,
+  OCR switches to whole-display mode so gameplay HUD anchors can be seen immediately.
+- The existing visual result gate is used only AFTER a result was already semantically certified. It cannot wake,
+  create, or confirm a result on its own.
+- If OEM delivers ACTION_OUTSIDE, that action is the fastest evidence path.
+- If OEM drops/redacts the event entirely, repeated disappearance of the already-certified result modal plus
+  repeated full-frame gameplay evidence is a deterministic recovery path.
+- ADS semantic evidence remains authoritative and blocks normal Receive completion.
+- Any transition that resolves to normal Receive synchronously commits:
+    resultReceiveLatched=true
+    resultAction=RECEIVE_TRANSITION_CONFIRMED
+    completionStatus=RECEIVE_LATCHED
+  BEFORE confirmNormalResultAutomatically() and BEFORE automatic sync enqueue.
+- confirmNormalResultAutomatically() now refuses to complete/sync unless the durable Receive latch exists.
+- Network/backend failure after completion does not delete the trip; the pre-existing durable sync queue remains
+  authoritative and retries later.
+
+PHYSICAL REGRESSION FIXTURES
+The exact user screenshots are packaged and tested:
+- scripts/fixtures/hf41-receive-flow/result-screen-receive.png
+  Expected: GtoResultVisualGate=true.
+- scripts/fixtures/hf41-receive-flow/gameplay-after-receive.png
+  Expected: GtoResultVisualGate=false and gameplay transition policy can resolve Receive after required evidence.
+
+NEW HF41 GATES
+- test:gto-r3.34-hf41-receive-irreversible: 14/14 PASS
+- GtoHf41ReceiveFlowPolicyTest: PASS
+- GtoHf41ReceiveScreenshotsTest: PASS
+
+REGRESSION / STRUCTURAL VALIDATION EXECUTED
+- JavaSyntaxCheck: PASS (47 sources)
+- validate:gto-native: 49/49 PASS
+- validate:gto-auto-sync: 74/74 PASS
+- R2 lifecycle: 26/26 PASS
+- R3.3 freight re-arm: 21/21 PASS
+- R3.5 result/sync recovery: 35/35 PASS
+- R3.6 Receive latch: 33/33 PASS
+- R3.7 full stability: 63/63 PASS
+- R3.13 / print / R3.17 / R3.19 / R3.20: PASS
+- R3.21 capture stability: 13/13 PASS
+- R3.22 selection: 8/8 PASS
+- R3.23 integrity: 16/16 PASS
+- R3.24 bootstrap/origin: 14/14 PASS
+- R3.25 detection flow: 16/16 PASS
+- R3.27 runtime flow: 31/31 PASS
+- R3.28 practical flow: 17/17 PASS
+- R3.29 strict screen: 15/15 PASS (direct earlier run / full gate progressed without failure)
+- R3.30 selected freight: 17/17 PASS
+- R3.32 card continuity: 11/11 PASS
+- R3.33 audit flow: 19/19 PASS
+- R3.34 money integrity: 10/10 PASS
+- R3.34 PC hotfix: 24/24 PASS
+- HF10 projection/runtime: 33/33 PASS
+- HF12 intelligent flow: 20/20 PASS
+- HF14: 14/14 PASS
+- HF15: 13/13 PASS
+- HF17: 12/12 PASS
+- HF18: 16/16 PASS
+- HF19: 24/24 PASS
+- HF20: 19/19 PASS
+- HF21: 13/13 PASS
+- HF22: 21/21 PASS
+- HF23: 10/10 PASS
+- HF24: 16/16 PASS
+- HF25: 16/16 PASS
+- HF27: 16/16 PASS
+- HF28: 13/13 PASS
+- HF29: 11/11 PASS
+- HF30 continuous projection: 24/24 PASS
+- HF31 bubble lifecycle: 16/16 PASS
+- HF32 continuous recognition: 18/18 PASS
+- HF34 deterministic lifecycle: 22/22 PASS
+- HF35 freight-list authority: 10/10 PASS
+- HF36 cargo auto-recovery: 11/11 PASS
+- HF37 replacement session: 19/19 PASS
+- HF38 mixed-line recovery: 18/18 PASS
+- HF39 certified-list boundary: PASS
+- HF40 cancelled-list bootstrap: 14/14 PASS
+- HF41 irreversible Receive: 14/14 PASS
+
+HISTORICAL GATE ALIGNMENTS
+Some historical textual tests encoded assumptions weaker/older than HF41 (sensor physically absent before capture-ready,
+no post-result visual gate usage at all, etc.). They were updated only to preserve their original safety invariant:
+- freight state mutation still requires capture stability;
+- semantic OCR remains the sole authority for entering result state;
+- post-result visual disappearance is allowed only after semantic result certification;
+- ADS remains authoritative;
+- no time-only completion path was introduced.
+No runtime safety check was removed to make a failing test pass.
+
+GRADLE COMPILE STATUS IN THIS CONTAINER
+Attempted: ./gradlew :app:compileDebugJavaWithJavac --no-daemon
+Blocked before Gradle execution because this sandbox cannot resolve services.gradle.org while wrapper needs
+Gradle 8.14.3. Error: java.net.UnknownHostException: services.gradle.org.
+This is an environment/network limitation, not a Java compile error. PREPARAR-ANDROID-WINDOWS.bat retains the
+real Gradle/JDK 21 compilation gate and must pass on the release Windows machine before APK signing.
+
+RELEASE IDENTITY
+- functionalRelease: R3.34-PC-HF41
+- Android versionName: 1.0.93
+- Android versionCode: 93
+- Android-only vs HF40
+
+FINAL PHYSICAL ACCEPTANCE SCENARIO
+1. Start Observe and complete a normal trip.
+2. Wait for NVU to recognize Concluído / result amount.
+3. Tap Receber once, including a fast tap.
+4. Result modal disappears permanently.
+5. NVU must immediately recognize post-result gameplay with whole-display evidence.
+6. Receive latch must be durable before any completion/sync.
+7. Trip must enter automatic send; if backend/network is unavailable, it must remain durably queued for retry.
+8. Repeat at least five times, including during a capture-surface recovery window.
+9. Verify ADS path remains blocked from normal Receive completion.
+
+The exact code path responsible for the reported HF40 incident has been removed and is covered by physical-screen
+regression fixtures. Final OEM/device approval still requires running the signed 1.0.93/93 APK on the affected device.

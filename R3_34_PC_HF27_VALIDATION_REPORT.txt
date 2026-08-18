@@ -1,0 +1,37 @@
+NVU R3.34 PC-HF27 — Android 1.0.79 / versionCode 79
+
+CAUSAS RAIZ CORRIGIDAS
+1) Pós-autorização MediaProjection: em alguns OEMs o UsageStats continuava reportando NVU/unknown depois que a autorização transparente fechava. A análise era pausada, e a prova visual dependia da própria análise/lista de fretes, criando um ciclo circular. Em carregamentos mais longos o grace period expirava e a captura ficava autorizada porém sem detecção.
+2) Destino Itopetuna: a política literal da HF26 não autocorrigia nomes, porém se snapshot e OCR preciso repetissem o mesmo erro de 1 caractere, não existia conflito e a releitura focalizada não era acionada.
+
+CORREÇÕES HF27
+- Ponte pós-consentimento armada somente a partir de handoff GTO previamente verificado.
+- A ponte aceita atraso de UsageStats quando foreground é NVU/unknown, mas nunca substitui terceiro app conhecido ou SystemUI transitória.
+- MainActivity real da NVU sinaliza onResume/onPause e bloqueia a ponte, evitando tratar a própria NVU como GTO.
+- Recuperação de superfície e reautorização automática podem continuar usando esse contexto verificado; dead surface continua escalando para nova autorização.
+- Destino a 1 erro de um destino GTO conhecido vira gatilho de verificação, nunca correção silenciosa.
+- Exemplo: Itopetuna -> candidato Itapetuna. O valor canônico só é adotado quando uma releitura focalizada da linha selecionada lê literalmente Itapetuna. Se não confirmar, somente Destino entra em revisão.
+- Os caminhos de falha/indisponibilidade da releitura também limpam apenas o destino suspeito, evitando gravar a grafia errada.
+- Proteções HF26 de lista certificada + ação humana + linha exata permanecem intactas.
+
+VALIDAÇÃO
+- JavaSyntaxCheck: PASS (40 fontes)
+- R2 lifecycle/clean-checkout: 26/26 PASS
+- Fluxo nativo: 49/49 PASS durante verify:release
+- Sincronização/Firebase/ACK: passou na cadeia verify:release
+- HF23 produção / 5 fretes distintos: 10/10 PASS, incluindo 5/5 jornadas completas simuladas
+- HF24: 16/16 PASS
+- HF25: 16/16 PASS
+- HF26: 20/20 PASS + 3080 assertions; fixtures negativas físicas preservadas
+- HF27: 16/16 PASS
+- R3.28 foi atualizado apenas para aceitar o novo nome trustedGtoContext e voltou a 17/17 PASS.
+- A execução monolítica verify:release passou todos os blocos até HF17 e foi interrompida somente pelo limite de tempo do executor; HF18-HF27 foram executados em sequência separada e todos passaram.
+- YAML do GitHub Actions: PASS
+- Parser apksigner moderno preservado: "certificate SHA-256 digest" genérico para V3.0 Signer.
+- Auditoria de checkout limpo não depende de android/app/src/main/assets/public/assets.
+
+ESCOPO
+Alterações funcionais restritas ao Android nativo e testes/workflow de release. Web, Netlify e Firebase Functions não foram alterados.
+
+GATE EXTERNO
+A compilação/signing real do APK deve ser executada pelo GitHub Actions ou Windows. O ambiente desta auditoria não acessa services.gradle.org.

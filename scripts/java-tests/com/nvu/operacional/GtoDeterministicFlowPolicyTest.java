@@ -18,10 +18,10 @@ public final class GtoDeterministicFlowPolicyTest {
         require(GtoDeterministicFlowPolicy.mayAutoBootstrapFreightList("CANCELLED"), "CANCELLED may bootstrap a real freight list");
         require(!GtoDeterministicFlowPolicy.mayAutoBootstrapFreightList("CONFIRMING_FREIGHT"), "confirmation must never bootstrap/restart from live list frames");
         require(!GtoDeterministicFlowPolicy.mayObserveFreightListOutsideWaiting("CONFIRMING_FREIGHT"), "confirmation owns its frozen transaction");
-        require(GtoDeterministicFlowPolicy.freightListIsInformationalOnly("TRIP_IN_PROGRESS", false), "reopened list during trip is informational by default");
-        require(!GtoDeterministicFlowPolicy.mayReplaceActiveTrip("TRIP_IN_PROGRESS", false), "trip cannot be replaced without explicit arm");
-        require(GtoDeterministicFlowPolicy.mayReplaceActiveTrip("TRIP_IN_PROGRESS", true), "explicit trip replacement may proceed through safe selection flow");
-        require(!GtoDeterministicFlowPolicy.mayReplaceActiveTrip("CONFIRMING_FREIGHT", true), "confirmation cannot be replaced even if a stale arm exists");
+        require(!GtoDeterministicFlowPolicy.freightListIsInformationalOnly("TRIP_IN_PROGRESS", false), "reopened list during trip is a lifecycle boundary");
+        require(!GtoDeterministicFlowPolicy.mayReplaceActiveTrip("TRIP_IN_PROGRESS", false), "one unconfirmed list candidate cannot replace the trip");
+        require(GtoDeterministicFlowPolicy.mayReplaceActiveTrip("TRIP_IN_PROGRESS", true), "stable returned jobs list may close the stale trip");
+        require(!GtoDeterministicFlowPolicy.mayReplaceActiveTrip("CONFIRMING_FREIGHT", true), "confirmation owns its frozen selected-row transaction");
         require(GtoDeterministicFlowPolicy.mayInterpretResultScreen("TRIP_IN_PROGRESS"), "result is meaningful during a trip");
         require(!GtoDeterministicFlowPolicy.mayInterpretResultScreen("WAITING_FREIGHT"), "result-like pixels cannot alter freight-selection state");
         require(GtoDeterministicFlowPolicy.mayInterpretBonusOrAds("RESULT_DETECTED"), "bonus/ad is meaningful only after result");

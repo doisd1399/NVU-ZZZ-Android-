@@ -83,7 +83,7 @@ check('backend rejects trailer drift', backend.includes('O reboque da operação
 check('backend requires operation documents', backend.includes('!userSnapshot.exists || !companySnapshot.exists || !jobSnapshot.exists || !contractSnapshot.exists'));
 check('backend validates FIX18 completion timestamp', backend.includes('clientContractVersion >= 18 && completedAtClient === null'));
 check('fresh-session reset protects completed unsynced trip', service.includes('preserveCompletedTripBeforeReset()') && service.includes('nova viagem bloqueada'));
-check('cancelled/stale session snapshots are discarded', service.includes('discardSessionSnapshot(this, prefs.getString("gtoTripSessionId", ""))') && sync.includes('discardSessionSnapshot'));
+check('cancelled/stale session snapshots are discarded', service.includes('GtoAutoTripSync.discardSessionSnapshot(this,') && sync.includes('discardSessionSnapshot'));
 
 for (const field of historyFields) {
   const explicit = backend.includes(`${field}:`);

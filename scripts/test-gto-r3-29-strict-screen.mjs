@@ -28,7 +28,7 @@ function runJava(name, mainClass, sources, javaArgs = []) {
 }
 
 check("freight list requires a bounded top-panel first row", detector.includes("screenHeight * 0.055f") && detector.includes("screenHeight * 0.20f"));
-check("freight list requires one same-row Aceitar + adjacent freight information anchor", detector.includes("acceptAndInfoAnchorRows") && detector.includes("GtoFreightListEvidencePolicy.isPlausibleSimpleList") && listEvidence.includes("acceptAndInfoAnchorRows >= 1"));
+check("freight list requires repeated same-row Aceitar + freight-information anchors on multi-row pages", detector.includes("acceptAndInfoAnchorRows") && detector.includes("GtoFreightListEvidencePolicy.isPlausibleSimpleList") && listEvidence.includes("requiredAnchors") && listEvidence.includes("Math.min(2, rowCount)"));
 check("freight list rejects inconsistent button widths", detector.includes("largestWidth > Math.round(smallestWidth * 1.70f)"));
 check("freight list uses narrow repeated-card vertical cadence", detector.includes("screenHeight * 0.100f") && detector.includes("screenHeight * 0.235f"));
 check("bitmap/OCR fallback has the same strict refined list gate", service.includes("plausibleRefinedAcceptStack(bitmap, best)"));

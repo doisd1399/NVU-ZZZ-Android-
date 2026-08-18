@@ -1,0 +1,19 @@
+NVU HF28 — Windows
+Android 1.0.80 / versionCode 80
+
+Se ainda não rodou o preparador:
+PREPARAR-ANDROID-WINDOWS.bat
+
+Depois, para gerar Release:
+cd android
+gradlew.bat assembleRelease --no-daemon
+
+Saída esperada:
+android\app\build\outputs\apk\release\
+
+Identidade esperada:
+applicationId com.nvu.operacional
+versionCode 80
+versionName 1.0.80
+
+Para atualização sobre APK existente, use a mesma keystore/certificado de produção.

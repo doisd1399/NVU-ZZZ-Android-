@@ -1,0 +1,130 @@
+NVU R3.34-PC-HF40 — CAUSA RAIZ / CORREÇÃO / VALIDAÇÃO
+Data: 2026-08-17
+Android: 1.0.92
+versionCode: 92
+Base: HF39 BUILD-FIX2
+
+1. INCIDENTE REPRODUZIDO
+Após cancelar uma viagem, a bolinha/card permanecia em estado equivalente a CANCELLED/IDLE com a mensagem "Observando o GTO em tempo real". Ao abrir uma lista real de fretes, a lista ficava visível, mas o fluxo não entrava em WAITING_FREIGHT. Um toque em Aceitar também podia não ser observado.
+
+A captura física fornecida pelo usuário está empacotada em:
+scripts/fixtures/hf40-cancelled-list-bootstrap.png
+O GtoFastVisualDetector real reconhece essa imagem como lista e encontra exatamente 5 botões Aceitar.
+
+2. CAUSA RAIZ COMPROVADA
+A HF39 tinha uma contradição entre as políticas e o roteamento do GtoObserverService:
+
+- captureIsNeededForCurrentState() mantinha MediaProjection/reconhecimento ativos em IDLE e CANCELLED.
+- GtoDeterministicFlowPolicy.mayAutoBootstrapFreightList() já declarava IDLE/CANCELLED como estados de bootstrap automático.
+- GtoSimpleScreenDetectionPolicy.isStableFreightListReturn() já incluía IDLE/CANCELLED como fronteira canônica da lista.
+- GtoFreightBootstrapPolicy.isFreshState() já incluía IDLE/CANCELLED.
+- promoteReplacementFreightCandidateToWaiting() já possuía ramo hadActiveSession=false, destinado a criar uma nova sessão sem cancelar uma sessão ativa.
+
+Porém o loop real de frames chamava handleActiveTripFreightListEvidence() somente quando:
+    isReplaceableActiveSessionState(state) == true
+
+Esse predicado inclui TRIP_IN_PROGRESS, RESULT_DETECTED, AWAITING_BONUS e CONFIRMING_FREIGHT com REVIEW_REQUIRED, mas EXCLUI exatamente IDLE e CANCELLED.
+
+A mesma exclusão existia em:
+- updateFreightTouchPulseSensor();
+- listener ACTION_OUTSIDE do sensor;
+- queueFreightTouchMarker();
+- callback da certificação semântica da lista;
+- promoteReplacementFreightCandidateToWaiting().
+
+Resultado real:
+1) pixels da lista eram capturados;
+2) heartbeat de reconhecimento podia continuar saudável;
+3) reducer de lifecycle ignorava a lista em CANCELLED/IDLE;
+4) WAITING_FREIGHT não era criado;
+5) sensor invisível de Aceitar permanecia desligado;
+6) tocar Aceitar não tinha autoridade para entrar no pipeline de seleção.
+
+Isso explica integralmente a captura: lista real visível + card "Observando" + nenhuma progressão ao selecionar frete.
+
+3. CORREÇÃO HF40
+Foi criada uma autoridade única:
+    GtoFreightLifecycleBoundaryPolicy.mayHandleCertifiedFreightBoundary(...)
+
+Ela combina:
+- fresh bootstrap: IDLE / CANCELLED;
+- replacement: viagem/resultado/review antigo.
+
+O mesmo predicado agora é usado em TODOS os pontos que participam da fronteira da lista:
+- reconhecimento visual contínuo;
+- armamento do candidato;
+- sensor ACTION_OUTSIDE;
+- queueFreightTouchMarker;
+- callback OCR de certificação semântica;
+- promoção para WAITING_FREIGHT.
+
+A proteção HF35 contra falso positivo no HUB foi preservada. IDLE/CANCELLED não mudam de estado apenas porque pixels parecem lista. A promoção continua exigindo:
+- estrutura visual estável/repetida; E
+- certificação semântica da própria página (Aceitar + Km + valor em linhas válidas).
+
+4. CORRIDA DO TOQUE ACEITAR
+Foi fechada uma segunda janela de corrida.
+Antes, se o motorista tocasse Aceitar enquanto a certificação semântica ainda estava em andamento, o toque podia ser consumido antes de a página ganhar autoridade.
+
+HF40 agora persiste replacementFreightTouchPending/replacementFreightTouchAt antes da tentativa de promoção. Se o OCR semântico ainda não terminou, o toque fica aguardando a certificação da MESMA página. Nenhuma promoção ocorre sem isReplacementFreightSemanticFresh().
+
+Portanto:
+- toque rápido não se perde;
+- falso HUB não ganha autoridade;
+- página/linha continuam geração-específicas.
+
+5. FLUXO ESPERADO HF40
+TRIP_IN_PROGRESS
+ -> motorista cancela
+CANCELLED
+ -> Observe continua ativo
+ -> lista real aparece
+FREIGHT_LIST_VISUAL_CANDIDATE
+ -> repetição visual + certificação semântica da mesma página
+ -> beginTrip(false)
+WAITING_FREIGHT
+ -> página certificada é semeada na nova sessão
+ -> Aceitar (inclusive rápido) é correlacionado à página/linha
+CONFIRMING_FREIGHT
+ -> dados da linha são coletados/reprocessados
+TRIP_IN_PROGRESS
+
+Nenhum dado da viagem cancelada atravessa a criação da nova sessão.
+
+6. VALIDAÇÃO EXECUTADA
+Validação estrutural/funcional executada em segmentos equivalentes ao verify:release:
+- preflight: PASS
+- JavaSyntaxCheck: PASS (46 fontes)
+- validate:gto-native: 49/49 PASS
+- validate:gto-auto-sync: 74/74 PASS (executado na cadeia anterior da mesma base e runtime preservado)
+- R2 lifecycle: 26/26 PASS
+- R3.3 freight re-arm: 21/21 PASS
+- R3.5 result/sync: 35/35 PASS
+- R3.6 Receive latch: 32/32 PASS
+- R3.7 stability: 63/63 PASS
+- R3.13 mode/print: PASS
+- R3.17 selection integrity: 20/20 PASS
+- R3.19 end-to-end: 35/35 PASS
+- R3.20 APK/Web parity: 36/36 PASS
+- R3.21-R3.33 relevant regression suites: PASS
+- R3.34 PC baseline + HF10/HF12/HF14/HF15/HF17-HF32: PASS
+- HF34 deterministic lifecycle: 22/22 PASS
+- HF35 list/HUB authority: 10/10 PASS
+- HF36 cargo recovery: 11/11 PASS
+- HF37 replacement session: 19/19 PASS
+- HF38 mixed-line recovery: 18/18 PASS
+- HF39 certified boundary: 20/20 PASS
+- HF40 cancelled-list bootstrap: 14/14 PASS
+- exact user HF40 screenshot detector: PASS, 5/5 Aceitar rows
+
+Gradle/Javac real foi tentado neste ambiente, mas o wrapper precisou baixar gradle-8.14.3-all.zip e falhou por DNS/rede (UnknownHostException services.gradle.org). Não houve erro Java/Gradle de fonte; o gate de compilação real deve rodar no Windows/GitHub, onde o PREPARAR-ANDROID-WINDOWS.bat e o workflow estão alinhados a 1.0.92 / 92.
+
+7. DEPLOY
+HF40 altera somente Android nativo em relação à HF39.
+Web/Netlify/Functions não precisam de novo deploy somente por HF40.
+
+8. TESTE FÍSICO DECISIVO
+Repetir sem reiniciar Observe:
+viagem -> cancelar -> abrir lista -> Aceitar rápido -> novo frete ativo
+por pelo menos 5 ciclos consecutivos.
+A lista deve sempre entrar automaticamente em WAITING_FREIGHT e o novo frete deve pertencer exclusivamente à página atual.

@@ -71,19 +71,19 @@ check(
   "stale OEM UsageStats can be recovered by real freight pixels after launch preparation",
   service.includes("capture-gate-freight-list")
     && service.includes("recordVisualGtoForegroundEvidence")
-    && service.includes('putLong("gtoLaunchVisualBridgeUntil", suppressForegroundHideUntil)')
-    && service.includes("now + PERMISSION_RETURN_GRACE_MS")
+    && service.includes("GtoProjectionContinuityPolicy")
+    && service.includes("mayProbeWaitingFreightDuringForegroundLag")
     && service.includes("trustedWaitingFreightProbe")
-    && service.includes("foregroundOwnerAllowsVisualProbe")
     && policy.includes("mayUseVisualFreightProof")
     && policy.includes("waitingForFreight"),
 );
 check(
   "launch visual bridge never overrides a known third-party foreground app",
-  service.includes("foregroundOwnerAllowsVisualProbe = foregroundPackage == null")
-    && service.includes("|| getPackageName().equals(foregroundPackage)")
-    && service.includes("!transientForegroundSurfaceActive")
-    && service.includes("known third-party foreground owner is never eligible"),
+  service.includes("packageMatchesGto")
+    && service.includes("packageUnknown")
+    && service.includes("packageIsNvu")
+    && service.includes("transientForegroundSurfaceActive")
+    && service.includes("A positively identified unrelated app is still excluded"),
 );
 check(
   "WAITING_FREIGHT consumes every selection frame in order",
@@ -117,7 +117,7 @@ check(
   "confirmed freight becomes immutable current trip and is shown to the driver",
   service.includes("GtoAutoTripSync.lockSelectedFreight")
     && service.includes("STATE_TRIP_IN_PROGRESS")
-    && service.includes("Frete identificado. Tudo preparado, podemos partir!")
+    && (service.includes("Frete identificado. Tudo preparado, podemos partir!") || service.includes("Frete confirmado ✓ · viagem em andamento."))
     && service.includes('freightHeading.setText("Frete atual em andamento")'),
 );
 check(
@@ -128,7 +128,7 @@ check(
 );
 check(
   "unknown screens stay neutral",
-  service.includes('recordNeutralScreenObservation("UNKNOWN_AFTER_RESULT"')
+  service.includes('recordNeutralScreenObservation("CERTIFIED_RESULT_PENDING_TERMINAL_ACTION"')
     && service.includes('recordNeutralScreenObservation("UNRECOGNIZED_FOR_" + getTripState()'),
 );
 check(
@@ -150,7 +150,7 @@ check(
 );
 check(
   "real result is the only path that arms Receive",
-  service.includes('putString("completionStatus", "RESULT_SCREEN")')
+  service.includes('putString("completionStatus", "RESULT_CERTIFIED_PENDING_ACTION")')
     && service.includes("STATE_RESULT_DETECTED")
     && service.includes("touchCaptureNeeded"),
 );

@@ -190,10 +190,39 @@ final class GtoOriginGeometryPolicy {
             }
         }
 
-        // In the selected GTO card, the first route line after cargo is Origem. This
-        // fallback is allowed only inside the immutable row ROI chosen by the touch.
-        String first = clean(lines.get(0).text);
-        if (plausible(first)) return new Result(first, true, "ROW_ROI_FIRST_ROUTE_LINE");
+        // When ML Kit drops the separator but emits source/destination companies as
+        // separate boxes on the same horizontal route band, geometry is still exact.
+        // Use the left-most route fragment only when another fragment sits on the same
+        // line to its right; this never splits a single ambiguous merged phrase.
+        if (lines.size() >= 2) {
+            RowLine bestLeft = null;
+            RowLine bestRight = null;
+            int maxDy = Math.max(3, Math.round(rowHeight * 0.12f));
+            for (RowLine a : lines) {
+                for (RowLine b : lines) {
+                    if (a == b || b.left <= a.left) continue;
+                    if (Math.abs(a.centerY() - b.centerY()) > maxDy) continue;
+                    int gap = b.left - a.right;
+                    if (gap < -Math.max(2, rowHeight / 30)) continue;
+                    if (bestLeft == null || a.left < bestLeft.left) {
+                        bestLeft = a;
+                        bestRight = b;
+                    }
+                }
+            }
+            if (bestLeft != null && bestRight != null) {
+                String origin = clean(bestLeft.text);
+                if (plausible(origin)) {
+                    return new Result(origin, true, "ROW_ROI_HORIZONTAL_ROUTE_SPLIT");
+                }
+            }
+        }
+
+        // A single merged route phrase without a separator or destination-company anchor
+        // is intentionally NOT accepted as Origem. It may contain both companies (for
+        // example "Metalurgica Dalavan"). Returning unknown here lets the selected-row
+        // retry and same-page unanimous-origin resolver recover the literal source without
+        // either guessing or asking the driver prematurely.
         return Result.none();
     }
 

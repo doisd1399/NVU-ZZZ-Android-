@@ -27,7 +27,7 @@ public final class JavaSyntaxCheck {
                 null,
                 files,
                 diagnostics,
-                List.of("-proc:none"),
+                List.of("-encoding", "UTF-8", "-proc:none"),
                 null,
                 units
             );

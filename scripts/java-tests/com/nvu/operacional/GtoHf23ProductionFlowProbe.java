@@ -138,9 +138,9 @@ public final class GtoHf23ProductionFlowProbe {
 
     private static void testReplacementSafety() {
         require(!GtoDeterministicFlowPolicy.mayReplaceActiveTrip("TRIP_IN_PROGRESS", false),
-            "list reappearance alone cannot replace active trip");
+            "one unconfirmed list frame cannot replace active trip");
         require(GtoDeterministicFlowPolicy.mayReplaceActiveTrip("TRIP_IN_PROGRESS", true),
-            "explicitly armed replacement may replace only after new Accept evidence");
+            "stable jobs-list return may close the stale trip before the new Accept");
         int newSelected = GtoSelectionIdentityPolicy.resolveExactTouchAfterTransition(4, 5, true, -1);
         require(newSelected == 4, "replacement touch must select only the new row");
     }

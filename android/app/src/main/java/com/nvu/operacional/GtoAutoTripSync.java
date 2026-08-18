@@ -425,29 +425,46 @@ final class GtoAutoTripSync {
     }
 
     static void flushPending(Context context, SharedPreferences mainPrefs, Listener listener) {
-        com.google.firebase.auth.FirebaseUser currentUser = FirebaseAuth.getInstance().getCurrentUser();
-        if (currentUser == null) {
-            mainPrefs.edit()
-                .putLong("gtoTripSyncLastAttemptAt", System.currentTimeMillis())
-                .putString("gtoTripSyncLastErrorCode", "NO_NATIVE_AUTH")
-                .apply();
-            String message = "Aguardando autenticação NVU para sincronizar a viagem.";
-            markPending(mainPrefs, message);
-            if (listener != null) listener.onPending(mainPrefs.getString("gtoTripSessionId", ""), message);
-            return;
-        }
-        String currentUid = clean(currentUser.getUid());
-
         SharedPreferences queue = context.getSharedPreferences(QUEUE_PREFS, Context.MODE_PRIVATE);
         SharedPreferences retry = context.getSharedPreferences(RETRY_PREFS, Context.MODE_PRIVATE);
         Map<String, ?> all = queue.getAll();
         if (all.isEmpty()) return;
-        long now = System.currentTimeMillis();
 
         List<String> keys = new ArrayList<>();
         for (String key : all.keySet()) {
             if (key.startsWith(QUEUE_PREFIX)) keys.add(key);
         }
+        if (keys.isEmpty()) return;
+
+        long now = System.currentTimeMillis();
+        String currentSessionId = clean(mainPrefs.getString("gtoTripSessionId", ""));
+        com.google.firebase.auth.FirebaseUser currentUser = FirebaseAuth.getInstance().getCurrentUser();
+        if (currentUser == null) {
+            String message = "Aguardando autenticação NVU para sincronizar a viagem.";
+            boolean currentSessionQueued = false;
+            for (String key : keys) {
+                String queuedSessionId = key.substring(QUEUE_PREFIX.length());
+                if (queuedSessionId.equals(currentSessionId)) currentSessionQueued = true;
+                if (listener != null) listener.onPending(queuedSessionId, message);
+            }
+            SharedPreferences.Editor editor = mainPrefs.edit()
+                .putLong("backgroundSyncPendingAt", now)
+                .putString("backgroundSyncPendingDetail", message)
+                .putString("backgroundSyncLastErrorCode", "NO_NATIVE_AUTH");
+            if (currentSessionQueued) {
+                editor
+                    .putLong("gtoTripSyncLastAttemptAt", now)
+                    .putString("gtoTripSyncLastErrorCode", "NO_NATIVE_AUTH")
+                    .apply();
+                markPending(mainPrefs, message);
+            } else {
+                // HF45: a queued PREVIOUS delivery must never turn the fresh/current
+                // freight session into PENDING. Keep the background problem orthogonal.
+                editor.apply();
+            }
+            return;
+        }
+        String currentUid = clean(currentUser.getUid());
 
         for (String key : keys) {
             String raw = queue.getString(key, "");

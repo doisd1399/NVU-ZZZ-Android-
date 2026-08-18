@@ -66,10 +66,12 @@ check('trip result OCR uses simple semantic gate instead of pixel/color signatur
   && service.includes('Concluído + monetary value'));
 check('trip result OCR keeps a slow fallback', service.includes('ACTIVE_TRIP_RESULT_FALLBACK_OCR_MS')
   && service.includes('tripFallbackOcrDue'));
-check('active trip treats a returned visual list as candidate and replaces only after new human Accept', service.includes('handleActiveTripFreightListEvidence')
-  && service.includes('FREIGHT_LIST_CANDIDATE_AFTER_TRIP')
-  && service.includes('replacementFreightTouchPending')
-  && service.includes('mayReplaceCancelledTripOnNewAccept'));
+check('certified freight-list return deterministically closes the active trip and prepares a new selection', service.includes('handleActiveTripFreightListEvidence')
+  && service.includes('FREIGHT_LIST_REOPENED_CERTIFIED')
+  && service.includes('HF35 canonical lifecycle: the previous trip is discarded only after two')
+  && service.includes('GtoSimpleScreenDetectionPolicy.isCertifiedFreightListReturn')
+  && service.includes('isReplacementFreightSemanticFresh')
+  && service.includes('promoteReplacementFreightCandidateToWaiting'));
 check('no audio capture permission/code', !manifest.includes('RECORD_AUDIO') && !service.includes('AudioRecord') && !service.includes('MediaRecorder') && !service.includes('AudioPlaybackCapture'));
 check('plugin capture request only defers consent to confirmed GTO', methodBody(plugin, 'public void requestScreenCapture', 'public void setContext').includes('requestProjectionPermissionIfRunning') && methodBody(plugin, 'public void requestScreenCapture', 'public void setContext').includes('projectionPermissionDeferredToGto') && !methodBody(plugin, 'public void requestScreenCapture', 'public void setContext').includes('startActivityForResult'));
 check('no accessibility service remains', !manifest.includes('accessibilityservice') && !manifest.includes('BIND_ACCESSIBILITY_SERVICE'));

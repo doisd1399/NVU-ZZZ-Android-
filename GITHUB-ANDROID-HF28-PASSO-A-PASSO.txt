@@ -1,0 +1,34 @@
+HF28 — Android 1.0.80 / versionCode 80
+GitHub pelo Android + Codespaces
+
+1. Envie somente NVU-CAPACITOR-ANDROID-R3.34-PC-HF28.zip temporariamente para o main pelo GitHub web.
+2. No Codespace:
+   git pull
+   ls -lh *HF28*.zip
+3. Extraia em /tmp:
+   ZIP="NVU-CAPACITOR-ANDROID-R3.34-PC-HF28.zip"
+   rm -rf /tmp/hf28 && mkdir -p /tmp/hf28
+   unzip -q "$ZIP" -d /tmp/hf28
+   SRC="/tmp/hf28/NVU-CAPACITOR-ANDROID-R3.34-PC-HF28"
+4. Confira antes de substituir:
+   grep -nE "versionCode|versionName" "$SRC/android/app/build.gradle"
+   Esperado: versionCode 80 / versionName "1.0.80"
+5. Backup local e substituição segura:
+   git branch -f backup-pre-hf28 HEAD
+   rsync -a --delete --exclude='.git' "$SRC/" ./
+   rm -f NVU-CAPACITOR-ANDROID-R3.34-PC-HF28.zip
+6. Valide:
+   npm ci
+   npm run verify:release
+7. Se tudo passar:
+   git add -A
+   git commit -m "NVU R3.34 PC-HF28 Android 1.0.80"
+   git push origin main
+8. GitHub > Actions > Build NVU R3.34 PC-HF28 Release > Run workflow > main > Run workflow.
+9. Se verde, baixe o artifact NVU-R3.34-PC-HF28-release.
+
+O workflow HF28 preserva:
+- checkout limpo sem depender de assets Capacitor pré-gerados;
+- parser compatível com apksigner V3;
+- versionCode 80 / versionName 1.0.80;
+- validação opcional EXPECTED_SIGNING_CERT_SHA256.

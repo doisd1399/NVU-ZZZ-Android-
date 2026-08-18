@@ -1,0 +1,165 @@
+NVU R3.34-PC-HF37 — RELATÓRIO DE CAUSA RAIZ E VALIDAÇÃO
+Data: 2026-08-17
+Android: 1.0.89
+versionCode: 89
+Base: R3.34-PC-HF36
+Escopo: Android nativo / GTO Observe. Sem alteração Web/Netlify/Functions em relação à HF36.
+
+1. INCIDENTE REAL
+Sequência observada no aparelho:
+1) uma lista certificada com 5 fretes estava aberta;
+2) a viagem anterior foi encerrada/desconsiderada pela reabertura real da lista;
+3) o motorista navegou para outra página/lista, agora com 4 fretes;
+4) tocou em Aceitar em um novo frete;
+5) o GTO entrou no gameplay, comprovando que o novo frete foi escolhido no jogo;
+6) a NVU não concluiu automaticamente a confirmação e apresentou "Frete preservado. Confirme apenas carga na bolinha NVU".
+
+As capturas exatas estão empacotadas como fixtures permanentes:
+- scripts/fixtures/hf37-replacement-list-before.png
+- scripts/fixtures/hf37-replacement-list-current.png
+- scripts/fixtures/hf37-after-accept-review-regression.png
+
+O detector de produção classifica as duas primeiras como listas reais (5 e 4 linhas respectivamente) e a terceira como gameplay, não como lista.
+
+2. CAUSA RAIZ EXATA
+A falha estava na transição ENTRE DUAS SESSÕES de viagem, e não na regra de cancelar a viagem anterior.
+
+HF35/HF36 já fazia corretamente a certificação semântica da NOVA página antes de permitir que uma lista reaberta encerrasse uma viagem ativa. Nessa mesma leitura OCR, parseFreightOptions() já produzia os dados de cada linha da nova página: carga, rota/origem, destino, km e valor.
+
+Porém, esses FreightOption eram usados apenas para responder "esta página é uma lista real?" e depois eram descartados.
+
+Ao promover a nova lista, o fluxo era:
+- certificar semanticamente a nova página;
+- descartar snapshot da viagem anterior;
+- clearTripAnalysis();
+- beginTrip(false);
+- restaurar somente bitmap/botões da nova lista;
+- iniciar um SEGUNDO OCR assíncrono da página para reconstruir freightOptions.
+
+clearTripAnalysis() limpa freightOptions/freightTextGeneration por design, pois esses dados pertencem à sessão anterior.
+
+Isso abria uma janela de corrida: se o motorista tocasse Aceitar antes de o segundo OCR terminar, buildSelectionTransaction()/stableFreightForRow() encontrava a NOVA sessão ainda sem baseline textual. A seleção humana podia ser detectada corretamente, mas o OCR da linha selecionada virava a única fonte de dados. Se essa leitura transitória perdesse a carga (ou outro campo), o sistema entrava em revisão manual, apesar de a própria NVU já ter lido esse campo segundos antes ao certificar a nova página.
+
+A aparência de "interferência da viagem anterior" vinha dessa fronteira mal sincronizada: a viagem antiga era realmente apagada, mas os dados já certificados da nova lista também eram perdidos no mesmo reset.
+
+Havia ainda uma segunda contradição curta: mesmo após uma página restaurada ser marcada como FREIGHT_LIST certificada e receber a contagem real, o código logo depois podia sobrescrever screenState para FREIGHT_LIST_CANDIDATE e freightCount=0 enquanto o OCR de refresh rodava.
+
+3. CORREÇÃO HF37
+A correção mantém a arquitetura atual e altera somente a passagem de autoridade entre a lista certificada e a nova sessão.
+
+A) Os dados da NOVA página certificada agora atravessam a fronteira de sessão
+- scheduleReplacementFreightSemanticCertification() preserva cópias dos FreightOption produzidos pelo MESMO OCR que certificou a página.
+- Os dados ficam em replacementFreightCertifiedOptions, ligados à generation da página candidata.
+- Se a página mudar, for rejeitada ou o candidato for resetado, essa coleção é apagada imediatamente.
+
+B) A viagem antiga continua sendo totalmente descartada
+A ordem permanece explícita:
+1. desanexar recursos pertencentes à NOVA página certificada;
+2. GtoAutoTripSync.discardSessionSnapshot() da sessão anterior;
+3. clearTripAnalysis();
+4. beginTrip(false) cria a nova sessão;
+5. somente então os FreightOption da NOVA página são semeados na nova sessão.
+
+Nenhum selectedFreight/freightOptions da viagem cancelada é reaproveitado.
+
+C) Nova sessão nasce com baseline textual pronto
+Após beginTrip(false):
+- freightPageGeneration é incrementada;
+- freightOptions recebe somente cópias das linhas da página substituta certificada;
+- freightTextGeneration recebe exatamente a nova freightPageGeneration;
+- freightTextAt é atualizado;
+- markFreightPageSemanticallyCertified() certifica a mesma página sob a NOVA geração;
+- o OCR geral de página continua em background apenas como refresh, não como pré-requisito para um Aceitar rápido.
+
+Assim stableFreightForRow() já possui carga/rota/destino/km/valor da linha correta no primeiro toque válido.
+
+D) Página já certificada não volta a CANDIDATE/0
+O estado FREIGHT_LIST + contagem real é preservado quando savedCertifiedOptions existe. FREIGHT_LIST_CANDIDATE e freightCount=0 ficam restritos ao fallback sem dados certificados.
+
+E) OCR transitório da linha não força ação humana
+HF36 já possuía releitura focalizada em duas escalas, mas havia dois caminhos restantes que podiam escapar dela:
+- primeiro parse da linha selecionada retornar null;
+- ML Kit falhar na leitura da linha.
+
+HF37 envia ambos para a mesma releitura focalizada da imagem imutável da linha tocada antes de REVIEW_REQUIRED.
+
+4. INVARIANTE FUNCIONAL APÓS HF37
+LISTA REAL CERTIFICADA REAPARECE DURANTE VIAGEM
+=> sessão antiga é descartada
+=> nova lista torna-se a única autoridade de seleção
+=> nova sessão é criada vazia de qualquer dado da viagem antiga
+=> dados já certificados da NOVA página são ligados à nova geração
+=> motorista toca Aceitar
+=> linha tocada é correlacionada somente com a NOVA página
+=> frete selecionado torna-se a viagem atual
+=> OCR focalizado é apenas recuperação, nunca troca de linha
+=> revisão humana só pode ocorrer depois dos retries automáticos seguros.
+
+5. REGRESSÃO EXATA DAS CAPTURAS DO USUÁRIO
+GtoHf37UserReplacementScreenshotTest:
+- primeira captura: freight list = true; exatamente 5 Aceitar;
+- segunda captura: freight list = true; exatamente 4 Aceitar;
+- terceira captura: freight list = false (gameplay após aceitar).
+Resultado: PASS.
+
+Isso protege simultaneamente contra:
+- perder a nova lista;
+- carregar row count da página antiga;
+- reutilizar frete antigo;
+- interpretar gameplay como lista depois do toque.
+
+6. GATE NOVO HF37
+scripts/test-gto-r3-34-hf37-replacement-session-isolation.mjs
+scripts/java-tests/com/nvu/operacional/GtoHf37UserReplacementScreenshotTest.java
+
+Cobertura HF37:
+- identidade Android/workflow/metadata;
+- armazenamento dedicado das linhas certificadas da nova página;
+- preservação dos rows pelo mesmo OCR que certifica a página;
+- detach antes do descarte da sessão antiga;
+- descarte da sessão antiga antes de beginTrip(false);
+- seed da nova sessão somente com linhas certificadas da nova página;
+- freightTextGeneration sincronizada com a nova geração;
+- certificação semântica sob a nova geração;
+- refresh OCR geral preservado;
+- página certificada não é rebaixada para CANDIDATE/0;
+- parse vazio da linha selecionada => retry focalizado;
+- falha ML Kit da linha => retry focalizado;
+- reset do candidato elimina qualquer possibilidade de vazamento entre páginas;
+- as três capturas físicas fazem parte do teste.
+Resultado: 19/19 PASS.
+
+7. REGRESSÕES EXECUTADAS
+- JavaSyntaxCheck: PASS (43 fontes)
+- validate:gto-native: 49/49 PASS
+- HF20 overlay anchor: 19/19 PASS
+- HF21 selected-row authority: 13/13 PASS
+- HF22 observer UX: 21/21 PASS
+- HF23 production: 10/10 PASS
+- HF24 resilience: 16/16 PASS
+- HF25 focused fields: 16/16 PASS
+- HF30 continuous projection: 24/24 PASS
+- HF31 bubble lifecycle: 16/16 PASS
+- HF32 continuous recognition: 18/18 PASS
+- HF34 deterministic lifecycle: 22/22 PASS
+- HF35 freight-list authority/HUB: 10/10 PASS
+- HF36 cargo auto-recovery: 11/11 PASS
+- R3.30 selected-freight (executado pelo gate HF37): 17/17 PASS
+- HF37 replacement-session: 19/19 PASS
+
+O comando verify:release também foi iniciado e passou toda a cadeia inicial até HF19 antes do limite de tempo do executor; a parte restante foi executada em segmentos, incluindo os gates críticos listados acima.
+
+8. BUILD / DEPLOY
+Release candidata:
+NVU R3.34-PC-HF37
+Android 1.0.89
+versionCode 89
+
+HF37 altera apenas Android nativo em relação à HF36.
+- Web/Netlify: sem alteração.
+- Firebase Functions: sem alteração.
+
+O Javac/Gradle real foi tentado neste ambiente com o wrapper do projeto, mas o Gradle 8.14.3 não está em cache e o wrapper não consegue resolver services.gradle.org neste executor (UnknownHostException). Por isso a compilação real continua como gate do workflow GitHub/Windows incluído no pacote.
+
+A aprovação definitiva continua exigindo compilar o APK assinado e repetir no aparelho real o cenário:
+viagem ativa -> lista real reaparece -> página/lista muda -> Aceitar rapidamente -> gameplay -> NVU deve confirmar automaticamente o NOVO frete, sem carregar qualquer dado da viagem anterior e sem revisão manual quando os campos estiverem legíveis.

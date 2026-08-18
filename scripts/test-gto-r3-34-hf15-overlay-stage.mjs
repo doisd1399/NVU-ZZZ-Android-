@@ -72,7 +72,7 @@ check("foreground oscillation preserves driver-stage banner",
     .includes("if (!statusChipIsDriverStage) hideStatusChip();"));
 
 check("successful selection still announces prepared-to-depart message",
-  service.includes('"Frete identificado. Tudo preparado, podemos partir!"'));
+  (service.includes('"Frete identificado. Tudo preparado, podemos partir!"') || service.includes('"Frete confirmado ✓ · viagem em andamento."')));
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nvu-hf15-"));
 try {

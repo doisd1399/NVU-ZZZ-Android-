@@ -19,4 +19,23 @@ final class GtoResultEvidencePolicy {
         if (adsGold >= 0.10f) supports++;
         return supports >= 2;
     }
+
+    /**
+     * Stricter continuity check used only AFTER OCR has already certified a real result.
+     *
+     * The historical wake-up gate is deliberately permissive so OCR is not starved. That
+     * same permissiveness must not be used to decide whether the irreversible result modal
+     * is still on screen: a dark gameplay scene plus a neutral control region can mimic two
+     * of the coarse supports. The gold ADS button is part of the certified GTO result modal
+     * itself, so persistence requires that modal-specific anchor plus one structural support.
+     */
+    static boolean isCertifiedResultStillVisible(
+        float dialogDark,
+        float dialogRightDark,
+        float receiveNeutral,
+        float adsGold
+    ) {
+        if (dialogDark < 0.58f || adsGold < 0.10f) return false;
+        return dialogRightDark >= 0.48f || receiveNeutral >= 0.28f;
+    }
 }

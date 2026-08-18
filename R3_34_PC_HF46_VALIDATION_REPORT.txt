@@ -1,0 +1,49 @@
+NVU R3.34-PC-HF46 — Android 1.0.98 / versionCode 98
+
+ROOT CAUSE CONFIRMADA — RECEBER NÃO SELAVA/ENVIAVA ATÉ A LISTA REABRIR
+
+Sintoma físico:
+1) Tela Concluído / Receber foi certificada corretamente.
+2) Motorista tocou Receber e o modal desapareceu.
+3) NVU continuou exibindo "Viagem concluída ✓ · toque em Receber".
+4) A viagem só foi selada/enviada quando uma nova lista de fretes apareceu.
+
+Causa raiz:
+- Alguns Android/OEMs não entregam ACTION_OUTSIDE com coordenadas úteis para overlays de 1px. A arquitetura já previa recuperação por transição visual.
+- Porém HF45 usava GtoResultVisualGate.looksLikeResultDialog(), um gate propositalmente permissivo criado apenas para ACORDAR OCR, também para decidir se o modal certificado ainda estava visível.
+- Na captura física pós-Receber, o gameplay escuro coincidiu com as regiões genéricas do gate (centro escuro + região neutra), então o modal era falsamente considerado ainda presente.
+- Consequência: resultDialogVisualAbsentFrames permanecia em 0, shouldInferReceiveFromCertifiedExit() nunca disparava, resultReceiveLatched não era criado e enqueueConfirmedTrip() não executava.
+- Ao abrir posteriormente uma lista real, sealCertifiedResultForReplacementBoundary() selava a entrega preservada e então a fila sincronizava. Isso explica exatamente por que a viagem "pendente" foi enviada somente ao abrir a lista.
+
+Medição das capturas reais anexadas:
+- Tela Concluído: dialogDark≈0.880, dialogRightDark≈0.841, receiveNeutral≈0.467, adsGold≈0.517 -> resultado real.
+- Gameplay pós-Receber: dialogDark≈0.639, dialogRightDark≈0.635, receiveNeutral≈0.933, adsGold≈0.017 -> o gate antigo permissivo ainda retornava TRUE, apesar de o modal já não existir.
+
+Correção HF46:
+- Separados dois conceitos que antes estavam misturados:
+  A) looksLikeResultDialog(): continua permissivo e serve SOMENTE para acordar OCR antes da certificação semântica.
+  B) looksLikeCertifiedResultStillVisible(): gate estrito usado SOMENTE depois que Concluído + valor já foram certificados.
+- O gate estrito exige a âncora visual específica do modal de resultado (botão ADS dourado) + estrutura do modal; gameplay escuro não mantém mais o resultado artificialmente vivo.
+- Quando o modal certificado some, resultDialogVisualAbsentFrames passa a avançar normalmente.
+- Após a graça segura existente, sem evidência positiva de anúncio assistido, o sistema cria o Receive latch, persiste a conclusão, sela a fila e chama o envio automaticamente — sem depender da lista seguinte.
+- A lista certificada continua como self-heal secundário, não como mecanismo normal de conclusão.
+- A prova durável HF42 permanece intacta: uma tela de resultado certificada nunca é perdida; somente evidência positiva de anúncio/recompensa assistida bloqueia o registro normal.
+
+Regressão física permanente:
+- scripts/fixtures/hf46-receive-exit/result-before-receive.png
+- scripts/fixtures/hf46-receive-exit/gameplay-after-receive.png
+
+Validações executadas:
+- JavaSyntaxCheck: PASS (50 fontes)
+- validate:gto-native: 49/49 PASS
+- validate:gto-auto-sync: 74/74 PASS
+- audit:gto-r3.6 Receive latch: 33/33 PASS
+- HF41 irreversible Receive: 14/14 PASS
+- HF45 critical flow: 18/18 PASS
+- HF46 exact physical Receive-exit: 10/10 PASS
+- verify:release completo foi iniciado e percorreu a cadeia histórica até o limite de tempo da sandbox; nenhuma falha funcional foi encontrada antes do timeout. Os gates diretamente afetados e dependentes do Receber passaram integralmente.
+
+Build real:
+- O workflow GitHub foi atualizado para Android 1.0.98 / versionCode 98 e artifact NVU-R3.34-PC-HF46-release.
+- PREPARAR-ANDROID-WINDOWS.bat e comandos de release foram alinhados à HF46.
+- Mudança Android-only em relação à HF45; Web/Netlify/Functions permanecem sem necessidade de novo deploy por esta hotfix.

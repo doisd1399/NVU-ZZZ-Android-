@@ -95,8 +95,11 @@ check(
     && service.includes("freightOverlaySafeRight"),
 );
 check(
-  "page and selected-row OCR are serialized for low-memory devices",
-  service.includes("preciseSelectionOcrBusy || focusedFreightConflictRetryBusy || ocrBusy.get()")
+  "selected-row OCR is latency-isolated but memory-bounded on a dedicated cropped recognizer",
+  service.includes("selectionTextRecognizer = TextRecognition.getClient")
+    && service.includes("Bitmap rowCrop = Bitmap.createBitmap")
+    && service.includes("preciseSelectionOcrBusy || focusedFreightConflictRetryBusy")
+    && !service.includes("preciseSelectionOcrBusy || focusedFreightConflictRetryBusy || ocrBusy.get()")
     && service.includes("PRECISE_OCR_BUSY_WAIT_TIMEOUT_MS"),
 );
 check(

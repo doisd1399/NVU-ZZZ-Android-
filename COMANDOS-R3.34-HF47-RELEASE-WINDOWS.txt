@@ -1,0 +1,29 @@
+NVU R3.34-PC-HF47 — Android 1.0.99 / versionCode 99
+
+1) Extraia o ZIP HF47 em uma pasta nova e entre na raiz do projeto.
+
+2) Preparação e certificação automática:
+PREPARAR-ANDROID-WINDOWS.bat
+
+3) Build Gradle real, caso queira executar manualmente após a preparação:
+cd android
+gradlew.bat clean assembleRelease
+
+4) Confirme no APK/log:
+versionName = 1.0.99
+versionCode = 99
+applicationId = com.nvu.operacional
+
+APK esperado em:
+android\app\build\outputs\apk\release\
+
+TESTE FÍSICO HF47 — CAUSA RAIZ DO RECEBER:
+A) conclua uma viagem e confirme que "Concluído + valor" é detectado e preservado;
+B) toque em Receber e confirme que, quando o modal sumir, a NVU sai de "toque em Receber" sem depender da abertura da próxima lista;
+C) faça o mesmo em sequência após sair/voltar ao app e após reconstrução do serviço/Observe; a prova certificada deve continuar sendo resolvida por frames;
+D) mesmo se o Android não entregar coordenadas do toque, 4+ frames estritos sem o modal + janela segura sem evidência de anúncio devem gerar o latch de Receber e selar a viagem;
+E) a viagem deve entrar na fila durável e começar o envio automaticamente; abrir a próxima lista não pode ser necessário para disparar o envio;
+F) se houver evidência positiva de anúncio/recompensa assistida, o registro normal deve ser bloqueado; a simples presença do botão ADS ou UI intermediária não reprova a viagem;
+G) repita lista -> Aceitar -> viagem -> Concluído -> Receber -> gameplay -> envio por várias viagens sem reiniciar manualmente o Observe.
+
+HF47 é Android-only em relação à HF46. Não é necessário novo deploy Web/Netlify/Functions apenas por esta hotfix.

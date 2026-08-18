@@ -29,11 +29,11 @@ public class GtoProjectionPermissionActivity extends Activity {
     public static final String EXTRA_GTO_VERIFIED_HEIGHT = "nvuGtoVerifiedHeight";
 
     private static final int REQUEST_CAPTURE = 9007;
-    private static final long HANDOFF_MAX_AGE_MS = 3200L;
+    private static final long HANDOFF_MAX_AGE_MS = 9000L;
     private static final long LANDSCAPE_SETTLE_MS = 260L;
     private static final long RETRY_MS = 80L;
-    private static final int MAX_ATTEMPTS = 40;
-    private static final long GRANT_ACK_TIMEOUT_MS = 5000L;
+    private static final int MAX_ATTEMPTS = 80;
+    private static final long GRANT_ACK_TIMEOUT_MS = 12000L;
     private static final long GRANT_ACK_POLL_MS = 60L;
     private static final String STATE_CONSENT_LAUNCHED = "nvuConsentLaunched";
     private static final String STATE_VERIFIED_AT = "nvuVerifiedAt";
@@ -264,6 +264,11 @@ public class GtoProjectionPermissionActivity extends Activity {
             // Service instance: a game/permission transition can reclaim the app process
             // even though Android still returns this valid one-use grant to the Activity.
             long resultAt = System.currentTimeMillis();
+            // HF30: keep an in-process copy of the one-use RESULT_OK only until the
+            // foreground service acknowledges/binds it. The normal service Intent remains
+            // authoritative and also survives service recreation; this staged reference is
+            // a same-process rescue for OEMs that delay that Intent while GTO is loading.
+            GtoObserverService.stageProjectionGrantFromPermissionHost(resultCode, data, resultAt);
             prefs.edit()
                 .putBoolean("projectionPermissionInFlight", true)
                 .putBoolean("projectionGrantValidated", false)
@@ -272,6 +277,12 @@ public class GtoProjectionPermissionActivity extends Activity {
                 .putString("lastEvent", "Compartilhamento aceito · iniciando captura no serviço NVU")
                 .apply();
 
+            // Same-process fast path: the observer is normally already a foreground
+            // service. Queue RESULT_OK directly to its main looper immediately, then also
+            // send the normal service Intent as the process-recreation-safe authoritative
+            // path. Whichever arrives first wins; acceptProjectionGrantOnMainThread() is
+            // duplicate-safe and never consumes the grant twice.
+            boolean directRescueArmed = GtoObserverService.rescueStagedProjectionGrantIfRunning(resultAt);
             Intent serviceIntent = new Intent(this, GtoObserverService.class)
                 .setAction(GtoObserverService.ACTION_START_PROJECTION)
                 .putExtra(GtoObserverService.EXTRA_RESULT_CODE, resultCode)
@@ -283,22 +294,36 @@ public class GtoProjectionPermissionActivity extends Activity {
                     ContextCompat.startForegroundService(this, serviceIntent);
                 }
             } catch (Exception ex) {
-                GtoObserverService.reportProjectionPermissionTerminalFailure(
-                    this,
-                    "GRANT_DISPATCH_FAILED",
-                    "O Android autorizou o compartilhamento, mas o serviço de captura não pôde ser iniciado: "
-                        + GtoObserverService.describeError(ex)
-                );
-                finish();
-                overridePendingTransition(0, 0);
-                return;
+                // If the already-running observer accepted the staged grant, a delayed or
+                // rejected duplicate service Intent is not a terminal capture failure.
+                if (!directRescueArmed) {
+                    GtoObserverService.reportProjectionPermissionTerminalFailure(
+                        this,
+                        "GRANT_DISPATCH_FAILED",
+                        "O Android autorizou o compartilhamento, mas o serviço de captura não pôde ser iniciado: "
+                            + GtoObserverService.describeError(ex)
+                    );
+                    finish();
+                    overridePendingTransition(0, 0);
+                    return;
+                }
+                prefs.edit()
+                    .putString("projectionDispatchWarning", GtoObserverService.describeError(ex))
+                    .putString("lastEvent", "Compartilhamento aceito · vínculo direto ativo apesar do atraso do Intent")
+                    .apply();
             }
 
-            // Keep this transparent landscape host alive only until the service proves
-            // that the one-use grant produced a real VirtualDisplay. This host has no
-            // visible content, so the GTO remains visually behind it. A timeout here
-            // never destroys a grant that may still be starting; the service owns the
-            // authoritative terminal/error state.
+            // Retry the same staged one-use result at short intervals until the service
+            // acknowledges it. These are not new permission requests and cannot create a
+            // second VirtualDisplay; they only close OEM scheduling races.
+            mainHandler.postDelayed(
+                () -> GtoObserverService.rescueStagedProjectionGrantIfRunning(resultAt),
+                180L
+            );
+            mainHandler.postDelayed(
+                () -> GtoObserverService.rescueStagedProjectionGrantIfRunning(resultAt),
+                700L
+            );
             waitForProjectionActivation(resultAt);
             return;
         }
@@ -340,6 +365,12 @@ public class GtoProjectionPermissionActivity extends Activity {
                 String status = prefs.getString("projectionStatus", "");
                 String error = prefs.getString("projectionError", "");
                 long firstFrameAt = prefs.getLong("projectionFirstFrameAt", 0L);
+                long grantReceivedAt = prefs.getLong("projectionGrantReceivedAt", 0L);
+                if (!active && !grantValidated
+                    && grantReceivedAt < resultAt
+                    && System.currentTimeMillis() - resultAt >= 700L) {
+                    GtoObserverService.rescueStagedProjectionGrantIfRunning(resultAt);
+                }
 
                 if (active && grantValidated) {
                     prefs.edit()

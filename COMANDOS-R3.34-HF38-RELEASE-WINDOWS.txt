@@ -1,0 +1,51 @@
+NVU R3.34-PC-HF38 — Windows
+Android 1.0.90 / versionCode 90
+
+Use somente a pasta extraída do ZIP HF38. Não misture arquivos de builds anteriores.
+
+VALIDAÇÃO PRINCIPAL
+npm run check:android-java-syntax
+npm run validate:gto-native
+npm run test:gto-r3.34-hf35-freight-list-authority
+npm run test:gto-r3.34-hf36-cargo-auto-recovery
+npm run test:gto-r3.34-hf37-replacement-session
+npm run test:gto-r3.34-hf38-mixed-line-recovery
+
+VALIDAÇÃO COMPLETA
+npm run verify:release
+
+PREPARAR ANDROID/CAPACITOR
+PREPARAR-ANDROID-WINDOWS.bat
+
+GERAR APK RELEASE
+cd android
+gradlew.bat assembleRelease
+
+IDENTIDADE ESPERADA
+applicationId com.nvu.operacional
+versionCode 90
+versionName 1.0.90
+release funcional R3.34-PC-HF38
+
+DEPLOY WEB / FUNCTIONS
+- HF38 é Android-only em relação à HF37.
+- Não faça novo deploy Netlify apenas por causa da HF38.
+- Não faça novo deploy Firebase Functions apenas por causa da HF38.
+
+CENÁRIO FÍSICO OBRIGATÓRIO HF38
+1. Ative GTO Observe e compartilhe a tela.
+2. Abra uma lista real e confirme que a contagem de fretes aparece.
+3. Selecione uma linha cuja carga fique horizontalmente alinhada ao Km (ex.: Tijolos Maciços / 600Km).
+4. Toque Aceitar normalmente, inclusive logo após troca de página/lista.
+5. O GTO entra no gameplay.
+6. A NVU deve confirmar automaticamente carga, origem, destino, distância e valor da linha tocada.
+7. Não deve aparecer "Confirme somente carga" quando a carga estava visível na linha selecionada.
+8. Reabra a lista durante viagem ativa e selecione outro frete: a viagem anterior deve ser descartada e a nova linha deve assumir integralmente a sessão.
+9. HUB/gameplay sem lista real não pode cancelar a viagem.
+
+REGRA CENTRAL HF38
+OCR de uma linha é uma composição, não uma exclusão:
+- "Tijolos Maciços 600Km" => Km=600Km E texto="Tijolos Maciços";
+- "Fabrica de Tijolo > Cooper Log R$ 16.386" => valor=R$ 16.386 E rota preservada;
+- tokens Km/R$/Aceitar são removidos somente da cópia textual;
+- a linha inteira nunca é descartada apenas por conter um campo numérico.

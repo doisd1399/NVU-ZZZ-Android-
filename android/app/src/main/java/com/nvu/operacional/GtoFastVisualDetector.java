@@ -136,11 +136,11 @@ final class GtoFastVisualDetector {
                 float green = cardGreenInfoRatios != null && i < cardGreenInfoRatios.length ? cardGreenInfoRatios[i] : 0f;
                 orangeTotal += orange;
                 if (orange >= 0.14f) orangeEvidence++;
-                if (dark >= 0.62f && light >= 0.012f && green >= 0.0025f) cardEvidence++;
-                // HF16: one row must carry the two signals the driver actually sees:
-                // an Aceitar-like button and adjacent value/distance information. The
-                // remaining rows are allowed to be partially occluded or malformed.
-                if (orange >= 0.14f && dark >= 0.56f && light >= 0.008f && green >= 0.0025f) {
+                if (dark >= 0.68f && light >= 0.014f && green >= 0.0050f) cardEvidence++;
+                // HF35: HUB/HUD controls can share orange and green pixels with the jobs
+                // screen. A strong row therefore needs the actual freight-card texture:
+                // dominant neutral-dark body plus non-trivial light text and green info.
+                if (orange >= 0.18f && dark >= 0.68f && light >= 0.014f && green >= 0.0050f) {
                     acceptAndInfoAnchorRows++;
                 }
             }
@@ -149,6 +149,9 @@ final class GtoFastVisualDetector {
             // screen presence is now decided by a single strong row + bounded geometry.
             if (!GtoFreightListEvidencePolicy.isPlausibleSimpleList(
                 buttons.size(), true, acceptAndInfoAnchorRows
+            )) return false;
+            if (!GtoFreightListEvidencePolicy.isPlausibleList(
+                buttons.size(), true, orangeEvidence, cardEvidence, averageOrange
             )) return false;
             if (buttons.size() == 1) return true;
 

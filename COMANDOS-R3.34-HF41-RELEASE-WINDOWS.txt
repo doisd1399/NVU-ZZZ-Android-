@@ -1,0 +1,39 @@
+NVU R3.34-PC-HF41 — Android 1.0.93 / versionCode 93
+
+1) Entre na raiz do projeto HF41.
+
+2) Validação rápida da fonte:
+node scripts/check-android-java-syntax.mjs
+node scripts/validate-gto-native-flow.mjs
+node scripts/validate-gto-auto-sync.mjs
+node scripts/test-gto-r3-34-hf39-certified-list-boundary.mjs
+node scripts/test-gto-r3-34-hf40-cancelled-list-bootstrap.mjs
+node scripts/test-gto-r3-34-hf41-receive-irreversible.mjs
+
+3) Preparação Android Windows/JDK 21 (use o script já incluído no projeto):
+PREPARAR-ANDROID-WINDOWS.bat
+
+4) Build Gradle real:
+cd android
+gradlew.bat clean assembleRelease
+
+5) Confirme no log/artefato:
+versionName = 1.0.93
+versionCode = 93
+
+APK esperado em uma árvore semelhante a:
+android\app\build\outputs\apk\release\
+
+TESTE FÍSICO OBRIGATÓRIO PARA ESTE HOTFIX:
+A) iniciar Observe, selecionar um frete e concluir a rota normalmente;
+B) ao surgir o modal Concluído / Valor a receber, aguardar a NVU detectar a entrega;
+C) tocar Receber uma única vez, inclusive rapidamente;
+D) o modal pode desaparecer de forma irreversível: a NVU deve reconhecer imediatamente o retorno ao gameplay pelo frame completo;
+E) antes de concluir/enviar, o evento Receber deve estar persistido como latch durável;
+F) a viagem deve entrar em envio automático sem exigir reabrir a tela de resultado;
+G) em caso de falha de rede/backend, o payload concluído deve permanecer na fila durável para retry, nunca ser perdido;
+H) Dobrar valor (ADS) continua bloqueando o caminho normal de Receber;
+I) repetir o fluxo completo pelo menos 5 vezes, incluindo um toque rápido em Receber e uma execução durante recuperação de surface/captura.
+
+
+HF41 é Android-only em relação à HF40. Não é necessário novo deploy Web/Netlify/Functions apenas por HF41.

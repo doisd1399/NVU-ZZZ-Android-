@@ -48,7 +48,7 @@ check('touch gap does not select a neighboring row', hitRow(800, 270, boxes) ===
 check('overlapping bounding boxes fail closed', hitRow(800, 215, [boxes[0], {left: 700, top: 200, right: 900, bottom: 230}]) === -1);
 check('nearest-row resolver is absent', !service.includes('findFreightAt(') && !service.includes('findFreightFlexible('));
 check('OEM-safe visual selection requires isolated row change plus list closure', service.includes('fastVisualDetector.detectPressedRow(') && service.includes('!fastTouchPulseActive') && service.includes('fastMissingListFrames >= missingRequired') && service.includes('finalizeFastVisualSelection()'));
-check('replacement flow cannot promote row without touch', service.includes('boolean touchEvidence = replacementFreightTouchPending;') && !service.includes('boolean touchEvidence = replacementFreightTouchPending || rowAlreadyPressed;'));
+check('certified returned list may close stale trip but cannot commit a new row without human-backed selection', service.includes('HF35 canonical lifecycle: the previous trip is discarded only after two') && service.includes('isReplacementFreightSemanticFresh') && service.includes('ensureHumanSelectionConfirmedForFreight') && service.includes('GtoSelectionEvidencePolicy.isHumanBackedSource') && service.includes('SELECTION_BLOCKED_NO_HUMAN_ACTION'));
 
 // 2. Correlation invariants.
 check('touch marker is sequenced on capture coordinator', coordinator.includes('markTouch()') && service.includes('selectionCoordinator.markTouch()'));

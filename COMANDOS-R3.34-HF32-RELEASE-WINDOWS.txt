@@ -1,0 +1,25 @@
+NVU HF32 — Windows
+Android 1.0.84 / versionCode 84
+
+Use somente a pasta extraída do ZIP HF32. Não misture arquivos de builds anteriores.
+
+VALIDAR FONTE
+npm run test:gto-r3.34-hf32-continuous-recognition
+npm run verify:release
+
+GERAR APK
+cd android
+gradlew.bat assembleRelease
+
+IDENTIDADE ESPERADA
+versionCode 84
+versionName 1.0.84
+
+FOCO HF32
+- detector GTO contínuo e em tempo real
+- sem comparação inválida Image.timestamp x System.nanoTime
+- bolinha branca = detector realmente executando, não apenas buffers chegando
+- lista de fretes observada pelo detector OCR-free a cada ~90ms no fluxo ativo
+- resultado semântico reavaliado a cada ~650ms quando aplicável
+- regras determinísticas continuam impedindo mudança de frete sem evidência humana válida
+- todas as proteções HF31 do botão flutuante foram preservadas

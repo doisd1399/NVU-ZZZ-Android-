@@ -533,6 +533,12 @@ public class GtoObserverPlugin extends Plugin {
         status.put("projectionError", prefs.getString("projectionError", ""));
         status.put("projectionReauthRequired", prefs.getBoolean("projectionReauthRequired", false));
         status.put("projectionPermissionInFlight", prefs.getBoolean("projectionPermissionInFlight", false));
+        status.put("observerOperationalReady", prefs.getBoolean("observerOperationalReady", false));
+        status.put("observerOperationalStatus", prefs.getString("observerOperationalStatus", ""));
+        status.put("observerOperationalChangedAt", prefs.getLong("observerOperationalChangedAt", 0L));
+        status.put("resultCertifiedLatched", prefs.getBoolean("resultCertifiedLatched", false));
+        status.put("resultCertifiedAt", prefs.getLong("resultCertifiedAt", 0L));
+        status.put("resultWatchedAdEvidence", prefs.getBoolean("resultWatchedAdEvidence", false));
         status.put("resultTouchFallbackRequired", prefs.getBoolean("resultTouchFallbackRequired", false));
         status.put("resultTouchFallbackReady", prefs.getBoolean("resultTouchFallbackReady", false));
         status.put("resultTouchFallbackContinuityBroken", prefs.getBoolean("resultTouchFallbackContinuityBroken", false));
@@ -550,7 +556,6 @@ public class GtoObserverPlugin extends Plugin {
         status.put("gtoDurableStateRepairAt", prefs.getLong("gtoDurableStateRepairAt", 0L));
         status.put("resultOverlayClearedAt", prefs.getLong("resultOverlayClearedAt", 0L));
         status.put("activeTripFreightListVisible", prefs.getBoolean("activeTripFreightListVisible", false));
-        status.put("freightReplacementExplicitlyArmed", prefs.getBoolean("freightReplacementExplicitlyArmed", false));
         status.put("frameProcessingErrorArea", prefs.getString("frameProcessingErrorArea", ""));
         status.put("frameProcessingError", prefs.getString("frameProcessingError", ""));
         status.put("frameProcessingErrorAt", prefs.getLong("frameProcessingErrorAt", 0L));

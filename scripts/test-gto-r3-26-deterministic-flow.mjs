@@ -6,9 +6,11 @@ import path from "node:path";
 const servicePath = "android/app/src/main/java/com/nvu/operacional/GtoObserverService.java";
 const pluginPath = "android/app/src/main/java/com/nvu/operacional/GtoObserverPlugin.java";
 const policyPath = "android/app/src/main/java/com/nvu/operacional/GtoDeterministicFlowPolicy.java";
+const bridgePolicyPath = "android/app/src/main/java/com/nvu/operacional/GtoProjectionForegroundBridgePolicy.java";
 const service = fs.readFileSync(servicePath, "utf8");
 const plugin = fs.readFileSync(pluginPath, "utf8");
 const policy = fs.readFileSync(policyPath, "utf8");
+const bridgePolicy = fs.readFileSync(bridgePolicyPath, "utf8");
 
 const checks = [];
 function check(name, ok, detail = "") {
@@ -39,10 +41,10 @@ check(
 check(
   "known non-GTO foreground app cannot be overridden by freight-like pixels",
   policy.includes("packageMatchesGto || packageUnknown || permissionReturnFromNvu")
-    && service.includes("boolean permissionReturnFromNvu = returnGrace && getPackageName().equals(foregroundPackage)")
-    && service.includes("boolean foregroundOwnerAllowsVisualProbe = foregroundPackage == null")
-    && service.includes("|| getPackageName().equals(foregroundPackage);")
-    && service.includes("&& foregroundOwnerAllowsVisualProbe")
+    && bridgePolicy.includes("if (!verifiedGtoBridge || transientSurface) return false;")
+    && bridgePolicy.includes("return packageUnknown || (packageIsNvu && !nvuMainActivityForeground);")
+    && /private boolean hasVerifiedGtoProjectionBridge[\s\S]{0,900}GtoProjectionForegroundBridgePolicy\.allow/.test(service)
+    && /private boolean canUseFreightListAsVisualGtoProof[\s\S]{0,1500}hasVerifiedGtoProjectionBridge\(\)/.test(service)
     && service.includes("pauseScreenAnalysisOutsideGto("),
 );
 check(

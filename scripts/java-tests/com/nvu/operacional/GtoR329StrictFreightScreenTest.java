@@ -26,7 +26,12 @@ public final class GtoR329StrictFreightScreenTest {
             "scripts/fixtures/hf26-negative-gameplay-2.png",
             "scripts/fixtures/hf26-negative-gameplay-3.png",
             "scripts/fixtures/hf26-negative-gameplay-4.png",
-            "scripts/fixtures/hf26-negative-gameplay-5.png"
+            "scripts/fixtures/hf26-negative-gameplay-5.png",
+            "scripts/fixtures/hf29-user-loading-after-consent.png",
+            "scripts/fixtures/gto-hf30/01-star-games-loading.png",
+            "scripts/fixtures/gto-hf30/02-notification-shade.png",
+            "scripts/fixtures/gto-hf30/03-black-loading-fps0.png",
+            "scripts/fixtures/gto-hf30/04-garage-auth-stale.png"
         };
         GtoFastVisualDetector detector = new GtoFastVisualDetector();
         long ts = 1L;
@@ -42,6 +47,12 @@ public final class GtoR329StrictFreightScreenTest {
         GtoFastVisualDetector.Frame baseline = analyze(detector, list, ts++);
         require(baseline.hasFreightList(), "actual GTO freight list must be recognized");
         require(baseline.buttons.size() == 5, "actual list must report 5 freights");
+
+        BufferedImage hf29List = ImageIO.read(new File("scripts/fixtures/hf29-user-real-freight-list-not-detected.png"));
+        require(hf29List != null, "HF29 user freight list must load");
+        GtoFastVisualDetector.Frame hf29Frame = analyze(detector, hf29List, ts++);
+        require(hf29Frame.hasFreightList(), "HF29 physical freight list must be recognized");
+        require(hf29Frame.buttons.size() == 5, "HF29 physical freight list must report 5 freights");
 
         // Selection must still resolve every visible row after the stricter list gate.
         for (int row = 0; row < baseline.buttons.size(); row++) {

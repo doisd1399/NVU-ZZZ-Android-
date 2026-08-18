@@ -31,15 +31,15 @@ public final class GtoR334Hf12IntelligentFlowPolicyTest {
         require(GtoSelectionIdentityPolicy.resolveRow(-1, false, 3, 5) == 3,
             "redacted OEM coordinates may use the visual row fallback");
 
-        long nowNs = 10_000_000_000L;
-        require(GtoFrameFreshnessPolicy.shouldConsume(nowNs, nowNs - 300_000_000L, false),
-            "fresh normal frame must be consumed");
-        require(!GtoFrameFreshnessPolicy.shouldConsume(nowNs, nowNs - 900_000_000L, false),
-            "old normal frame must be dropped");
-        require(GtoFrameFreshnessPolicy.shouldConsume(nowNs, nowNs - 900_000_000L, true),
-            "critical touch window may retain a bounded intermediate frame");
-        require(!GtoFrameFreshnessPolicy.shouldConsume(nowNs, nowNs - 1_600_000_000L, true),
-            "even a critical touch must not consume arbitrarily old frames");
+        long previousProducerNs = 2_000_000_000L;
+        require(GtoFrameFreshnessPolicy.shouldConsume(previousProducerNs, 2_016_000_000L, false),
+            "same-producer forward frame must be consumed");
+        require(!GtoFrameFreshnessPolicy.shouldConsume(previousProducerNs, previousProducerNs, false),
+            "exact duplicate may be dropped outside a critical touch window");
+        require(GtoFrameFreshnessPolicy.shouldConsume(previousProducerNs, previousProducerNs, true),
+            "critical touch must fail open on an OEM duplicate timestamp");
+        require(GtoFrameFreshnessPolicy.shouldConsume(90_000_000_000L, 4_000_000L, false),
+            "producer timestamp domain reset must never blind detection");
 
         require(GtoFreightReviewPolicy.DESTINATION.equals(GtoFreightReviewPolicy.firstRequiredField(
             "Soja", "Coop A", "Coop B", "", "420Km", "R$ 5.300,00")),

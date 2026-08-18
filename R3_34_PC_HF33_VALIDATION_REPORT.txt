@@ -1,0 +1,162 @@
+NVU R3.34-PC-HF33 — RELATORIO DE CAUSA RAIZ E VALIDACAO
+Data: 2026-08-17
+Base de correcao: HF32 reprovada em aparelho real
+Android: 1.0.85 / versionCode 85
+Web: 2.3.9 (sem alteracao vs HF32)
+
+OBJETIVO
+Eliminar a classe de regressao em que o GTO Observe aparenta estar ativo, mas a maquina de estados impede ou atrasa a observacao das telas. A HF33 separa duas responsabilidades que estavam acopladas:
+1. OBSERVAR: MediaProjection + frames + classificador/OCR devem continuar vivos enquanto Observe estiver habilitado e o GTO for o contexto permitido.
+2. MUTAR A VIAGEM: somente o reducer/maquina de estados pode aceitar uma evidencia e alterar a viagem.
+
+CAUSAS RAIZ CONFIRMADAS NA HF32
+
+1) CAPTURA/RECONHECIMENTO ERAM DESLIGADOS PELO PROPRIO ESTADO
+captureIsNeededForCurrentState() excluia IDLE/CANCELLED e outros estados. Entretanto a politica deterministica permitia que uma lista real iniciasse automaticamente o proximo ciclo. Isso criava um ciclo impossivel: para sair de IDLE era preciso reconhecer a lista, mas em IDLE o proprio estado podia impedir a captura/analise necessaria para reconhece-la.
+CORRECAO HF33: a propriedade da captura passou a ser do Observe habilitado, nao do estado da viagem.
+
+2) RECUPERACAO DE FOREGROUND TINHA O MESMO PONTO CEGO
+O fallback visual usado quando UsageStats/OEM atrasava o foreground era efetivamente orientado ao estado de espera de frete. Assim uma lista GTO real podia estar nos pixels capturados, mas nao recuperar o observer em IDLE/CANCELLED.
+CORRECAO HF33: lista estruturalmente valida pode provar GTO para recuperar foreground em qualquer estado do Observe. Isso nao autoriza selecao nem mutacao por si so.
+
+3) VIAGEM ATIVA PODIA SER DESCARTADA POR UMA LISTA REABERTA
+Na HF32, TRIP_IN_PROGRESS ainda possuia caminho em que lista estavel + toque/transicao podia promover uma nova sessao e descartar snapshot da viagem anterior sem uma intencao explicita de troca. Isso contradizia a autoridade duravel da viagem.
+CORRECAO HF33: em TRIP_IN_PROGRESS, uma lista sem troca explicitamente armada e apenas informativa. Nenhum pixel, toque generico ou retorno de lista pode chamar o caminho destrutivo. Troca exige armacao explicita + nova evidencia humana de Aceitar.
+
+4) OCR CRITICO DA LINHA SELECIONADA ESPERAVA O OCR DE PAGINA
+A linha tocada usa um recognizer e crop proprios, mas a HF32 ainda a serializava atras de ocrBusy do OCR de pagina. Em aparelho fraco isso podia produzir atraso perceptivel e terminar em review/timeout apesar de a linha estar correta.
+CORRECAO HF33: OCR da linha selecionada nao espera OCR da pagina. Continua serializado apenas contra outro OCR/retry da mesma linha, mantendo limite de memoria.
+
+5) ORIGEM PODIA CAIR EM REVISAO POR PERDA DO GLIFO PEQUENO DA ROTA
+A rota do GTO usa texto pequeno (ex.: Metalurgica > Dalavan). Se o OCR perdesse o separador, a origem podia permanecer vazia mesmo quando carga/destino/km/valor estavam corretos.
+CORRECAO HF33, em camadas conservadoras:
+- separador visivel;
+- geometria dos tokens ML Kit na linha selecionada;
+- geometria de fragmentos horizontais da ROI selecionada;
+- contexto da mesma pagina somente quando as outras linhas legiveis concordam na mesma origem;
+- retries automaticos da linha congelada antes de mostrar campo manual.
+Nenhum fuzzy livre escolhe origem ou outra linha.
+
+6) EXISTIA UMA SEGUNDA MAQUINA DE ESTADOS MANUAL NA UI
+IDLE/CANCELLED mostravam 'Iniciar viagem/Iniciar nova viagem', mesmo o objetivo sendo automacao. Isso permitia divergencia entre o estado visual do card e a tela real do GTO.
+CORRECAO HF33: o botao manual de nova viagem foi removido. Lista real em IDLE/CANCELLED faz bootstrap automatico.
+
+ARQUITETURA HF33
+Observe habilitado
+ -> MediaProjection permanece proprietaria da sessao
+ -> frame real
+ -> foreground GTO/ponte OEM protegida
+ -> classificador visual leve (~70 ms de cadencia)
+ -> evento observado
+ -> reducer deterministico avalia se o evento pode alterar o estado
+ -> OCR semantico somente quando necessario
+ -> snapshot de frete selecionado imutavel
+ -> resultado/Receber -> fila duravel -> ACK
+
+A ausencia de reconhecimento nunca deve ser usada como evidencia de cancelamento. Tela desconhecida e neutra. Lista durante viagem ativa e neutra sem troca explicita.
+
+TEMPO/DESEMPENHO
+- classificador visual leve: alvo ~70 ms;
+- resultado semantico: fallback ~320 ms;
+- refresh semantico da pagina de fretes: ~900 ms, com primeira pagina/nova pagina imediata;
+- WAITING_FREIGHT continua consumindo frames em ordem para nao perder a transicao de Aceitar;
+- demais estados usam latest-frame/backpressure para nao acumular atraso.
+
+REGRESSAO FISICA DA HF32 INCORPORADA
+As 3 capturas fornecidas na reprova da HF32 foram empacotadas como fixtures permanentes:
+- hf33-user-page2-auto-list.png
+- hf33-user-active-trip-review.png
+- hf33-user-page2-review-overlay.png
+
+O detector real GtoFastVisualDetector foi executado sobre elas:
+- lista pagina 2: FREIGHT_LIST, 5 linhas Aceitar;
+- gameplay ativo: NAO e lista;
+- lista pagina 2 com overlay NVU: FREIGHT_LIST, 5 linhas Aceitar.
+
+GATES EXECUTADOS
+- JavaSyntaxCheck: 43 fontes PASS
+- validate:gto-native: 49/49 PASS
+- validate:gto-auto-sync: 74/74 PASS
+- R2 lifecycle: 26/26 PASS (no run segmentado de verify:release)
+- R3.3 freight re-arm: 21/21 PASS
+- R3.5: 35/35 PASS (verify:release segmentado)
+- R3.6: 32/32 PASS (verify:release segmentado)
+- R3.7: 63/63 PASS (verify:release segmentado)
+- R3.13: 20/20 PASS (verify:release segmentado)
+- R3.17: 20/20 PASS
+- R3.19: 35/35 PASS
+- R3.20: 36/36 PASS
+- R3.21: 13/13 PASS
+- R3.22: 8/8 PASS
+- R3.23 data integrity: 16/16 PASS
+- R3.24: 14/14 PASS
+- R3.25: 16/16 PASS
+- R3.26: 21/21 PASS
+- R3.27: 31/31 PASS
+- R3.28: 17/17 PASS
+- R3.29: 15/15 PASS
+- R3.30 selected freight: 17/17 PASS
+- R3.31 continuity: 14/14 PASS
+- R3.32 card continuity: 11/11 PASS
+- R3.33 audit flow: 19/19 PASS
+- R3.34 money integrity: 10/10 PASS
+- R3.34 PC hotfix: 24/24 PASS
+- HF10 projection/runtime: 33/33 PASS
+- HF12 intelligent flow: 20/20 PASS
+- HF13 capture/origin: 16/16 PASS
+- HF14 review/overlay: 14/14 PASS
+- HF15 overlay/stage: 13/13 PASS
+- HF16 simple flow: 12/12 PASS
+- HF17 overlay dismiss: 12/12 PASS
+- HF18 freight evidence: 16/16 PASS
+- HF19 overlay visual: 24/24 PASS
+- HF20 overlay anchor: 19/19 PASS
+- HF21 selected-row authority: 13/13 PASS
+- HF22 observer UX: 21/21 PASS
+- HF23 production: 10/10 PASS
+- HF24 resilience: 16/16 PASS
+- HF25 focused fields: 16/16 PASS
+- HF26 human evidence: 20/20 PASS
+- HF27 capture/destination: 16/16 PASS
+- HF28 known destination: 13/13 PASS
+- HF29 post-consent/list recovery: 11/11 PASS
+- HF30 continuous projection: 24/24 PASS
+- HF31 bubble lifecycle: 16/16 PASS
+- HF32 continuous recognition (cumulative): 18/18 PASS
+- HF33 realtime observer: 20/20 PASS
+
+O comando monolitico npm run verify:release ultrapassou o limite de 180 s do executor depois de avancar sem falhas ate HF15. Os blocos restantes foram executados separadamente e ficaram verdes. Os gates historicos que codificavam comportamentos posteriormente rejeitados (cancelamento implicito por lista e serializacao do OCR selecionado atras do OCR de pagina) foram atualizados para verificar as invariantes mais fortes da HF33, nao simplesmente desabilitados.
+
+PARIDADE NAO-ANDROID VS HF32
+- src/: SAME (145 arquivos)
+- public/: SAME (3 arquivos)
+- functions/src/: SAME (10 arquivos)
+- app/: SAME (2 arquivos)
+- capacitor.config.ts: SAME
+- capacitor.remote.json: SAME
+- netlify.toml: SAME
+A mudanca funcional HF33 e Android/validador de release.
+
+BUILD ANDROID REAL NESTE AMBIENTE
+TENTADO, MAS NAO CHEGOU AO JAVAC.
+Comando:
+  android/gradlew :app:compileDebugJavaWithJavac --no-daemon --console=plain
+O Gradle Wrapper tentou baixar gradle-8.14.3-all.zip e o sandbox retornou:
+  java.net.UnknownHostException: services.gradle.org
+Portanto este relatorio NAO afirma que um APK foi compilado neste sandbox. PREPARAR-ANDROID-WINDOWS.bat e o workflow GitHub mantem a compilacao Java/Gradle como gate obrigatorio antes de gerar/assinar o APK.
+
+BUILD WEB NESTE AMBIENTE
+npm run build foi tentado, mas node_modules nao esta instalado neste sandbox e o comando parou em 'vite: not found'. Nao houve mudanca Web na HF33; a paridade com HF32 foi verificada byte a byte nos diretorios/arquivos relevantes.
+
+GATE FISICO FINAL
+HF33 e a fonte candidata para gerar Android 1.0.85 / code 85. A aprovacao de producao exige instalar o APK assinado no mesmo aparelho que reprovou HF32 e executar pelo menos:
+1. abrir GTO + compartilhar tela;
+2. lista ja visivel em IDLE -> NVU entra sozinho em observacao/espera, sem botao de nova viagem;
+3. selecionar linhas diferentes/paginas diferentes;
+4. origem Metalurgica/Fabrica/etc entra automaticamente quando legivel;
+5. viagem ativa -> abrir/reabrir lista sem troca explicita -> viagem anterior permanece intacta;
+6. resultado -> Receber -> envio/ACK;
+7. 5 viagens consecutivas;
+8. Home/outro app/notificacao/retorno;
+9. resize/rotacao suportada pelo GTO;
+10. aparelho fraco, sem perda do heartbeat de reconhecimento.

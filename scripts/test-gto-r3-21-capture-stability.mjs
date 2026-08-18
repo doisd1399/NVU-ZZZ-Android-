@@ -47,9 +47,10 @@ check(
       < onImageAvailable.indexOf("if (STATE_WAITING_FREIGHT.equals(getTripState()))"),
 );
 check(
-  "freight touch sensor is blocked until final geometry is ready",
-    source.service.includes("&& captureStabilityGate.isReady()")
-    && source.service.includes("!captureStabilityGate.isReady()"),
+  "freight selection mutation remains blocked until final geometry is ready while passive result observer may stay armed",
+  source.service.includes("if (selectionArmed)")
+    && source.service.includes("if (!captureStabilityGate.isReady()) return false;")
+    && source.service.includes("Receber must remain observable even while ImageReader/surface"),
 );
 check(
   "resize invalidates geometry-bound analysis before rebuilding the reader",

@@ -1,0 +1,19 @@
+NVU HF29 — Windows
+Android 1.0.81 / versionCode 81
+
+Se ainda não rodou o preparador:
+PREPARAR-ANDROID-WINDOWS.bat
+
+Depois, para gerar Release:
+cd android
+gradlew.bat assembleRelease --no-daemon
+
+Saída esperada:
+android\app\build\outputs\apk\release\
+
+Identidade esperada:
+applicationId com.nvu.operacional
+versionCode 81
+versionName 1.0.81
+
+Para atualização sobre APK existente, use a mesma keystore/certificado de produção.

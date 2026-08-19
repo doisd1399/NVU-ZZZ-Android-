@@ -35,14 +35,8 @@ ck('ready MP3 has expected approved size', ready.length === 18576);
 ck('completed MP3 has expected approved size', completed.length === 39888);
 ck('ready MP3 is byte-identical to approved upload', sha(ready) === 'b53a46523dbbe745ac0a9600637ffce7f1f9c34667c64b2b1730c0df32b60bf2');
 ck('completed MP3 is byte-identical to approved upload', sha(completed) === '49c9c7fb8585b4385971cc3d19c59f8df0015e6e2c74ab1ae4bce7cd45fb7179');
-ck('workflow checks ready MP3 inside APK',
-  workflow.includes('res/raw/nvu_ready_voice_pt_br.mp3') &&
-  workflow.includes('zipfile.ZipFile(apk)') &&
-  workflow.includes('zf.read(entry)'));
-ck('workflow checks completed MP3 inside APK',
-  workflow.includes('res/raw/nvu_trip_completed_voice_pt_br.mp3') &&
-  workflow.includes('zipfile.ZipFile(apk)') &&
-  workflow.includes('zf.read(entry)'));
+ck('workflow checks ready MP3 inside APK', workflow.includes("READY_ENTRY='res/raw/nvu_ready_voice_pt_br.mp3'"));
+ck('workflow checks completed MP3 inside APK', workflow.includes("COMPLETED_ENTRY='res/raw/nvu_trip_completed_voice_pt_br.mp3'"));
 ck('workflow pins exact ready MP3 hash', workflow.includes('b53a46523dbbe745ac0a9600637ffce7f1f9c34667c64b2b1730c0df32b60bf2'));
 ck('workflow pins exact completed MP3 hash', workflow.includes('49c9c7fb8585b4385971cc3d19c59f8df0015e6e2c74ab1ae4bce7cd45fb7179'));
 

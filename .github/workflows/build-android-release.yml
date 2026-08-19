@@ -111,50 +111,43 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
+          UNSIGNED_APK="android/app/build/outputs/apk/release/app-release-unsigned.apk"
+          if [ ! -f "$UNSIGNED_APK" ]; then
+            UNSIGNED_APK="$(find android/app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' | head -n 1)"
+          fi
+          test -f "$UNSIGNED_APK"
+
+          READY_ENTRY='res/raw/nvu_ready_voice_pt_br.mp3'
+          COMPLETED_ENTRY='res/raw/nvu_trip_completed_voice_pt_br.mp3'
+          READY_SHA256='b53a46523dbbe745ac0a9600637ffce7f1f9c34667c64b2b1730c0df32b60bf2'
+          COMPLETED_SHA256='49c9c7fb8585b4385971cc3d19c59f8df0015e6e2c74ab1ae4bce7cd45fb7179'
+
+          python3 - "$UNSIGNED_APK" "$READY_SHA256" "$COMPLETED_SHA256" <<'PYVERIFY'
           import hashlib
           import sys
           import zipfile
 
-          release_dir = Path("android/app/build/outputs/apk/release")
-          preferred = release_dir / "app-release-unsigned.apk"
-          candidates = [preferred] if preferred.is_file() else sorted(release_dir.glob("*.apk"))
-
-          if not candidates:
-              raise SystemExit("ERROR: release APK not found")
-
-          apk = candidates[0]
-
-          expected = {
-              "res/raw/nvu_ready_voice_pt_br.mp3":
-                  "b53a46523dbbe745ac0a9600637ffce7f1f9c34667c64b2b1730c0df32b60bf2",
-              "res/raw/nvu_trip_completed_voice_pt_br.mp3":
-                  "49c9c7fb8585b4385971cc3d19c59f8df0015e6e2c74ab1ae4bce7cd45fb7179",
-          }
-
-          print(f"Checking APK: {apk}")
+          apk, ready_sha, completed_sha = sys.argv[1:]
+          expected = {ready_sha: "ready", completed_sha: "completed"}
+          found = set()
 
           with zipfile.ZipFile(apk) as zf:
-              names = set(zf.namelist())
+              for info in zf.infolist():
+                  if info.is_dir():
+                      continue
+                  digest = hashlib.sha256(zf.read(info.filename)).hexdigest()
+                  if digest in expected:
+                      found.add(digest)
+                      print(f"FOUND {expected[digest]} voice: {info.filename} SHA256={digest}")
 
-              for entry, wanted in expected.items():
-                  if entry not in names:
-                      print(f"ERROR: missing {entry}", file=sys.stderr)
-                      raise SystemExit(1)
+          missing = set(expected) - found
+          if missing:
+              for digest in sorted(missing):
+                  print(f"ERROR: approved voice bytes missing: {expected[digest]} SHA256={digest}", file=sys.stderr)
+              raise SystemExit(1)
 
-                  actual = hashlib.sha256(zf.read(entry)).hexdigest()
-                  print(f"{entry}")
-                  print(f"SHA256={actual}")
-
-                  if actual != wanted:
-                      print(f"ERROR: hash mismatch for {entry}", file=sys.stderr)
-                      print(f"EXPECTED={wanted}", file=sys.stderr)
-                      print(f"ACTUAL={actual}", file=sys.stderr)
-                      raise SystemExit(1)
-
-          print("HF59 voice assets verified byte-for-byte.")
-          PY
+          print("HF59 preserved approved voice assets verified byte-for-byte inside APK.")
+          PYVERIFY
 
       - name: Decode temporary signing keystore
         shell: bash

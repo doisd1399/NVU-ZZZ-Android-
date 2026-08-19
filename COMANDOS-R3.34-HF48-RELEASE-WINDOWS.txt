@@ -1,0 +1,29 @@
+NVU R3.34-PC-HF48 — Android 1.0.100 / versionCode 100
+
+1) Extraia o ZIP HF48 em uma pasta nova e entre na raiz do projeto.
+
+2) Preparação e certificação automática:
+PREPARAR-ANDROID-WINDOWS.bat
+
+3) Build Gradle real, caso queira executar manualmente após a preparação:
+cd android
+gradlew.bat clean assembleRelease
+
+4) Confirme no APK/log:
+versionName = 1.0.100
+versionCode = 100
+applicationId = com.nvu.operacional
+
+APK esperado em:
+android\app\build\outputs\apk\release\
+
+TESTE FÍSICO HF48 — RETORNO AO GTO / DETECÇÃO CONTÍNUA:
+A) com Observe já autorizado, abra uma lista e confirme “Lista de fretes detectada”;
+B) saia do GTO para outro app e volte sem reiniciar a NVU; a mesma lista deve ser recertificada automaticamente e a mensagem deve reaparecer;
+C) repita a saída/retorno várias vezes, inclusive com a lista já aberta; não pode existir bolinha branca enquanto uma lista visualmente presente permanece semanticamente travada;
+D) toque Aceitar imediatamente após o retorno; o frete deve seguir o fluxo normal;
+E) force retorno lento/overlay/notificação: OCR pré-retorno não pode bloquear a nova página, e callbacks antigos não podem liberar a lease de um OCR novo;
+F) confirme que viagem ativa, resultado certificado e envio automático da HF47 continuam funcionando;
+G) repita lista -> Aceitar -> viagem -> sair/voltar -> resultado -> Receber -> envio por várias viagens sem reiniciar manualmente o Observe.
+
+HF48 é Android-only em relação à HF47. Não é necessário novo deploy Web/Netlify/Functions apenas por esta hotfix.

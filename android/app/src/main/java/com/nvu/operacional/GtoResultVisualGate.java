@@ -19,14 +19,53 @@ final class GtoResultVisualGate {
     }
 
     boolean looksLikeResultDialog(Image image, int width, int height) {
-        if (image == null || width <= 0 || height <= 0) return false;
+        Evidence evidence = measure(image, width, height);
+        if (evidence == null) return false;
+        // OCR remains the semantic authority. This permissive method is only the wake-up
+        // gate, so partial/occluded result dialogs still receive semantic OCR.
+        return GtoResultEvidencePolicy.isPlausibleResult(
+            evidence.dialogNeutralDark, evidence.dialogRightNeutralDark,
+            evidence.receiveNeutral, evidence.adsGold
+        );
+    }
+
+    /**
+     * Continuity check for an ALREADY semantically certified result dialog.
+     * It is intentionally stricter than looksLikeResultDialog(): a dark gameplay scene
+     * must never keep the observer stuck on "toque em Receber" after the modal vanished.
+     */
+    boolean looksLikeCertifiedResultStillVisible(Image image, int width, int height) {
+        Evidence evidence = measure(image, width, height);
+        if (evidence == null) return false;
+        return GtoResultEvidencePolicy.isCertifiedResultStillVisible(
+            evidence.dialogNeutralDark, evidence.dialogRightNeutralDark,
+            evidence.receiveNeutral, evidence.adsGold
+        );
+    }
+
+    /**
+     * HF55 foreground-recovery signature. This is deliberately stricter than the
+     * ordinary OCR wake-up gate because it may be evaluated while UsageStats still
+     * reports the phone/another app after the driver has already returned to GTO.
+     */
+    boolean looksLikeStrongReturnResultDialog(Image image, int width, int height) {
+        Evidence evidence = measure(image, width, height);
+        if (evidence == null) return false;
+        return GtoResultEvidencePolicy.isStrongReturnResult(
+            evidence.dialogNeutralDark, evidence.dialogRightNeutralDark,
+            evidence.receiveNeutral, evidence.adsGold
+        );
+    }
+
+    private Evidence measure(Image image, int width, int height) {
+        if (image == null || width <= 0 || height <= 0) return null;
         Image.Plane[] planes = image.getPlanes();
-        if (planes == null || planes.length == 0) return false;
+        if (planes == null || planes.length == 0) return null;
         Image.Plane plane = planes[0];
         ByteBuffer buffer = plane.getBuffer();
         int pixelStride = plane.getPixelStride();
         int rowStride = plane.getRowStride();
-        if (buffer == null || pixelStride < 3 || rowStride <= 0) return false;
+        if (buffer == null || pixelStride < 3 || rowStride <= 0) return null;
 
         Rect dialog = normalizedRect(width, height, 0.34f, 0.31f, 0.66f, 0.69f);
         Rect dialogRight = normalizedRect(width, height, 0.50f, 0.31f, 0.66f, 0.69f);
@@ -45,13 +84,20 @@ final class GtoResultVisualGate {
         float adsGold = sampledRatio(
             buffer, pixelStride, rowStride, width, height, ads, 10, 6, this::isResultGold
         );
+        return new Evidence(dialogNeutralDark, dialogRightNeutralDark, receiveNeutral, adsGold);
+    }
 
-        // OCR remains the semantic authority, but the wake-up gate must still look like
-        // the centered GTO result modal. Requiring the modal's right half to be dark
-        // prevents the NVU side menu plus orange ground/scenery from mimicking a result.
-        return GtoResultEvidencePolicy.isPlausibleResult(
-            dialogNeutralDark, dialogRightNeutralDark, receiveNeutral, adsGold
-        );
+    private static final class Evidence {
+        final float dialogNeutralDark;
+        final float dialogRightNeutralDark;
+        final float receiveNeutral;
+        final float adsGold;
+        Evidence(float dialogNeutralDark, float dialogRightNeutralDark, float receiveNeutral, float adsGold) {
+            this.dialogNeutralDark = dialogNeutralDark;
+            this.dialogRightNeutralDark = dialogRightNeutralDark;
+            this.receiveNeutral = receiveNeutral;
+            this.adsGold = adsGold;
+        }
     }
 
     private Rect normalizedRect(int width, int height, float left, float top, float right, float bottom) {

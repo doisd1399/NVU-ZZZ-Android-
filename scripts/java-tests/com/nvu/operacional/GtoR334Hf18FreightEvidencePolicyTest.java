@@ -31,8 +31,8 @@ public final class GtoR334Hf18FreightEvidencePolicyTest {
         lines.add(new GtoOriginGeometryPolicy.RowLine("Cooperativa Central", 37, 49, 10, 140));
         lines.add(new GtoOriginGeometryPolicy.RowLine("Area Rural", 68, 80, 10, 95));
         GtoOriginGeometryPolicy.Result result = GtoOriginGeometryPolicy.inferFromRowLines(lines, "", 0, 100);
-        require(result.strong, "origin-only route line must be usable in selected row");
-        require("Cooperativa Central".equals(result.value), "cargo and destination must not be mistaken for origin");
+        require(!result.strong && result.value.isEmpty(),
+            "single unanchored route phrase must stay unresolved because it may contain source+destination company");
     }
 
     private static void testFieldEvidenceIsIndependent() {

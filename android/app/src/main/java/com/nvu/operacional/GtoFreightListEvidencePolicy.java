@@ -12,12 +12,13 @@ final class GtoFreightListEvidencePolicy {
         boolean geometryValid,
         int acceptAndInfoAnchorRows
     ) {
-        // HF16: screen presence needs one strong row, not a perfect page. Geometry is
-        // still mandatory and the row must jointly contain a real Aceitar-like control
-        // plus adjacent freight information (green value/distance context). Repetition
-        // helps when present, but a bugged row never invalidates the remaining list.
+        // HF35: a visual list is a repeated GTO card template, not merely one orange
+        // rectangle beside dark/green pixels. One-row pages remain supported, but any
+        // multi-row page must contain at least two independent strong row anchors.
+        // This prevents HUB/HUD widgets from becoming a freight-list lifecycle boundary.
         if (!geometryValid || rowCount < 1 || rowCount > 6) return false;
-        return acceptAndInfoAnchorRows >= 1;
+        int requiredAnchors = rowCount == 1 ? 1 : Math.min(2, rowCount);
+        return acceptAndInfoAnchorRows >= requiredAnchors;
     }
 
     static boolean isPlausibleList(

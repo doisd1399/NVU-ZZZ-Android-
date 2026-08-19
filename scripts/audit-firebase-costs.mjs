@@ -36,6 +36,141 @@ const storageCleanupFunctions = read("functions/src/storageCleanupAudit.ts");
 const functionIndex = read("functions/src/index.ts");
 const firestoreRules = read("firestore.rules");
 const indexes = JSON.parse(read("firestore.indexes.json"));
+const packageJson = JSON.parse(read("package.json"));
+const metadata = JSON.parse(read("metadata.json"));
+const envExample = read(".env.example");
+const gtoObserverService = read("android/app/src/main/java/com/nvu/operacional/GtoObserverService.java");
+const gtoAutoTripSync = read("android/app/src/main/java/com/nvu/operacional/GtoAutoTripSync.java");
+const gtoStateFunctions = read("functions/src/gtoState.ts");
+const gtoTripFunctions = read("functions/src/gtoTrips.ts");
+
+if (packageJson.dependencies?.["@google/genai"]) {
+  add(
+    "critical",
+    "UNUSED_GENAI_RUNTIME",
+    "package.json",
+    "@google/genai foi reintroduzido como dependência de runtime sem necessidade operacional aprovada.",
+  );
+}
+
+if (JSON.stringify(metadata).toUpperCase().includes("GEMINI")) {
+  add(
+    "critical",
+    "GEMINI_CAPABILITY_METADATA",
+    "metadata.json",
+    "O projeto voltou a anunciar capacidade Gemini sem fluxo de IA aprovado para produção.",
+  );
+}
+
+if (/GEMINI_API_KEY/i.test(envExample)) {
+  add(
+    "critical",
+    "GEMINI_ENV_WIRING",
+    ".env.example",
+    "Foi detectado wiring de GEMINI_API_KEY; IA paga não deve ser ativada implicitamente no NVU.",
+  );
+}
+
+if (
+  !gtoAutoTripSync.includes("Autenticação NVU ausente para sincronizar estado GTO") ||
+  !gtoAutoTripSync.includes("FirebaseAuth.getInstance().getCurrentUser()")
+) {
+  add(
+    "critical",
+    "GTO_CANONICAL_AUTH_GATE",
+    "android/app/src/main/java/com/nvu/operacional/GtoAutoTripSync.java",
+    "O espelhamento canônico GTO pode chamar Firebase Functions sem validar autenticação nativa local primeiro.",
+  );
+}
+
+if (
+  !gtoObserverService.includes("CANONICAL_SYNC_BASE_RETRY_MS = 15_000L") ||
+  !gtoObserverService.includes("CANONICAL_SYNC_MAX_RETRY_MS = 5L * 60_000L") ||
+  !gtoObserverService.includes("isPermanentCanonicalSyncFailure") ||
+  gtoObserverService.includes("mainHandler.postDelayed(this::retryCanonicalStateSync, 5000L)") ||
+  gtoObserverService.includes("mainHandler.postDelayed(() -> retryCanonicalStateSync(), 2500L)")
+) {
+  add(
+    "critical",
+    "GTO_CANONICAL_RETRY_STORM",
+    "android/app/src/main/java/com/nvu/operacional/GtoObserverService.java",
+    "A proteção HF58 contra retry infinito/rápido de syncGtoTripState não está íntegra.",
+  );
+}
+
+if (
+  !gtoAutoTripSync.includes("shouldPauseAutomaticRetry") ||
+  !gtoAutoTripSync.includes("RETRY_BLOCK_CODE_PREFIX") ||
+  !gtoAutoTripSync.includes("Long.MAX_VALUE") ||
+  !gtoAutoTripSync.includes("FirebaseFunctionsException.Code.INVALID_ARGUMENT") ||
+  !gtoAutoTripSync.includes("FirebaseFunctionsException.Code.FAILED_PRECONDITION") ||
+  !gtoAutoTripSync.includes("FirebaseFunctionsException.Code.PERMISSION_DENIED") ||
+  !gtoAutoTripSync.includes("FirebaseFunctionsException.Code.UNAUTHENTICATED")
+) {
+  add(
+    "critical",
+    "GTO_TRIP_PERMANENT_RETRY_STORM",
+    "android/app/src/main/java/com/nvu/operacional/GtoAutoTripSync.java",
+    "A proteção HF59 contra retry infinito de registerGtoTrip em erros permanentes não está íntegra.",
+  );
+}
+
+if (
+  !gtoAutoTripSync.includes('pauseRetryForReason(retry, queuedSessionId, "NO_NATIVE_AUTH")') ||
+  !gtoAutoTripSync.includes('pauseRetryForReason(retry, sessionId, "DRIVER_UID_MISMATCH")') ||
+  !gtoAutoTripSync.includes('pauseRetryForReason(retry, sessionId, "BACKEND_CONTRACT_MISMATCH")') ||
+  !gtoAutoTripSync.includes("AUTH_RECOVERY_RELEASED.add(sessionId + \":\" + blockedCode)") ||
+  !gtoAutoTripSync.includes("AUTH_RECOVERY_RELEASED.add(recoveryKey)") ||
+  !gtoAutoTripSync.includes("blockReason.equals(existingReason) && existingRetryAt == Long.MAX_VALUE") ||
+  !gtoAutoTripSync.includes("if (listener != null && pauseChanged)")
+) {
+  add(
+    "critical",
+    "GTO_TRIP_LOCAL_RETRY_GATES",
+    "android/app/src/main/java/com/nvu/operacional/GtoAutoTripSync.java",
+    "A fila durável perdeu as contenções locais HF59 para autenticação, ownership ou contrato inválido.",
+  );
+}
+
+if (
+  !gtoObserverService.includes("COMPLETION_QUEUE_SEAL_RETRY_BASE_MS = 1_200L") ||
+  !gtoObserverService.includes("COMPLETION_QUEUE_SEAL_RETRY_MAX_MS = 60_000L") ||
+  !gtoObserverService.includes("recoverUnsealedCompletedTripIfNeeded(now);") ||
+  !gtoObserverService.includes("armCompletionQueueSealRecovery(completedSessionId, System.currentTimeMillis())") ||
+  !gtoObserverService.includes('? "Protegendo viagem..."')
+) {
+  add(
+    "critical",
+    "GTO_COMPLETION_QUEUE_SEAL_RECOVERY",
+    "android/app/src/main/java/com/nvu/operacional/GtoObserverService.java",
+    "A autorrecuperação HF59 entre resultado certificado e fila durável não está íntegra.",
+  );
+}
+
+const sameStateIndex = gtoStateFunctions.indexOf("currentSnap.exists && currentState === state");
+const expectedStateIndex = gtoStateFunctions.indexOf("expectedState && expectedState !== currentState");
+if (sameStateIndex < 0 || expectedStateIndex < 0 || sameStateIndex > expectedStateIndex) {
+  add(
+    "critical",
+    "GTO_CANONICAL_IDEMPOTENCY",
+    "functions/src/gtoState.ts",
+    "Retry de uma transição canônica já confirmada pode voltar a gerar conflito e novas invocações.",
+  );
+}
+
+if (
+  !gtoTripFunctions.includes("GTO_PROGRESS_SCHEMA_VERSION = 1") ||
+  !gtoTripFunctions.includes("progressFastPath") ||
+  !gtoTripFunctions.includes("gtoProgressSchemaVersion: GTO_PROGRESS_SCHEMA_VERSION") ||
+  !gtoTripFunctions.includes("transaction.set(jobRef, progressUpdate, { merge: true })")
+) {
+  add(
+    "critical",
+    "GTO_PROGRESS_INCREMENTAL_COST_GUARD",
+    "functions/src/gtoTrips.ts",
+    "O registro GTO perdeu a migração segura que evita reler todas as viagens a cada novo envio.",
+  );
+}
 
 const unboundedTripRead = /(?:getDocs|getDocsFromServer|onSnapshot)\s*\(\s*collection\(db,\s*["']historico_viagens["']\s*\)/m;
 if (unboundedTripRead.test(tripsRepository)) {

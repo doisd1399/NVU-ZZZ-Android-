@@ -74,7 +74,8 @@ check(
     && service.includes("if (gtoLandscapeExpected && initialHeight > initialWidth)"))
   || (service.includes("private void maybeStartPendingProjectionSurface(long now)")
     && service.includes("DisplayMetrics metrics = realDisplayMetrics()")
-    && service.includes("if (!packageMatchesGto || width <= 0 || height <= 0 || width <= height)")
+    && (service.includes("if (!packageMatchesGto || width <= 0 || height <= 0 || width <= height)")
+      || service.includes("if (!trustedGtoContext || width <= 0 || height <= 0 || width <= height)"))
     && service.includes("createProjectionSurface(width, height)")),
 );
 check(
@@ -101,7 +102,7 @@ check(
   "selected freight remains immutable and visible as current trip",
   service.includes("GtoAutoTripSync.lockSelectedFreight")
     && service.includes('freightHeading.setText("Frete atual em andamento")')
-    && service.includes("Frete identificado. Tudo preparado, podemos partir!"),
+    && (service.includes("Frete identificado. Tudo preparado, podemos partir!") || service.includes("Frete confirmado ✓ · viagem em andamento.")),
 );
 check(
   "Receive is persisted before automatic queue and Firebase send",

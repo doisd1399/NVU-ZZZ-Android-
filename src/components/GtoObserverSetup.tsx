@@ -311,12 +311,7 @@ export default function GtoObserverSetup({
               )}
               {status.activeTripFreightListVisible && canonicalTripState === "TRIP_IN_PROGRESS" && (
                 <div className="text-cyan-700 dark:text-cyan-300">
-                  Lista reaberta: <strong>o frete atual permanece em andamento.</strong>
-                </div>
-              )}
-              {status.freightReplacementExplicitlyArmed && canonicalTripState === "TRIP_IN_PROGRESS" && (
-                <div className="text-amber-700 dark:text-amber-300">
-                  Troca de frete: <strong>autorizada; selecione o novo frete no GTO.</strong>
+                  Lista reaberta: <strong>encerrando o contexto anterior e preparando o próximo frete automaticamente.</strong>
                 </div>
               )}
               {status.selectionConfirmationStatus === "FAILED" && (

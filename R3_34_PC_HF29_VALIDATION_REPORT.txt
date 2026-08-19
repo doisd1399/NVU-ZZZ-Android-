@@ -1,0 +1,98 @@
+NVU R3.34 PC-HF29 — Android 1.0.81 / versionCode 81
+Data da auditoria: 2026-08-16
+Base: HF28 Windows FIX2
+
+STATUS
+- HF28 NÃO é considerada aprovada fisicamente para o fluxo de captura/lista.
+- HF29 é uma candidata de correção para novo teste físico.
+- Não afirmar aprovação de produção até o APK assinado passar no aparelho real.
+
+RELATO FÍSICO QUE ORIGINOU A HF29
+1. Após aceitar o compartilhamento de tela no GTO, a bolinha NVU permaneceu com indicador cinza durante o carregamento.
+2. Depois o indicador ficou branco, mas uma lista real com 5 fretes permaneceu na tela sem a UI NVU reconhecer/mostrar a lista.
+
+FIXTURES EXATAS DO RELATO
+- scripts/fixtures/hf29-user-loading-after-consent.png
+  SHA-256: 178cb685a5ea341e727deb646d964e9cc8cc5e57dc6109a2910817d3e1fe2ee7
+  Esperado: NÃO é lista de fretes.
+- scripts/fixtures/hf29-user-real-freight-list-not-detected.png
+  SHA-256: 451a9367aea9b451e8075ed10921da818f6a8636546dc87c532e1c1a4f65cf26
+  Esperado: lista real com EXATAMENTE 5 fretes.
+
+CAUSA RAIZ CONFIRMADA
+A correção HF27/HF28 estava incompleta.
+O bridge pós-consentimento (projectionVerifiedGtoBridgeActive) existia no polling de foreground,
+mas o callback real de frames ainda limitava a prova visual ao curto PERMISSION_RETURN_GRACE.
+Em OEMs onde UsageStats continua informando NVU/unknown por mais tempo durante o carregamento do GTO,
+os frames podiam ser recebidos mas descartados para análise. Isso cria o estado observado:
+MediaProjection viva / indicador eventualmente branco / lista real visível / fluxo WAITING_FREIGHT ainda sem reconhecer a lista.
+
+PROVA DE QUE NÃO ERA O DETECTOR GEOMÉTRICO
+O classificador atual foi executado contra a captura física exata da lista reportada.
+Resultado exigido e validado no teste Java:
+- hasFreightList = true
+- buttons.size() = 5
+A captura de carregamento exata permanece negativa.
+Portanto a falha estava no roteamento/gating de lifecycle/foreground, e não na geometria da lista exibida.
+
+CORREÇÕES HF29
+1. O probe de frames pós-consentimento não expira mais apenas pelo relógio enquanto existir um bridge GTO verificado da sessão.
+2. Uma lista estrita real pode restaurar a evidência de GTO mesmo após o grace timeout.
+3. O grant RESULT_OK limpa um latch stale de MainActivity foreground; um onResume real da NVU volta a bloqueá-lo normalmente.
+4. Um terceiro app conhecido e SystemUI/transient continuam sem poder usar o bridge.
+5. O frame atual pode restaurar evidência visual ANTES do gate final de paused/foreground no capture thread, eliminando uma corrida entre polling e análise.
+6. Uma lista visual forte com 2+ linhas passa a aparecer imediatamente como:
+   "Lista localizada · N fretes. Validando os dados para a seleção segura."
+   Isso não a transforma em lista semanticamente certificada.
+7. Uma lista apenas visual NÃO controla lifecycle/reopen de frete; onFreightListVisibleAgain continua reservado à certificação semântica.
+8. CONFIRMAÇÃO de frete continua exigindo ação humana + prova semântica de página/linha. Nenhum frame visual sozinho confirma seleção.
+9. As duas capturas físicas deste incidente foram adicionadas como regressões permanentes.
+10. Workflow GitHub alinhado a HF29, inclusive concurrency group, artifact, versionCode e versionName.
+
+IDENTIDADE
+applicationId: com.nvu.operacional
+versionName: 1.0.81
+versionCode: 81
+artifact esperado: NVU-R3.34-PC-HF29-release
+
+TESTES EXECUTADOS APÓS A CORREÇÃO FINAL
+- JavaSyntaxCheck: PASS — 41 fontes.
+- HF29 post-consent/list recovery: 11/11 PASS.
+- R3.29 strict screen (inclui as duas capturas físicas HF29): 15/15 PASS.
+- HF26 human evidence: 20/20 PASS, incluindo 3.080 assertions.
+- R3.27 runtime flow: 31/31 PASS.
+- HF23 production-flow MODEL: 10/10 PASS; 5/5 jornadas no modelo determinístico.
+- HF27 capture/destination: 16/16 PASS.
+- HF28 known destination + Windows/Capacitor compile guards: 13/13 PASS.
+- YAML do workflow: PASS.
+- SHA das fixtures comparada byte a byte com os uploads do usuário: PASS.
+
+REGRESSÃO AMPLA
+Uma execução monolítica de npm run verify:release avançou com todos os blocos verdes até R3.28,
+quando o limite do executor desta sessão interrompeu o comando. Os blocos posteriores foram executados
+em grupos/separadamente durante a auditoria e passaram. O timeout não foi uma falha de teste.
+
+GRADLE NESTE AMBIENTE
+Foi tentado :app:compileDebugJavaWithJavac. O Gradle wrapper precisou baixar gradle-8.14.3-all.zip,
+mas este ambiente não tem acesso externo e falhou com UnknownHostException services.gradle.org.
+Isso NÃO é apresentado como compilação Gradle aprovada aqui. O gate real de Gradle deve rodar no Windows
+do usuário ou no GitHub Actions, onde o SDK/Gradle estão disponíveis.
+
+HOTFIXES WINDOWS PRESERVADOS
+- javac direto usa -encoding UTF-8.
+- JavaCompile Gradle usa UTF-8.
+- MainActivity.onResume/onPause permanecem public, compatíveis com BridgeActivity/Capacitor 8.
+
+O QUE PRECISA SER VALIDADO NO APARELHO
+A HF29 só deve ser aprovada depois de repetir exatamente:
+A) abrir GTO -> aceitar compartilhamento -> permanecer no carregamento > 6,5 s -> abrir lista;
+B) indicador deve recuperar sem precisar forçar fechamento;
+C) lista real deve mostrar "Lista localizada"/"Lista detectada" e depois permitir seleção;
+D) selecionar linhas 1, 3 e 5 em tentativas separadas e confirmar identidade exata;
+E) sair do GTO e retornar, preservando captura/estado;
+F) concluir -> Receber -> fila durável -> ACK.
+
+CONCLUSÃO
+HF29 corrige a contradição específica observada fisicamente entre MediaProjection autorizada,
+UsageStats stale e uma lista real que o detector era capaz de reconhecer mas o lifecycle não entregava ao fluxo.
+Os testes automatizados estão verdes, mas a correção de runtime ainda depende do novo teste físico do APK.

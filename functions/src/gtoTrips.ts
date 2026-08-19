@@ -6,6 +6,8 @@ import { finalValueCompatibilityIssue, parsePositiveNumber } from "./gtoMoney";
 
 type CallableContext = functions.https.CallableContext;
 
+const GTO_PROGRESS_SCHEMA_VERSION = 1;
+
 type GtoTripRequest = {
   contractVersion?: unknown;
   sessionId?: unknown;
@@ -286,7 +288,11 @@ const syncJobProgress = async (
   const freshJobSnapshot = await jobRef.get();
   const currentStatus = text(freshJobSnapshot.data()?.status, 60);
   let nextStatus = currentStatus;
-  const progressUpdate: Record<string, unknown> = { progress };
+  const progressUpdate: Record<string, unknown> = {
+    progress,
+    gtoProgressSchemaVersion: GTO_PROGRESS_SCHEMA_VERSION,
+    gtoProgressSyncedAt: admin.firestore.FieldValue.serverTimestamp(),
+  };
   if (contractMode === "simple") {
     progressUpdate.completedRoutes = deriveSimpleCompletedRoutes(tripsSnapshot.docs);
     // Retire HF1 continuity metadata. A completed destination is never an origin source.
@@ -373,8 +379,10 @@ export const registerGtoTrip = functions.region("us-central1").https.onCall(
     }
     assertBoundedText(cargo, "cargo");
     assertBoundedText(originCompany, "originCompany");
-    // HF14: destinationCompany is optional metadata. Keep it in the fingerprint/payload
-    // when present, but never reject a real trip solely because GTO did not expose/read it.
+    // HF53 alignment: destinationCompany is optional metadata. Some valid GTO
+    // routes (for example rural destinations) do not expose a destination
+    // company. Requiring it here keeps a correctly sealed Android delivery in
+    // retry forever even though the rest of the freight snapshot is valid.
     if (destinationCompany) assertBoundedText(destinationCompany, "destinationCompany");
     assertBoundedText(origin, "origin");
     assertBoundedText(destination, "destination");
@@ -505,6 +513,29 @@ export const registerGtoTrip = functions.region("us-central1").https.onCall(
       }
 
       if (jobSnapshot.exists) {
+        const retryJob = jobSnapshot.data() || {};
+        const retryProgress = Number(retryJob.progress);
+        const hasCanonicalProgress =
+          Number(retryJob.gtoProgressSchemaVersion || 0) >= GTO_PROGRESS_SCHEMA_VERSION &&
+          Number.isFinite(retryProgress) &&
+          retryProgress >= 0;
+        if (hasCanonicalProgress) {
+          return {
+            success: true,
+            contractVersion: 18,
+            sessionId,
+            tripId,
+            created: false,
+            duplicate: true,
+            payloadFingerprint,
+            progress: Math.trunc(retryProgress),
+            jobStatus: text(retryJob.status, 60),
+          };
+        }
+
+        // One-time migration/heal for jobs created before HF58. The first retry/
+        // delivery scans historical trips, stamps the canonical progress schema,
+        // and every subsequent GTO delivery can use the atomic O(1) fast path.
         const synced = await syncJobProgress(
           db,
           jobId,
@@ -677,7 +708,7 @@ export const registerGtoTrip = functions.region("us-central1").https.onCall(
             "A chave desta sessão GTO já está vinculada a dados diferentes.",
           );
         }
-        return { created: false };
+        return { created: false, progressFastPath: false, progress: -1, jobStatus: "" };
       }
 
       const freshJobData = freshJob.exists ? freshJob.data() || {} : {};
@@ -690,6 +721,59 @@ export const registerGtoTrip = functions.region("us-central1").https.onCall(
           "failed-precondition",
           "A operação mudou antes da confirmação da viagem.",
         );
+      }
+
+      const currentProgress = Number(freshJobData.progress);
+      const progressFastPath =
+        Number(freshJobData.gtoProgressSchemaVersion || 0) >= GTO_PROGRESS_SCHEMA_VERSION &&
+        Number.isFinite(currentProgress) &&
+        currentProgress >= 0;
+      let fastProgress = -1;
+      let fastJobStatus = text(freshJobData.status, 60);
+
+      if (progressFastPath) {
+        fastProgress = Math.trunc(currentProgress) + 1;
+        const progressUpdate: Record<string, unknown> = {
+          progress: fastProgress,
+          gtoProgressSchemaVersion: GTO_PROGRESS_SCHEMA_VERSION,
+          gtoProgressSyncedAt: serverNow,
+        };
+
+        if (serverContractMode === "simple") {
+          const existingRoutes = Array.isArray(freshJobData.completedRoutes)
+            ? freshJobData.completedRoutes
+                .map((route: any) => ({
+                  origin: text(route?.origin, 180),
+                  destination: text(route?.destination, 180),
+                }))
+                .filter((route: { origin: string; destination: string }) =>
+                  Boolean(route.origin) && Boolean(route.destination),
+                )
+            : [];
+          progressUpdate.completedRoutes = [
+            ...existingRoutes,
+            { origin: effectiveOrigin, destination },
+          ];
+          progressUpdate.lastKnownGtoCity = admin.firestore.FieldValue.delete();
+          progressUpdate.gtoRouteContinuityUpdatedAt = admin.firestore.FieldValue.delete();
+        }
+
+        if (
+          totalDeliveries > 0 &&
+          fastProgress >= totalDeliveries &&
+          ["active", "delayed", "pending"].includes(fastJobStatus)
+        ) {
+          fastJobStatus = "awaiting_completion";
+          progressUpdate.status = fastJobStatus;
+        } else if (fastJobStatus === "pending" && fastProgress > 0) {
+          fastJobStatus = "active";
+          progressUpdate.status = fastJobStatus;
+        }
+
+        // Same transaction as the idempotent trip create: duplicate retries can
+        // never increment progress twice, and a successful trip cannot exist without
+        // its corresponding progress update once the job has been migrated to HF58.
+        transaction.set(jobRef, progressUpdate, { merge: true });
       }
 
       transaction.create(tripRef, {
@@ -758,10 +842,17 @@ export const registerGtoTrip = functions.region("us-central1").https.onCall(
         gtoCompletedAtClient: completedAtClient,
       });
 
-      return { created: true };
+      return {
+        created: true,
+        progressFastPath,
+        progress: fastProgress,
+        jobStatus: fastJobStatus,
+      };
     });
 
-    const synced = await syncJobProgress(db, jobId, totalDeliveries, serverContractMode);
+    const synced = transactionResult.progressFastPath
+      ? { progress: transactionResult.progress, jobStatus: transactionResult.jobStatus }
+      : await syncJobProgress(db, jobId, totalDeliveries, serverContractMode);
 
     return {
       success: true,

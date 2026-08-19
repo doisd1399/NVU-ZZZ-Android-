@@ -1,0 +1,131 @@
+NVU R3.34-PC-HF36 — RELATÓRIO DE CAUSA RAIZ E VALIDAÇÃO
+Data: 2026-08-17
+Android: 1.0.88
+versionCode: 88
+Base: R3.34-PC-HF35
+Escopo: Android nativo / GTO Observe. Sem alteração Web/Functions em relação à HF35.
+
+1. INCIDENTE
+Na lista real do GTO, o motorista selecionou a primeira linha:
+- Carga visível: Tijolos Maciços
+- Origem: Fabrica de Tijolo
+- Destino: Cruz do Oeste
+- Distância: 600Km
+- Valor: R$ 16.386,00
+
+Após a seleção, a NVU preservou corretamente origem, destino, distância e valor, mas abriu REVIEW_REQUIRED pedindo ao motorista para digitar apenas a carga, embora "Tijolos Maciços" estivesse visível na linha selecionada.
+
+As três capturas reais do incidente estão preservadas em:
+scripts/fixtures/hf36-cargo-recovery/
+
+2. CAUSA RAIZ EXATA
+A falha NÃO era identificação da linha. Quatro campos da mesma linha foram preservados corretamente, comprovando que a seleção estava vinculada ao frete correto.
+
+A contradição estava no estágio de recuperação de campo do GtoObserverService:
+
+A) Primeira leitura selecionada
+- O OCR dedicado da linha selecionada pode perder temporariamente somente a primeira linha textual (carga), especialmente no frame de transição/fechamento da lista.
+- Isso é aceitável como falha transitória e não deveria exigir ação humana.
+
+B) enterFreightReview()
+- HF35 possuía auto-retry dedicado para ORIGIN_COMPANY.
+- O retry genérico de baixa evidência só era acionado quando muitos campos estavam ausentes.
+- Quando somente CARGO faltava e os outros quatro campos estavam válidos, GtoFreightReviewEligibilityPolicy.mayAskDriver() autorizava imediatamente a revisão manual.
+- Resultado: o sistema pulava de uma única falha transitória de OCR diretamente para "Confirme somente carga".
+
+C) Focused retry já tinha a solução, mas havia um gate contraditório
+- GtoFreightFieldConflictPolicy.resolve() já suporta exatamente o caso:
+  exact="", frozen="", retry="Tijolos Maciços" => FOCUSED_RETRY válido.
+- Porém resolveFreightFieldAfterRetry() retornava antes de chamar resolve() quando needsRetry() era falso.
+- needsRetry() é verdadeiro somente quando as DUAS leituras iniciais são válidas e divergem.
+- Portanto, um campo ausente nas duas leituras iniciais nunca podia ser preenchido pela releitura focalizada, apesar de a policy já suportar esse cenário.
+
+Essa era a causa estrutural da regressão.
+
+3. CORREÇÃO HF36
+A correção é pequena e compatível com a arquitetura existente.
+
+A) Manual review vira último recurso para qualquer campo operacional
+Antes de abrir revisão manual, se a linha canônica ainda não puder ser bloqueada automaticamente ou existir qualquer campo operacional obrigatório pendente, a NVU relê a MESMA imagem congelada da MESMA linha selecionada.
+
+B) Duas escalas automáticas
+A releitura focalizada já existente é reutilizada:
+- tentativa 1: escala adicional 1.18x
+- tentativa 2: escala adicional 1.42x enquanto qualquer campo obrigatório continuar pendente
+
+C) Campo ausente agora pode ser recuperado
+resolveFreightFieldAfterRetry() não bloqueia mais um campo apenas porque não havia conflito entre duas leituras válidas.
+- campo ausente + retry válido => campo recuperado
+- campo válido e não conflitante => preservado
+- conflito real sem resolução => somente esse campo é limpo/revisado
+- OCR lixo/valor inválido => nunca é promovido
+
+D) Segurança preservada
+- A releitura não escolhe outra linha.
+- Usa o bitmap imutável da linha que o motorista tocou.
+- Não usa fuzzy guess para carga.
+- Não altera km/valor/origem/destino já válidos sem as regras existentes.
+- A revisão humana continua disponível somente se as releituras automáticas também falharem.
+
+4. IMPACTO NO HF35
+Nenhuma regra de autoridade da lista/HUB foi relaxada.
+Permanece:
+- candidato visual não destrutivo;
+- certificação semântica antes de lista real ter autoridade sobre lifecycle;
+- HUB/HUD não pode cancelar viagem por aparência visual;
+- reabertura de lista real certificada continua encerrando a viagem anterior conforme regra funcional.
+
+5. TESTE NOVO HF36
+scripts/test-gto-r3-34-hf36-cargo-auto-recovery.mjs
+scripts/java-tests/com/nvu/operacional/GtoHf36CargoRecoveryPolicyTest.java
+
+Cenários obrigatórios:
+- exact cargo vazio + frozen cargo vazio + focused retry "Tijolos Maciços" => recupera literal;
+- mesmo mecanismo funciona para outro texto operacional;
+- "OI" não pode virar carga;
+- duas leituras iniciais concordantes não podem ser sobrescritas pelo retry;
+- campo operacional ausente dispara releitura antes de revisão manual;
+- segunda tentativa ocorre enquanto houver campo obrigatório pendente;
+- somente conflito real não resolvido pode limpar campo previamente válido.
+
+Resultado HF36: 11/11 PASS.
+
+6. REGRESSÕES
+Executados em segmentos por limite de tempo do executor, cobrindo toda a cadeia verify:release.
+Principais resultados preservados:
+- JavaSyntaxCheck: PASS (43 sources)
+- validate:gto-native: 49/49 PASS
+- validate:gto-auto-sync: 74/74 PASS
+- R3.29 strict-screen: 15/15 PASS
+- R3.30 selected-freight: 17/17 PASS
+- R3.32 card-continuity: 11/11 PASS
+- R3.33 audit-flow: 19/19 PASS
+- R3.34 money-integrity: 10/10 PASS
+- R3.34 PC hotfix: 24/24 PASS
+- HF10 projection/runtime: 33/33 PASS
+- HF12 intelligent-flow: 20/20 PASS
+- HF14 review overlay: 14/14 PASS
+- HF15 overlay/stage: 13/13 PASS
+- HF17 overlay dismiss: 12/12 PASS
+- HF18 freight evidence: 16/16 PASS
+- HF19 overlay visual: 24/24 PASS
+- HF20 overlay anchor: 19/19 PASS
+- HF21 selected-row authority: 13/13 PASS
+- HF22 observer UX: 21/21 PASS
+- HF23 production: PASS
+- HF24 resilience: 16/16 PASS
+- HF25 focused fields: 16/16 PASS
+- HF30 continuous projection: 24/24 PASS
+- HF31 bubble lifecycle: 16/16 PASS
+- HF32 continuous recognition: 18/18 PASS
+- HF34 deterministic lifecycle: 22/22 PASS
+- HF35 freight-list authority: 10/10 PASS
+- HF36 cargo auto-recovery: 11/11 PASS
+
+7. BUILD
+O pacote está preparado para o workflow GitHub/Windows como:
+NVU R3.34-PC-HF36
+Android 1.0.88
+versionCode 88
+
+HF36 altera apenas Android nativo em relação à HF35. Não é necessário novo deploy Web/Netlify/Functions somente por esta correção.

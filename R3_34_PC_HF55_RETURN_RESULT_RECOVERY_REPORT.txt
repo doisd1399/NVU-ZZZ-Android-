@@ -1,0 +1,101 @@
+NVU R3.34 PC-HF55 — RECUPERAÇÃO APÓS LIGAÇÃO / TROCA DE APP
+Data: 2026-08-18
+Android: versionCode 107 / versionName 1.0.107
+Base auditada: R3.34 PC-HF54 / Android 1.0.106 (versionCode 106)
+
+1. FALHA REPRODUZIDA / CAUSA RAIZ
+
+Durante uma viagem ativa, ao sair temporariamente do GTO (ex.: ligação, outro app ou
+SystemUI), o GtoObserverService pausava a análise semântica corretamente para não ler
+aplicativos terceiros. Porém, ao retornar ao GTO, se o Android UsageStats continuasse
+informando por algum tempo o pacote anterior, o ramo pausado descartava os frames de
+uma viagem ativa. A tela "Concluído" não podia então ser analisada e também não podia
+servir como evidência do retorno ao GTO. A viagem permanecia preservada em
+TRIP_IN_PROGRESS, mas a transição de conclusão não acontecia.
+
+A captura MediaProjection não precisava estar perdida para o bug ocorrer: frames podiam
+estar chegando enquanto a análise semântica continuava bloqueada pelo foreground stale.
+
+2. CORREÇÃO HF55
+
+- Mantém um probe mínimo e específico de RESULTADO enquanto uma viagem durável está em
+  estado de rastreamento e a análise está pausada por foreground atrasado.
+- O probe só opera se a MediaProjection e o VirtualDisplay ainda existirem, em captura
+  landscape, fora do NVU MainActivity e fora de superfícies transitórias de SystemUI.
+- Um detector visual deliberadamente rígido exige os quatro anchors do modal do GTO:
+  fundo central escuro, lado direito escuro, botão Receber neutro e botão ADS dourado.
+- A assinatura visual NÃO restaura o foreground e NÃO conclui a viagem sozinha. Ela apenas
+  congela e envia o MESMO frame para OCR semântico.
+- O foreground GTO só é restaurado depois que o OCR desse mesmo frame certifica a regra
+  já existente: "Concluído" + valor monetário.
+- O mesmo frame é preservado para eliminar a corrida em que o motorista toca Receber antes
+  do próximo ciclo normal de análise.
+- O OCR de retorno reutiliza o lease global existente e é vinculado ao mesmo sessionId e
+  projectionGeneration, impedindo callback antigo de contaminar uma sessão nova.
+- Um probe RETURN_RESULT_PROBE em andamento não pode ser abandonado por outro frame forte;
+  isso evita starvation em aparelhos mais lentos onde o ML Kit demora mais que 180 ms.
+- Nenhuma regra de persistência da viagem, ADS, fila selada ou envio automático foi relaxada.
+
+3. REGRESSÃO FÍSICA INCORPORADA
+
+As duas capturas reais que expuseram a falha foram adicionadas como fixtures imutáveis:
+- scripts/fixtures/hf55-return-result/result-after-call.png
+  SHA-256 fb9793d998cd7dbbeb95d4f0a879fa68a3142be6b4bdb545686c9c5f82f48456
+- scripts/fixtures/hf55-return-result/result-under-nvu-menu.png
+  SHA-256 40c6de4d1c1bd04f1bf78854b023ada4620eae43a4d0da1a7328d53b49c71b9b
+
+O teste HF55 executa a implementação real de GtoResultVisualGate sobre essas imagens.
+As duas passam o novo gate forte de retorno, inclusive a imagem com o menu NVU sobreposto.
+
+4. VALIDAÇÕES EXECUTADAS
+
+PASS — JavaSyntaxCheck: 53 fontes Android
+PASS — HF10 projection/runtime: 33/33
+PASS — HF30 continuous projection: 24/24
+PASS — HF32 continuous recognition: 18/18
+PASS — HF34 deterministic lifecycle: 22/22
+PASS — HF41 irreversible Receive: 14/14
+PASS — HF42 certified result/readiness: 29/29
+PASS — HF45 critical flow: 18/18
+PASS — HF46 Receive exit: 10/10
+PASS — HF47 certified result lifecycle: 13/13
+PASS — HF48 return recognition: 17/17
+PASS — HF49 automatic result: 17/17
+PASS — HF54 upgrade recovery: 23/23
+PASS — HF55 return/result recovery: 20/20
+PASS — whitespace/diff check
+
+O comando completo `npm run verify:release` também foi iniciado e percorreu várias suítes,
+mas no ambiente local parou em `test:gto-r3.34-money-integrity` porque `functions/lib/gtoMoney.js`
+não existe no ZIP fonte sem o build TypeScript das Functions. `functions/node_modules` também
+não está presente neste ambiente. No workflow GitHub isso é gerado antes do verify por:
+`npm --prefix functions ci` e `npm --prefix functions run build`.
+A interrupção local, portanto, é uma pré-condição de build ausente e não uma falha HF55.
+
+5. ARQUIVOS MODIFICADOS / ADICIONADOS
+
+- .github/workflows/build-android-release.yml
+- android/app/build.gradle
+- android/app/src/main/java/com/nvu/operacional/GtoObserverService.java
+- android/app/src/main/java/com/nvu/operacional/GtoProjectionContinuityPolicy.java
+- android/app/src/main/java/com/nvu/operacional/GtoResultEvidencePolicy.java
+- android/app/src/main/java/com/nvu/operacional/GtoResultVisualGate.java
+- package.json
+- scripts/test-gto-r3-34-hf54-upgrade-recovery.mjs
+- scripts/test-gto-r3-34-hf55-return-result-recovery.mjs
+- scripts/java-tests/com/nvu/operacional/GtoHf55ReturnResultPolicyTest.java
+- scripts/java-tests/com/nvu/operacional/GtoHf55ReturnResultScreenshotTest.java
+- scripts/fixtures/hf55-return-result/result-after-call.png
+- scripts/fixtures/hf55-return-result/result-under-nvu-menu.png
+
+6. TESTE FÍSICO RECOMENDADO NO APK HF55
+
+A) Iniciar uma viagem normalmente.
+B) Durante a viagem, receber uma ligação ou abrir outro app.
+C) Retornar ao GTO antes ou já na tela Concluído.
+D) Confirmar que a NVU reconhece Concluído sem intervenção e inicia o registro automático.
+E) Repetir tocando Receber rapidamente após retornar.
+F) Repetir com o menu NVU aberto sobre parte do resultado.
+G) Confirmar que uma tela de outro app nunca é aceita como resultado.
+H) Confirmar que a viagem anterior nunca é perdida durante a interrupção.
+

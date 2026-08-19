@@ -1,0 +1,63 @@
+NVU R3.34-PC-HF60 — TERMINAL SAFE
+Android: 1.0.112 (versionCode 112)
+Base: HF59 Sync Safe / HF58 Cost Safe
+Data: 2026-08-19
+
+INCIDENTE CORRIGIDO
+- Cenário de campo: tela Concluído já certificada, modal desaparece, UI mostra
+  "Viagem preservada ✓ · finalizando recebimento…" e o fluxo pode ficar preso
+  quando gtoForeground/screenAnalysisPausedOutsideGto oscila.
+
+CAUSA RAIZ
+- resolveCertifiedResultExitFromFrames() bloqueava indefinidamente a resolução
+  terminal enquanto o foreground nativo estivesse incerto.
+- confirmNormalResultAutomatically() repetia a mesma dependência de foreground
+  mesmo depois de existir prova certificada + latch terminal durável.
+- o recovery de selagem da fila HF59 era acionado principalmente pelo polling de
+  foreground, deixando uma segunda janela de dead-end em OEMs com foreground stale.
+
+CORREÇÃO HF60
+1. Failsafe terminal armado no momento em que a tela Concluído é certificada.
+2. O failsafe é independente do foreground e sobrevive a restart pela prova durável.
+3. Evidência positiva de anúncio assistido continua bloqueando registro normal.
+4. Toque ADS mantém a janela máxima já aprovada antes de fallback normal.
+5. Snapshot imutável do frete é exigido/restaurado antes da finalização.
+6. A conclusão terminal é persistida com commit síncrono antes de RESULT_CONFIRMED.
+7. RESULT_CONFIRMED que ainda não conseguiu selar a fila recebe retry local agendado
+   diretamente, sem depender do motorista voltar a uma tela específica.
+8. Functions HF58 permanecem byte-identical; não há novo deploy de Functions.
+9. OCR/ML Kit, lista de fretes, seleção, bolha e mensagens HF57 permanecem preservados.
+
+VALIDAÇÕES EXECUTADAS NESTE PACOTE
+- JavaSyntaxCheck: PASS (53 fontes)
+- HF41 Receive irreversible: 14/14 PASS
+- HF42 result proof/readiness: 29/29 PASS
+- HF45 critical flow: 18/18 PASS
+- HF46 Receive exit: 10/10 PASS
+- HF47 certified result lifecycle: 13/13 PASS
+- HF49 automatic result: 17/17 PASS
+- HF51 dual voice: 43/43 PASS
+- HF54 upgrade recovery: 23/23 PASS
+- HF55 return-result recovery: 20/20 PASS
+- HF56 bubble position: 14/14 PASS
+- HF57 instant messages: 20/20 PASS
+- HF58 Cost Safe: 21/21 PASS
+- HF59 Sync Safe: 29/29 PASS
+- HF60 Terminal Safe: 29/29 PASS
+- Firebase cost audit: 0 críticos / 0 avisos
+- Workflow YAML: válido
+- package.json / release metadata JSON: válidos
+- functions/src/gtoTrips.ts SHA-256: e11110e248fe886c0a8eb1644bb1b129b618919413ae15f8b576a56d907bd707
+- functions/src/gtoState.ts SHA-256: f15301283ea37774deef756498a655a0018be17474254dcfc09485efdcfbc836
+
+OBSERVAÇÃO DE BUILD
+O gate verify:release completo neste ambiente chegou até os testes que dependem de
+functions/lib e parou porque as dependências npm das Functions não estão instaladas
+neste container. Isso não é uma falha funcional HF60. O workflow GitHub incluído faz
+npm ci + build das Functions antes do gate e permanece fail-closed: se compilação,
+testes, Gradle, assets, assinatura ou identidade falharem, o APK release não é entregue.
+
+DEPLOY
+- APK Android HF60 somente.
+- Não redeployar Functions apenas por HF60.
+- Não é necessário novo deploy Web/Netlify por HF60.

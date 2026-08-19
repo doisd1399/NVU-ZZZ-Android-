@@ -1,0 +1,96 @@
+NVU R3.34-PC-HF52 — Android 1.0.104 / versionCode 104
+Data da revisão: 18/08/2026
+Base auditada: NVU-CAPACITOR-ANDROID-R3.34-PC-HF51
+
+OBJETIVO
+Eliminar o comportamento relatado em que o card do GTO mostrava "Anterior em envio"/"Aguardando envio anterior", aparentando interferir na finalização automática da viagem atual, e corrigir o falso estado "Enviando comprovante... 0%" observado no fluxo por print.
+
+CAUSA RAIZ CONFIRMADA — SINCRONIZAÇÃO NATIVA
+1. A tela "Concluído" NÃO dependia da viagem anterior para salvar a viagem atual.
+   Quando o resultado normal é certificado, o serviço persiste CONFIRMED_NORMAL e chama enqueueConfirmedTrip(). O payload da viagem atual é selado em SharedPreferences numa fila durável antes de qualquer chamada de rede.
+2. Se a operação ainda tem próximas entregas, a NVU cria uma nova sessionId imediatamente após confirmar que a sessão concluída está na fila durável. Portanto, uma viagem anterior em retry não é um lock/head-of-line da nova viagem.
+3. O defeito estava na representação/limpeza do estado da sincronização em segundo plano:
+   - backgroundSyncPendingSessionId era gravado por callback de pending;
+   - esse marcador era usado como fonte de verdade no card;
+   - um ACK de background podia ocorrer via MainActivity com listener=null, então ninguém limpava o marcador;
+   - o listener só reconhecia como "anterior" a sessão armazenada no ponteiro único gtoPreviousQueuedSessionId;
+   - se duas ou mais viagens ficassem em fila/retry, esse ponteiro podia ser sobrescrito e o ACK de uma sessão mais antiga não limpava o estado visual;
+   - um callback tardio de timeout/pending podia voltar depois de um ACK e recriar a impressão de pendência.
+Resultado: o motorista podia ver "Anterior em envio" mesmo quando a fila daquela viagem já tinha sido removida após ACK. Era um estado fantasma de UI/diagnóstico, não evidência de bloqueio da viagem atual.
+
+CORREÇÃO HF52 — SINCRONIZAÇÃO
+- A fila selada durável passou a ser a única fonte de verdade para dizer se existe entrega anterior pendente.
+- Adicionados hasQueued(), hasQueuedOtherThan() e queuedCount() para separar "há fila real" de "há retry elegível agora".
+- Adicionado reconcileBackgroundSyncMarkers(): marcadores legados são limpos automaticamente quando a sessão correspondente já não existe na fila.
+- ACK de sessão em background agora grava backgroundSyncLastSessionId/backgroundSyncLastTripId/backgroundSyncLastAckAt e limpa marcadores mesmo quando flushPending() foi chamado com listener=null.
+- O ACK de QUALQUER sessão não atual é tratado; não depende mais do ponteiro único gtoPreviousQueuedSessionId.
+- Callback tardio de pending não pode ressuscitar "anterior em envio" se a fila daquela sessionId já foi removida.
+- O card passa a mostrar "Anterior salva · enviando" somente quando existe de fato outra sessionId selada na fila, deixando explícito ao motorista que a entrega anterior está protegida localmente e não bloqueia a atual.
+- O estado da viagem atual permanece independente: uma entrega atual certificada é selada mesmo que existam outras entregas antigas em retry.
+- O plugin de diagnóstico agora expõe gtoDurableQueueCount, gtoCurrentSessionQueued e gtoBackgroundQueuePending.
+
+O QUE AS CAPTURAS DO MOTORISTA PROVAM
+- A mensagem "Viagem salva ✓ · enviando em segundo plano. Próximo frete liberado." só é exibida depois que enqueueConfirmedTrip() conseguiu persistir a sessão concluída na fila durável. Portanto, a viagem mostrada nessa captura já estava protegida localmente.
+- O texto "Sincronização: Anterior em envio" da outra captura não prova que a viagem atual estava bloqueada. Na HF51 ele podia ser um marcador obsoleto, inclusive após ACK.
+
+CAUSA RAIZ CONFIRMADA — MODO PRINT / 0%
+RecordTrip.tsx reutilizava a mesma flag isUploading para dois processos diferentes:
+A) análise/preparação/upload do comprovante;
+B) envio final do lançamento da viagem.
+Além disso, isUploading era ativado antes do OCR/hash. Por isso a prévia podia mostrar "Enviando comprovante... 0%" enquanto ainda estava analisando o print — e, mais grave, voltava a mostrar "Enviando comprovante... 0%" quando o usuário tocava em LANÇAR VIAGEM, mesmo com o comprovante já enviado. O botão inferior "ENVIANDO..." + o card em 0% da captura é compatível exatamente com essa falha de estado visual.
+
+CORREÇÃO HF52 — WEB-FONTE DO PRINT
+- Criado receiptUploadPhase: idle / analyzing / preparing / uploading.
+- "Analisando comprovante..." durante OCR.
+- "Preparando comprovante..." durante snapshot/hash/verificação de duplicidade.
+- "Enviando comprovante... N%" e percentual somente quando uploadService.uploadImage() está realmente ativo.
+- O envio final da viagem não reutiliza mais o overlay de progresso do comprovante.
+
+IMPORTANTE SOBRE O WEB REMOTO
+O APK usa runtime Capacitor remoto: https://stirring-pavlova-ca6808.netlify.app
+A captura do motorista contém uma mensagem de fallback/auditoria de print que NÃO existe no Web-fonte presente no ZIP HF51 auditado. Isso comprova drift entre o Web remoto atual e este pacote-fonte.
+Consequência:
+- O hardening de sincronização Android HF52 entra no próximo APK.
+- A correção visual do print está incluída no Web-fonte HF52 para merge, mas NÃO é seguro sobrescrever o Netlify atual diretamente com este Web sem primeiro reconciliar as alterações que já existem no remoto.
+- Firebase Functions não foi alterado no HF52; registerGtoTrip permaneceu byte a byte idêntico.
+
+INVARIANTES DE SEGURANÇA PRESERVADOS
+- Tela Concluído certificada continua sendo a autoridade de conclusão automática.
+- Evidência positiva de anúncio/valor dobrado continua bloqueando resultado normal.
+- Resultado certificado é persistido antes da rede.
+- Payload concluído é selado com SHA-256 em fila durável.
+- Falha de rede/auth/backend não apaga a viagem; fica em retry.
+- Queue entry só é apagada após ACK FIX18 válido para a mesma sessionId/contractVersion.
+- Backend registerGtoTrip continua idempotente por sessão.
+- Detector rápido, coordenador de seleção e result visual gate não foram alterados.
+- Os dois MP3 aprovados do HF51 permanecem byte a byte idênticos.
+
+VALIDAÇÕES EXECUTADAS NESTA SANDBOX
+PASS 74/74 validate-gto-auto-sync
+PASS 49/49 validate-gto-native-flow
+PASS 18/18 HF45 critical-flow
+PASS 17/17 HF49 automatic-result
+PASS 43/43 HF51 dual-voice compatibility
+PASS 28/28 HF52 sync/finalization
+PASS 8/8 Android Google-auth config
+PASS JavaSyntaxCheck (53 fontes)
+PASS verify-capacitor-remote
+PASS preflight --full (com aviso esperado de node_modules ausente)
+PASS parse YAML do workflow HF52
+PASS TypeScript parser de RecordTrip.tsx sem diagnósticos de sintaxe TS1xxx; os únicos erros do teste isolado foram imports/dependências indisponíveis porque node_modules não está presente.
+
+VALIDAÇÃO NÃO EXECUTÁVEL NESTA SANDBOX
+- npm run build: vite não está instalado porque node_modules não veio no ZIP e a sandbox não tem acesso de rede para npm ci.
+- Gradle compileDebugJavaWithJavac: wrapper tentou baixar Gradle 8.14.3 e a sandbox não resolveu services.gradle.org.
+Essas duas etapas continuam obrigatórias no ambiente Windows/GitHub com dependências disponíveis. PREPARAR-ANDROID-WINDOWS.bat e o workflow HF52 mantêm esses gates antes da publicação.
+
+IDENTIDADE DA PRÓXIMA RELEASE
+R3.34-PC-HF52
+versionName 1.0.104
+versionCode 104
+applicationId com.nvu.operacional
+
+VEREDITO
+Não foi encontrado um lock real no qual "a viagem anterior" impeça a viagem atual de ser selada. O defeito reproduzível era a mistura entre fila real e marcadores de UI obsoletos, somada a um estado visual de upload por print que reutilizava isUploading. HF52 remove esses dois caminhos reproduzíveis sem alterar detector, contrato FIX18, Functions ou regras de anúncio.
+
+Limite técnico: nenhum software conectado a rede pode garantir que Firebase/Internet nunca falharão. O que o HF52 garante por construção é que, uma vez certificada a tela Concluído e selado o payload, uma falha de envio não transforma a viagem em perda silenciosa: a fila durável permanece e novas tentativas são idempotentes.

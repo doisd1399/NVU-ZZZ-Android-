@@ -1,16 +1,35 @@
 package com.nvu.operacional;
 
-/** Prevents queued old frames from replacing newer journey context on slow devices. */
+/**
+ * Producer-order guard for MediaProjection frames.
+ *
+ * IMPORTANT: Image.getTimestamp() is source-defined and must never be subtracted from
+ * a callback wall clock. Different Android/OEM producers can use a different timestamp
+ * timebase. We therefore use the image timestamp only relative to the previous image
+ * from the SAME ImageReader producer. Queue age is controlled by acquireLatestImage()
+ * outside WAITING_FREIGHT and by the ImageReader(3) bound during ordered freight touch
+ * capture.
+ */
 final class GtoFrameFreshnessPolicy {
-    static final long NORMAL_MAX_AGE_MS = 520L;
-    static final long CRITICAL_TOUCH_MAX_AGE_MS = 1350L;
-
     private GtoFrameFreshnessPolicy() {}
 
-    static boolean shouldConsume(long nowNs, long imageTimestampNs, boolean criticalTouchWindow) {
-        if (imageTimestampNs <= 0L || nowNs <= 0L || imageTimestampNs > nowNs) return true;
-        long ageMs = (nowNs - imageTimestampNs) / 1_000_000L;
-        long maxAge = criticalTouchWindow ? CRITICAL_TOUCH_MAX_AGE_MS : NORMAL_MAX_AGE_MS;
-        return ageMs <= maxAge;
+    static boolean shouldConsume(
+        long previousProducerTimestampNs,
+        long imageTimestampNs,
+        boolean criticalTouchWindow
+    ) {
+        // A missing timestamp is not grounds to blind the observer.
+        if (imageTimestampNs <= 0L || previousProducerTimestampNs <= 0L) return true;
+
+        // Normal same-producer progression.
+        if (imageTimestampNs > previousProducerTimestampNs) return true;
+
+        // A producer/session can legitimately restart its timestamp domain after a surface
+        // rebind/resize. Accept the first regressed value and let it become the new baseline.
+        if (imageTimestampNs < previousProducerTimestampNs) return true;
+
+        // Exact duplicate buffers add no information. During a critical touch pulse keep
+        // fail-open semantics so an OEM timestamp quirk cannot erase the only press frame.
+        return criticalTouchWindow;
     }
 }

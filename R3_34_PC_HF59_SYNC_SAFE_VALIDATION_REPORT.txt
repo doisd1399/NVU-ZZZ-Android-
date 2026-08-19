@@ -1,0 +1,91 @@
+NVU R3.34-PC-HF59 — SYNC SAFE
+Android: 1.0.111 (versionCode 111)
+Base: R3.34-PC-HF58 Cost Safe / Android 1.0.110
+Data: 2026-08-18
+
+OBJETIVO DO HOTFIX
+Corrigir exclusivamente o cenário em que uma entrega normal já certificada pode permanecer em
+"salvando viagem" antes de entrar na fila durável, além de impedir oscilação/repetição indefinida
+de registerGtoTrip em erros que não serão corrigidos por uma nova chamada idêntica.
+
+ALTERAÇÕES FUNCIONAIS CONTROLADAS
+1. Watchdog local RESULT_CONFIRMED -> fila durável.
+   - Se a primeira selagem local falhar, a prova certificada não é descartada.
+   - O Observador tenta novamente localmente com backoff 1,2 s -> máximo 60 s.
+   - Nenhuma chamada Firebase é iniciada por esse watchdog antes da fila estar selada.
+
+2. Retry de registerGtoTrip classificado.
+   - Falhas transitórias continuam com backoff exponencial limitado (15 s -> máximo 5 min).
+   - INVALID_ARGUMENT, FAILED_PRECONDITION, PERMISSION_DENIED, UNAUTHENTICATED,
+     ALREADY_EXISTS, OUT_OF_RANGE e incompatibilidade de contrato não entram em loop temporizado.
+   - A viagem selada continua preservada no aparelho.
+   - Ausência de autenticação e troca incorreta de motorista são bloqueadas localmente antes da Function.
+   - Retorno da autenticação/perfil correto libera uma tentativa limitada dentro do processo.
+   - Repetições do mesmo estado NO_NATIVE_AUTH são idempotentes: não ficam regravando prefs/repaintando
+     a mesma mensagem a cada poll.
+
+3. Estado visual de sincronização mais fiel.
+   - Resultado concluído ainda não selado: "Protegendo viagem..."
+   - Fila selada com retry permanente pausado: "Salva · sincronização protegida"
+   - Sucesso continua sendo informado somente após ACK real do backend.
+
+ESCOPO PRESERVADO
+- OCR / ML Kit: sem alterações.
+- Detecção visual de frete: sem alterações.
+- Bolha/arraste: sem alterações.
+- Seleção de frete: sem alterações.
+- Web/src: byte-a-byte sem alterações em relação ao HF58.
+- public: byte-a-byte sem alterações em relação ao HF58.
+- Firebase Functions source: byte-a-byte sem alterações em relação ao HF58 já publicado.
+
+HASHES DAS FUNCTIONS HF58 PRESERVADAS
+functions/src/gtoTrips.ts
+  e11110e248fe886c0a8eb1644bb1b129b618919413ae15f8b576a56d907bd707
+functions/src/gtoState.ts
+  f15301283ea37774deef756498a655a0018be17474254dcfc09485efdcfbc836
+
+DEPLOY
+HF59 é Android-only.
+NÃO exige novo deploy das Firebase Functions HF58 já publicadas.
+NÃO exige novo deploy Web/Netlify.
+
+VALIDAÇÕES EXECUTADAS NESTE PACOTE
+- Android Java static syntax: PASS — 53 fontes.
+- GTO auto-sync contract: PASS — 74/74.
+- HF59 Sync Safe: PASS — 29/29.
+- Firebase cost audit: PASS — 0 críticos / 0 avisos.
+- HF58 Cost Safe: PASS — 21/21.
+- HF57 mensagens instantâneas: PASS — 20/20.
+- HF56 bolha: PASS — 14/14.
+- HF55 retorno/resultado: PASS — 20/20.
+- HF54 recuperação de fila: PASS — 23/23.
+- HF49 resultado automático: PASS — 17/17.
+- HF47 ciclo de resultado certificado: PASS — 13/13.
+- HF46 Receive exit: PASS — 10/10.
+- HF45 fluxo crítico: PASS — 18/18.
+- HF43 mensagens responsivas: PASS — 17/17.
+- HF42 prova de resultado/readiness: PASS — 29/29.
+- HF41 Receive irreversível: PASS — 14/14.
+- Google Auth Android: PASS — 8/8.
+- Capacitor remote runtime: PASS.
+- Project preflight: PASS (aviso esperado: node_modules não acompanha o ZIP fonte).
+
+FULL verify:release
+A execução integral no ambiente de empacotamento ultrapassou o limite contínuo disponível, sem
+registrar FAIL até o ponto alcançado. As regressões críticas e as validações novas acima foram
+executadas separadamente e concluíram com PASS. O PREPARAR-ANDROID-WINDOWS.bat mantém
+"npm run verify:release" como gate obrigatório e, no PC do release, também executa a compilação
+Java Android real com JDK 21. Se qualquer gate ou compilação falhar, a preparação é interrompida.
+
+OBSERVAÇÃO SOBRE COMPILAÇÃO NESTE AMBIENTE
+A compilação Gradle real não pôde ser repetida aqui porque o Gradle Wrapper precisou acessar
+services.gradle.org e o ambiente de empacotamento não possui acesso externo. Isso não foi tratado
+como PASS. A validação real de Gradle permanece obrigatória no PREPARAR-ANDROID-WINDOWS.bat.
+As Functions também não foram recompiladas aqui por ausência dos node_modules de desenvolvimento;
+os dois fontes de Functions permanecem byte-a-byte iguais ao HF58 que já foi compilado e publicado
+com sucesso no projeto vtc-frota-log.
+
+CRITÉRIO DE LIBERAÇÃO
+O ZIP pode avançar para o preparador Windows porque nenhuma regressão foi detectada nos gates
+críticos e o hotfix é isolado no Android. Antes de distribuição ampla, gerar DEBUG, executar uma
+viagem completa e então gerar a RELEASE com a mesma keystore oficial.

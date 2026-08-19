@@ -1,6 +1,7 @@
 import { getDownloadURL, ref, uploadBytesResumable } from "firebase/storage";
 import imageCompression from "browser-image-compression";
 import { auth, storage } from "../lib/firebase";
+import { isAsyncTimeoutError, withTimeout } from "../lib/asyncTimeout";
 import {
   FILE_ACCESS_ERROR_CODE,
   isFileAccessError,
@@ -20,6 +21,9 @@ export interface UploadOptions {
   maxWidthOrHeight?: number;
   maxOutputBytes?: number;
   storageScope?: "default" | "trip-receipt";
+  authTimeoutMs?: number;
+  compressionTimeoutMs?: number;
+  uploadTimeoutMs?: number;
 }
 
 export class UploadError extends Error {
@@ -114,6 +118,9 @@ export const uploadService = {
     maxWidthOrHeight = 1920,
     maxOutputBytes = DEFAULT_UPLOAD_MAX_BYTES,
     storageScope = "default",
+    authTimeoutMs = 12_000,
+    compressionTimeoutMs = 30_000,
+    uploadTimeoutMs = 90_000,
   }: UploadOptions): Promise<string> {
     const sourceType = inferImageType(file);
     if (!supportedSourceTypes.has(sourceType)) {
@@ -141,7 +148,11 @@ export const uploadService = {
 
     // Wait for Firebase Auth to finish restoring the native/web session before
     // starting an authenticated Storage request.
-    await auth.authStateReady();
+    await withTimeout(
+      auth.authStateReady(),
+      authTimeoutMs,
+      "O Firebase demorou para restaurar sua sessão. Tente novamente.",
+    );
     if (!auth.currentUser) {
       throw new UploadError(
         "Sua sessão do Firebase não está ativa. Entre novamente e tente enviar a imagem.",
@@ -150,35 +161,47 @@ export const uploadService = {
     }
 
     let finalFile = file;
-    try {
-      const compressedBlob = await imageCompression(file, {
-        maxSizeMB: compressionMaxSizeMB,
-        maxWidthOrHeight,
-        useWebWorker: true,
-        fileType: "image/webp",
-      });
 
-      finalFile = new File(
-        [compressedBlob],
-        file.name.replace(/\.[^/.]+$/, ".webp"),
-        { type: "image/webp" },
-      );
-    } catch (error) {
-      if (isFileAccessError(error)) {
-        const fileError = normalizeFileAccessError(error);
-        throw new UploadError(fileError.message, FILE_ACCESS_ERROR_CODE);
-      }
+    // Do not spend CPU/RAM recompressing screenshots that already satisfy the
+    // authenticated Storage ceiling. This is especially important for older
+    // Android WebViews where starting the compression worker can be slower than
+    // the upload itself.
+    if (file.size >= maxOutputBytes) {
+      try {
+        const compressedBlob = await withTimeout(
+          imageCompression(file, {
+            maxSizeMB: compressionMaxSizeMB,
+            maxWidthOrHeight,
+            useWebWorker: true,
+            fileType: "image/webp",
+          }),
+          compressionTimeoutMs,
+          "A preparação da imagem demorou demais neste aparelho.",
+        );
 
-      // A small original file can still be uploaded safely. A large original
-      // must never be sent after compression failure because Storage will deny
-      // it and the user would only see a generic upload failure.
-      if (file.size >= maxOutputBytes) {
+        finalFile = new File(
+          [compressedBlob],
+          file.name.replace(/\.[^/.]+$/, ".webp"),
+          { type: "image/webp" },
+        );
+      } catch (error) {
+        if (isFileAccessError(error)) {
+          const fileError = normalizeFileAccessError(error);
+          throw new UploadError(fileError.message, FILE_ACCESS_ERROR_CODE);
+        }
+
+        if (isAsyncTimeoutError(error)) {
+          throw new UploadError(
+            "A imagem demorou demais para ser preparada neste aparelho. Tente novamente com um print menor.",
+            "upload/compression-timeout",
+          );
+        }
+
         console.error("Image compression failed", error);
         throw new UploadError(
           "Não foi possível compactar a imagem para o tamanho permitido. Escolha outra imagem ou tente novamente.",
         );
       }
-      console.warn("Image compression failed; using the small original file", error);
     }
 
     if (finalFile.size >= maxOutputBytes) {
@@ -218,6 +241,38 @@ export const uploadService = {
     });
 
     return new Promise((resolve, reject) => {
+      let settled = false;
+      let timeoutId: ReturnType<typeof setTimeout>;
+
+      const finishResolve = (value: string) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeoutId);
+        resolve(value);
+      };
+
+      const finishReject = (error: unknown) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeoutId);
+        reject(error);
+      };
+
+      timeoutId = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        const timeoutError = new UploadError(
+          "O envio demorou demais. Confira a conexão e tente novamente.",
+          "storage/retry-limit-exceeded",
+        );
+        try {
+          uploadTask.cancel();
+        } catch {
+          // The task may already be transitioning to its terminal state.
+        }
+        reject(timeoutError);
+      }, uploadTimeoutMs);
+
       uploadTask.on(
         "state_changed",
         (snapshot) => {
@@ -228,6 +283,7 @@ export const uploadService = {
           onProgress?.(progress);
         },
         (error) => {
+          if (settled) return;
           console.error("Erro no upload para o Firebase Storage:", {
             code: (error as { code?: string })?.code,
             message: (error as { message?: string })?.message,
@@ -235,15 +291,15 @@ export const uploadService = {
             bytes: finalFile.size,
             contentType: finalFile.type,
           });
-          reject(normalizeFirebaseStorageError(error));
+          finishReject(normalizeFirebaseStorageError(error));
         },
         async () => {
           try {
             const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
-            resolve(downloadURL);
+            finishResolve(downloadURL);
           } catch (error) {
             console.error("Erro ao obter URL de download:", error);
-            reject(normalizeFirebaseStorageError(error));
+            finishReject(normalizeFirebaseStorageError(error));
           }
         },
       );

@@ -33,8 +33,12 @@ public final class GtoFullJourneyPolicyTest {
         require(GtoDeterministicFlowPolicy.unknownScreenMustBeNeutral(state),
             "unknown/non-GTO screens are neutral");
         require(state.equals(preserved), "app switch cannot mutate the trip");
-        require(GtoDeterministicFlowPolicy.freightListIsInformationalOnly(state, false),
-            "reopened list cannot replace current trip without explicit arm");
+        require(!GtoDeterministicFlowPolicy.freightListIsInformationalOnly(state, false),
+            "reopened list is a lifecycle boundary, never informational during an active trip");
+        require(GtoDeterministicFlowPolicy.mayReplaceActiveTrip(state, true),
+            "a stable returned freight list closes the old trip and prepares the next selection");
+        require(!GtoDeterministicFlowPolicy.mayReplaceActiveTrip(state, false),
+            "one unconfirmed candidate frame cannot close the old trip");
 
         require(GtoDeterministicFlowPolicy.mayInterpretResultScreen(state),
             "result is valid only once trip is in progress");

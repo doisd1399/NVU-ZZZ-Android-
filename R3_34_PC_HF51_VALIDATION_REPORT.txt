@@ -1,0 +1,121 @@
+NVU R3.34-PC-HF51 — Android 1.0.103 / versionCode 103
+Data: 2026-08-18
+Base funcional: R3.34-PC-HF50/HF49
+Escopo: substituição do áudio sintético e inclusão de um segundo aviso de conclusão, sem alterar detecção/MediaProjection/fluxo GTO.
+
+OBJETIVO IMPLEMENTADO
+====================
+1) Frete confirmado / sistema pronto:
+   - Evento existente: SISTEMA_PRONTO
+   - Gatilho: somente depois de seleção humana confirmada + snapshot imutável bloqueado + estado TRIP_IN_PROGRESS.
+   - Áudio local aprovado: "Tudo preparado, podemos partir."
+   - Arquivo: android/app/src/main/res/raw/nvu_ready_voice_pt_br.mp3
+   - Duração medida: 3.096 s
+   - Codec: MP3, 24 kHz, mono, 48 kbps
+   - SHA-256: b53a46523dbbe745ac0a9600637ffce7f1f9c34667c64b2b1730c0df32b60bf2
+
+2) Viagem concluída:
+   - Novo evento passivo: VIAGEM_CONCLUIDA
+   - Gatilho: somente depois que o fluxo existente certifica a tela Concluído e persiste sincronamente resultCertifiedLatched/resultCertifiedSessionId.
+   - Áudio local aprovado: "Ótimo trabalho, chegamos no destino. Sua viagem será enviada automaticamente."
+   - Arquivo: android/app/src/main/res/raw/nvu_trip_completed_voice_pt_br.mp3
+   - Duração medida: 6.648 s
+   - Codec: MP3, 24 kHz, mono, 48 kbps
+   - SHA-256: 49c9c7fb8585b4385971cc3d19c59f8df0015e6e2c74ab1ae4bce7cd45fb7179
+
+FIDELIDADE DOS ÁUDIOS
+=====================
+Os dois MP3 enviados pelo usuário foram copiados BYTE A BYTE para res/raw.
+Não houve TTS, regravação, normalização, recompressão, mudança de velocidade, pitch ou volume.
+O workflow GitHub HF51 abre o APK gerado e compara o SHA-256 de cada MP3 interno com o SHA-256 dos arquivos aprovados. O build falha se qualquer byte for diferente.
+
+INTEGRAÇÃO
+==========
+NvuAudioManager continua sendo uma extensão passiva. Ele não lê frames, não executa OCR, não conhece MediaProjection e não decide estados do GTO.
+
+SISTEMA_PRONTO:
+GtoObserverService.transitionConfirmedFreightToTripInProgress()
+ -> estado TRIP_IN_PROGRESS
+ -> emitSystemReadyForDepartureIfEligible()
+ -> NvuAudioManager.playReadyVoice(eventId)
+
+VIAGEM_CONCLUIDA:
+fluxo de resultado existente
+ -> parseResultScreen() certifica Concluído
+ -> resultado é persistido com commit()
+ -> emitTripCompletedVoiceIfEligible()
+ -> NvuAudioManager.playTripCompletedVoice(eventId)
+ -> fluxo HF49 continua scheduleAutoFinalizeCertifiedResult(0L)
+
+O áudio de conclusão NÃO substitui, atrasa nem comanda o envio automático.
+
+ANTI-REPETIÇÃO E CONCORRÊNCIA
+=============================
+- Cada frase usa eventId derivado do sessionId da viagem.
+- lastReadyVoiceEventId e lastTripCompletedVoiceEventId são persistidos separadamente.
+- queuedOrPlayingEventIds impede duplicação enquanto a fala está tocando ou aguardando.
+- Frames/callbacks repetidos da mesma tela não repetem voz.
+- Uma nova sessionId permite novo aviso.
+- Os dois áudios usam fila FIFO no NvuAudioManager para nunca falarem sobrepostos.
+- Não há Thread.sleep(); o detector continua funcionando durante a reprodução.
+
+PERMISSÕES / SEGURANÇA
+======================
+- AndroidManifest.xml permaneceu byte-idêntico ao HF50/HF49.
+- NÃO existe android.permission.RECORD_AUDIO.
+- NÃO existe android.permission.CAPTURE_AUDIO_OUTPUT.
+- NÃO foi usado AudioRecord.
+- NÃO foi adicionado TTS em runtime.
+- NÃO há alteração de volume do dispositivo.
+- MediaProjection, detector visual, seleção de frete e políticas de captura não foram modificados.
+
+ARQUIVOS CRIADOS
+================
+- android/app/src/main/res/raw/nvu_trip_completed_voice_pt_br.mp3
+- scripts/test-gto-r3-34-hf51-dual-voice.mjs
+- R3_34_PC_HF51_VALIDATION_REPORT.txt
+- COMANDOS-R3.34-HF51-RELEASE-WINDOWS.txt
+
+ARQUIVO DE ÁUDIO SUBSTITUÍDO
+============================
+- removido: android/app/src/main/res/raw/nvu_ready_voice_pt_br.ogg (voz sintética HF50)
+- criado:   android/app/src/main/res/raw/nvu_ready_voice_pt_br.mp3 (áudio aprovado pelo usuário)
+
+ARQUIVOS FUNCIONAIS ALTERADOS
+=============================
+- android/app/src/main/java/com/nvu/operacional/NvuAudioManager.java
+- android/app/src/main/java/com/nvu/operacional/GtoObserverService.java
+
+ARQUIVOS DE RELEASE/VALIDAÇÃO ALTERADOS
+=======================================
+- android/app/build.gradle
+- .github/workflows/build-android-release.yml
+- package.json
+- scripts/test-gto-r3-34-hf50-ready-voice.mjs (gate HF50 tornado compatível com HF51+)
+- NVU_RELEASE_METADATA.json
+- PREPARAR-ANDROID-WINDOWS.bat
+
+GATES EXECUTADOS NESTE AMBIENTE
+===============================
+- JavaSyntaxCheck: PASS (53 fontes)
+- validate:gto-native: 49/49 PASS
+- validate:gto-auto-sync: 74/74 PASS
+- HF45 critical-flow: 18/18 PASS
+- HF48 return-recognition: 17/17 PASS
+- HF49 auto-result: 17/17 PASS
+- HF50 ready-voice baseline: 30/30 PASS
+- HF51 dual-voice: 43/43 PASS
+
+O verify:release completo foi iniciado e avançou pelos gates anteriores, mas esta sandbox não possui todo o cache npm necessário para gerar functions/lib; o workflow GitHub executa npm ci + npm --prefix functions run build antes do verify:release. Isso é uma limitação do ambiente atual, não um erro de fonte HF51.
+
+GATE DO APK
+===========
+O workflow build-android-release.yml exige:
+- applicationId com.nvu.operacional
+- versionName 1.0.103
+- versionCode 103
+- os dois MP3 presentes no APK
+- SHA-256 interno dos dois MP3 exatamente igual aos uploads aprovados
+- assinatura release válida
+
+Web/Netlify/Functions: sem alteração funcional em relação à HF50. Release Android-only.

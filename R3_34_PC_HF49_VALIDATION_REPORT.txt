@@ -1,0 +1,103 @@
+NVU R3.34-PC-HF49 — Android 1.0.101 / versionCode 101
+Data da correção: 2026-08-18
+Base: R3.34-PC-HF48
+Escopo: Android nativo / encerramento e sincronização automática da viagem GTO
+
+OBJETIVO FUNCIONAL
+==================
+A tela real “Concluído” + “Valor a receber” passa a ser a autoridade terminal da viagem.
+O motorista não precisa tocar em Receber para a NVU concluir, preservar, enfileirar e enviar a viagem.
+
+Mensagens principais solicitadas:
+1. “Viagem concluída, enviando dados automaticamente...”
+2. “Viagem registrada com sucesso!”
+
+CAUSA ESTRUTURAL REMOVIDA
+=========================
+Nas versões anteriores, embora a tela Concluído já fosse preservada como prova, o caminho normal de conclusão ainda dependia de uma ação posterior (Receber ou inferência da saída do modal). Isso criava dependência desnecessária de callback de toque, ACTION_OUTSIDE, continuidade visual pós-modal e particularidades OEM.
+
+HF49 remove esse requisito do caminho principal. A certificação semântica do resultado agora cria um latch automático durável e chama a mesma infraestrutura segura de persistência/fila que já era usada depois de Receber.
+
+NOVA INVARIANTE TERMINAL
+========================
+Quando todas estas condições são verdadeiras:
+- sessão de viagem possui snapshot imutável recuperável;
+- OCR certifica a tela Concluído;
+- existe valor final válido/consensual, ou o valor está sendo recuperado automaticamente da prova preservada;
+- não existe evidência positiva de anúncio/bônus assistido;
+- a proteção ADS está instalada;
+
+a NVU trata a viagem como concluída e inicia o registro automático sem depender do botão Receber.
+
+PROTEÇÃO CONTRA ADS
+===================
+A mudança para conclusão automática não pode criar uma corrida em que a viagem seja registrada normalmente e, logo depois, o motorista inicie “Dobrar valor (ADS)”.
+
+HF49 adiciona uma proteção transparente e temporária sobre a ação ADS durante o registro automático:
+- prefere a geometria OCR exata de “Dobrar valor (ADS)”;
+- se o OCR perder o texto ADS, infere a área pela posição do botão Receber;
+- se ambos os textos não forem mapeados, usa uma região normalizada conservadora do botão direito do modal;
+- a proteção nunca deve roubar a área Receber;
+- a proteção existe apenas durante o resultado certificado e é removida ao sair do GTO ou quando o modal desaparece;
+- antes de selar automaticamente há uma pequena janela determinística para que frames frescos detectem uma transição já iniciada para anúncio;
+- toque isolado nunca reprova a viagem; somente evidência positiva de anúncio/recompensa assistido bloqueia o registro normal.
+
+DURABILIDADE / ENVIO
+====================
+1. A prova do resultado continua sendo gravada no GtoResultProofStore.
+2. O resultado automático grava resultAutoCompletionLatched de forma síncrona.
+3. A conclusão grava completionStatus=CONFIRMED_NORMAL e status PENDING de forma durável.
+4. enqueueConfirmedTrip sela o payload na fila FIX18 antes da prova visual ser apagada.
+5. Falha de rede/Firebase/backend não descarta o payload; a fila permanece para retry.
+6. “Viagem registrada com sucesso!” só aparece quando o listener recebe ACK real de sincronização/estado SYNCED.
+
+COMPATIBILIDADE
+===============
+- O caminho legado de Receber permanece como compatibilidade, mas não é necessário.
+- HF48 de retorno ao GTO/OCR lease permanece intacta.
+- HF45-HF47 de prova de resultado, fila durável e recuperação de processo permanecem intactas.
+- HF35 de autoridade de lista e proteção contra falso positivo no HUB permanece intacta.
+- Nenhuma lógica Web/Netlify/Functions foi alterada nesta hotfix.
+
+VALIDAÇÕES EXECUTADAS
+=====================
+PASS JavaSyntaxCheck: 52 fontes
+PASS validate:gto-native: 49/49
+PASS validate:gto-auto-sync: 74/74
+PASS R3.33 audit-flow: 19/19
+PASS HF37 replacement session: 19/19
+PASS HF39 certified-list boundary: 20/20
+PASS HF40 cancelled-list bootstrap: 14/14
+PASS HF41 irreversible Receive: 14/14
+PASS HF42 result proof/readiness: 29/29
+PASS HF43 responsive messages: 17/17
+PASS HF44 live list message/count: 17/17
+PASS HF45 critical flow: 18/18
+PASS HF46 Receive exit: 10/10
+PASS HF47 certified-result lifecycle: 13/13
+PASS HF48 return recognition: 17/17
+PASS HF49 automatic result: 17/17
+PASS fixture física HF49: tela real Concluído é reconhecida e preservada como resultado.
+
+O verify:release completo foi percorrido em segmentos por limite de tempo da sandbox. Os gates executados até HF34 passaram; os gates posteriores críticos foram executados individualmente e estão listados acima.
+
+DEPENDÊNCIAS WEB/TYPESCRIPT
+===========================
+O diretório de trabalho da sandbox não contém node_modules do projeto principal. Por isso “npm run lint” isolado sem “npm ci” não é um gate válido aqui. PREPARAR-ANDROID-WINDOWS.bat e o workflow GitHub executam npm ci antes de lint/verify.
+
+GRADLE REAL
+===========
+A compilação Gradle/Javac real deve ser executada pelo PREPARAR-ANDROID-WINDOWS.bat ou GitHub Actions, onde o wrapper Gradle e Android SDK têm acesso às dependências. O gate sintático Java do pacote passou localmente.
+
+IDENTIDADE DA RELEASE
+=====================
+functionalRelease: R3.34-PC-HF49
+applicationId: com.nvu.operacional
+versionName: 1.0.101
+versionCode: 101
+GitHub artifact esperado: NVU-R3.34-PC-HF49-release
+
+DEPLOY
+======
+HF49 é Android-only em relação à HF48.
+Web/Netlify e Firebase Functions não precisam de novo deploy apenas por esta hotfix.

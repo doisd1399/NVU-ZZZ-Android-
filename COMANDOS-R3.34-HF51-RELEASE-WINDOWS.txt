@@ -1,0 +1,52 @@
+NVU R3.34-PC-HF51 — Android 1.0.103 / versionCode 103
+
+1) Extraia o ZIP HF51 em uma pasta nova e entre na raiz do projeto.
+
+2) Execute:
+PREPARAR-ANDROID-WINDOWS.bat
+
+O preparador instala dependências, compila Functions, executa verify:release, gera Web/Capacitor e valida Javac com Java 21.
+
+3) Para GitHub Actions, publique o CONTEÚDO extraído do ZIP em um branch e execute:
+.github/workflows/build-android-release.yml
+
+Artifact esperado:
+NVU-R3.34-PC-HF51-release
+
+APK esperado:
+NVU-R3.34-PC-HF51-release.apk
+
+Identidade obrigatória:
+applicationId = com.nvu.operacional
+versionName = 1.0.103
+versionCode = 103
+
+VALIDAÇÃO AUTOMÁTICA DOS ÁUDIOS NO APK
+======================================
+O workflow falha se os dois recursos não estiverem no APK ou se qualquer byte for diferente dos MP3 aprovados:
+
+res/raw/nvu_ready_voice_pt_br.mp3
+SHA-256 b53a46523dbbe745ac0a9600637ffce7f1f9c34667c64b2b1730c0df32b60bf2
+
+res/raw/nvu_trip_completed_voice_pt_br.mp3
+SHA-256 49c9c7fb8585b4385971cc3d19c59f8df0015e6e2c74ab1ae4bce7cd45fb7179
+
+TESTE FÍSICO HF51
+=================
+A) Abra uma lista real e selecione/aceite um frete.
+   Esperado: depois da confirmação real do frete e entrada em TRIP_IN_PROGRESS, tocar uma única vez:
+   "Tudo preparado, podemos partir."
+
+B) Continue a mesma viagem até a tela Concluído.
+   Esperado: depois da certificação/persistência do resultado, tocar uma única vez:
+   "Ótimo trabalho, chegamos no destino. Sua viagem será enviada automaticamente."
+
+C) Mantenha a mesma tela aberta.
+   Esperado: nenhum dos áudios repete por frames/OCR/callbacks repetidos.
+
+D) Inicie outra viagem com nova sessionId.
+   Esperado: o áudio de 3 s volta a ficar elegível; ao concluir, o áudio de 6 s também.
+
+E) A automação, detecção, MediaProjection e envio devem continuar funcionando durante a fala.
+
+HF51 é Android-only em relação à HF50. Não requer novo deploy Netlify/Functions somente por estes avisos locais.

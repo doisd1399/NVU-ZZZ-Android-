@@ -1,0 +1,35 @@
+NVU R3.34-PC-HF39 — Android 1.0.91 / versionCode 91
+
+1) Entre na raiz do projeto HF39.
+
+2) Validação rápida da fonte:
+node scripts/check-android-java-syntax.mjs
+node scripts/validate-gto-native-flow.mjs
+node scripts/validate-gto-auto-sync.mjs
+node scripts/test-gto-r3-34-hf39-certified-list-boundary.mjs
+
+3) Preparação Android Windows/JDK 21 (use o script já incluído no projeto):
+PREPARAR-ANDROID-WINDOWS.bat
+
+4) Build Gradle real:
+cd android
+gradlew.bat clean assembleRelease
+
+5) Confirme no log/artefato:
+versionName = 1.0.91
+versionCode = 91
+
+APK esperado em uma árvore semelhante a:
+android\app\build\outputs\apk\release\
+
+TESTE FÍSICO OBRIGATÓRIO PARA ESTE HOTFIX:
+A) iniciar Observe e abrir lista real;
+B) selecionar um frete que eventualmente force review (se possível);
+C) reabrir uma lista real enquanto review/viagem anterior estiver vivo;
+D) o review anterior deve desaparecer/ser invalidado e a nova lista deve assumir a sessão;
+E) tocar Aceitar rapidamente em um frete da nova página;
+F) somente dados da nova linha podem aparecer;
+G) se a primeira leitura perder apenas a carga, a NVU deve tentar automaticamente OCR exclusivo da carga antes de pedir digitação;
+H) gameplay/HUB sem lista nunca pode cancelar/substituir viagem.
+
+HF39 é Android-only em relação à HF38. Não é necessário novo deploy Web/Netlify/Functions apenas por HF39.

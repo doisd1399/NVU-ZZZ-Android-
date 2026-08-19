@@ -19,19 +19,31 @@ public class MainActivity extends BridgeActivity {
     }
 
     @Override
+    public void onResume() {
+        super.onResume();
+        GtoObserverService.reportMainActivityForeground(true);
+    }
+
+    @Override
+    public void onPause() {
+        GtoObserverService.reportMainActivityForeground(false);
+        super.onPause();
+    }
+
+    @Override
     public void onStart() {
         super.onStart();
+        android.content.SharedPreferences gtoPrefs = getSharedPreferences(GtoObserverService.PREFS_NAME, MODE_PRIVATE);
+        // HF54: recover HF51/HF52 legacy queue state before the observer/menu can render
+        // a sticky previous-sync status. The recovery never deletes a sealed trip.
+        GtoAutoTripSync.recoverLegacyPendingStateOnAuthenticatedStart(this, gtoPrefs);
         GtoObserverService.recoverIfEnabled(this);
         // Durable completed deliveries must be retried even when the driver has
         // temporarily disabled the floating observer. Authentication is checked
         // before touching the queue so the login screen does not inherit another
         // user's pending status on shared devices.
         if (FirebaseAuth.getInstance().getCurrentUser() != null) {
-            GtoAutoTripSync.flushPending(
-                this,
-                getSharedPreferences(GtoObserverService.PREFS_NAME, MODE_PRIVATE),
-                null
-            );
+            GtoAutoTripSync.flushPending(this, gtoPrefs, null);
         }
     }
 

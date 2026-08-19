@@ -50,10 +50,13 @@ final class GtoAutoTripSync {
     private static final String QUARANTINE_PREFIX = "quarantine_";
     private static final String RETRY_AT_PREFIX = "retry_at_";
     private static final String RETRY_COUNT_PREFIX = "retry_count_";
+    private static final String RETRY_BLOCK_CODE_PREFIX = "retry_block_code_";
+    private static final String RETRY_BLOCK_AT_PREFIX = "retry_block_at_";
     private static final long BASE_RETRY_MS = 15_000L;
     private static final long MAX_RETRY_MS = 5 * 60_000L;
     private static final long CALL_WATCHDOG_MS = 25_000L;
     private static final Set<String> IN_FLIGHT = ConcurrentHashMap.newKeySet();
+    private static final Set<String> AUTH_RECOVERY_RELEASED = ConcurrentHashMap.newKeySet();
     private static final Handler MAIN_HANDLER = new Handler(Looper.getMainLooper());
 
     private static final String[] HASH_FIELDS = new String[] {
@@ -92,6 +95,16 @@ final class GtoAutoTripSync {
         String driverId = clean(prefs.getString("driverId", ""));
         if (sessionId.isEmpty() || driverId.isEmpty() || state == null || state.trim().isEmpty()) {
             return com.google.android.gms.tasks.Tasks.forException(new IllegalStateException("Sessão/contexto GTO ausente"));
+        }
+        com.google.firebase.auth.FirebaseUser currentUser = FirebaseAuth.getInstance().getCurrentUser();
+        String authenticatedUid = currentUser == null ? "" : clean(currentUser.getUid());
+        if (authenticatedUid.isEmpty() || !driverId.equals(authenticatedUid)) {
+            // Local gate: do not spend a callable invocation when native Firebase Auth is
+            // not ready or belongs to another profile. The observer keeps the pending
+            // canonical state locally and may retry later without touching Google APIs.
+            return com.google.android.gms.tasks.Tasks.forException(
+                new IllegalStateException("Autenticação NVU ausente para sincronizar estado GTO")
+            );
         }
         JSONObject payload = new JSONObject();
         try {
@@ -368,6 +381,42 @@ final class GtoAutoTripSync {
         return sealed != null && !sealed.trim().isEmpty();
     }
 
+    static boolean hasQueued(Context context) {
+        SharedPreferences queue = context.getSharedPreferences(QUEUE_PREFS, Context.MODE_PRIVATE);
+        for (Map.Entry<String, ?> entry : queue.getAll().entrySet()) {
+            String key = entry.getKey();
+            if (!key.startsWith(QUEUE_PREFIX)) continue;
+            Object value = entry.getValue();
+            if (value instanceof String && !((String) value).trim().isEmpty()) return true;
+        }
+        return false;
+    }
+
+    static boolean hasQueuedOtherThan(Context context, String excludedSessionId) {
+        String excluded = clean(excludedSessionId);
+        SharedPreferences queue = context.getSharedPreferences(QUEUE_PREFS, Context.MODE_PRIVATE);
+        for (Map.Entry<String, ?> entry : queue.getAll().entrySet()) {
+            String key = entry.getKey();
+            if (!key.startsWith(QUEUE_PREFIX)) continue;
+            String sessionId = clean(key.substring(QUEUE_PREFIX.length()));
+            Object value = entry.getValue();
+            if (sessionId.isEmpty() || sessionId.equals(excluded)) continue;
+            if (value instanceof String && !((String) value).trim().isEmpty()) return true;
+        }
+        return false;
+    }
+
+    static int queuedCount(Context context) {
+        SharedPreferences queue = context.getSharedPreferences(QUEUE_PREFS, Context.MODE_PRIVATE);
+        int count = 0;
+        for (Map.Entry<String, ?> entry : queue.getAll().entrySet()) {
+            if (!entry.getKey().startsWith(QUEUE_PREFIX)) continue;
+            Object value = entry.getValue();
+            if (value instanceof String && !((String) value).trim().isEmpty()) count++;
+        }
+        return count;
+    }
+
     static boolean hasPending(Context context) {
         SharedPreferences queue = context.getSharedPreferences(QUEUE_PREFS, Context.MODE_PRIVATE);
         SharedPreferences retry = context.getSharedPreferences(RETRY_PREFS, Context.MODE_PRIVATE);
@@ -377,6 +426,162 @@ final class GtoAutoTripSync {
             String sessionId = key.substring(QUEUE_PREFIX.length());
             long retryAt = retry.getLong(RETRY_AT_PREFIX + sessionId, 0L);
             if (retryAt <= now) return true;
+        }
+        return false;
+    }
+
+    /**
+     * HF52 self-healing diagnostics: legacy background-sync preference markers are
+     * never authoritative. The sealed durable queue is the source of truth. This also
+     * cleans sticky HF51 markers after upgrade when their queue entry already ACKed or
+     * was quarantined while no service listener was attached.
+     */
+    static void reconcileBackgroundSyncMarkers(Context context, SharedPreferences mainPrefs) {
+        String markedSession = clean(mainPrefs.getString("backgroundSyncPendingSessionId", ""));
+        String previousSession = clean(mainPrefs.getString("gtoPreviousQueuedSessionId", ""));
+        SharedPreferences.Editor editor = null;
+        if (!markedSession.isEmpty() && !hasPendingSession(context, markedSession)) {
+            editor = mainPrefs.edit()
+                .remove("backgroundSyncPendingSessionId")
+                .remove("backgroundSyncPendingDetail")
+                .remove("backgroundSyncPendingAt");
+        }
+        if (!previousSession.isEmpty() && !hasPendingSession(context, previousSession)) {
+            if (editor == null) editor = mainPrefs.edit();
+            editor.remove("gtoPreviousQueuedSessionId");
+        }
+        if (editor != null) editor.apply();
+    }
+
+    /**
+     * HF54 upgrade recovery. A beta device may arrive here with a real FIX18 queue
+     * created by HF51 while the old backend still rejected a valid trip, or with
+     * sticky HF51 background markers that no longer represent the authenticated
+     * driver's queue. Never delete a sealed trip. Instead, reconcile markers,
+     * reset only this driver's retry backoff once, and persist field diagnostics
+     * before the normal idempotent flush is attempted.
+     */
+    static void recoverLegacyPendingStateOnAuthenticatedStart(Context context, SharedPreferences mainPrefs) {
+        reconcileBackgroundSyncMarkers(context, mainPrefs);
+
+        com.google.firebase.auth.FirebaseUser currentUser = FirebaseAuth.getInstance().getCurrentUser();
+        String currentUid = currentUser == null ? "" : clean(currentUser.getUid());
+        String currentSession = clean(mainPrefs.getString("gtoTripSessionId", ""));
+        String previousMarker = clean(mainPrefs.getString("gtoPreviousQueuedSessionId", ""));
+        String backgroundMarker = clean(mainPrefs.getString("backgroundSyncPendingSessionId", ""));
+        String lastError = clean(mainPrefs.getString("gtoTripSyncLastErrorCode", ""));
+        long now = System.currentTimeMillis();
+
+        SharedPreferences queue = context.getSharedPreferences(QUEUE_PREFS, Context.MODE_PRIVATE);
+        SharedPreferences retry = context.getSharedPreferences(RETRY_PREFS, Context.MODE_PRIVATE);
+        int total = 0;
+        int owned = 0;
+        int foreign = 0;
+        int invalid = 0;
+        boolean currentQueued = false;
+        boolean previousOwned = false;
+        boolean backgroundOwned = false;
+        String recoveredUid = clean(mainPrefs.getString("gtoQueueRecoverySchemaUid", ""));
+        boolean forceRetry = !currentUid.isEmpty()
+            && (mainPrefs.getInt("gtoQueueRecoverySchema", 0) < 2 || !currentUid.equals(recoveredUid));
+
+        SharedPreferences.Editor retryEditor = forceRetry ? retry.edit() : null;
+        for (Map.Entry<String, ?> entry : queue.getAll().entrySet()) {
+            String key = entry.getKey();
+            if (!key.startsWith(QUEUE_PREFIX)) continue;
+            Object value = entry.getValue();
+            if (!(value instanceof String) || ((String) value).trim().isEmpty()) continue;
+            total++;
+            String sessionId = clean(key.substring(QUEUE_PREFIX.length()));
+            if (sessionId.equals(currentSession)) currentQueued = true;
+
+            QueueRecord record = readQueueRecord((String) value);
+            if (record == null) {
+                invalid++;
+                continue;
+            }
+            String payloadDriverId = clean(record.payload.optString("driverId", ""));
+            boolean belongsToCurrentDriver = !currentUid.isEmpty() && currentUid.equals(payloadDriverId);
+            if (belongsToCurrentDriver) {
+                owned++;
+                if (sessionId.equals(previousMarker)) previousOwned = true;
+                if (sessionId.equals(backgroundMarker)) backgroundOwned = true;
+                String blockedCode = clean(retry.getString(RETRY_BLOCK_CODE_PREFIX + sessionId, ""));
+                boolean authRecovered = ("NO_NATIVE_AUTH".equals(blockedCode) || "UNAUTHENTICATED".equals(blockedCode))
+                    && AUTH_RECOVERY_RELEASED.add(sessionId + ":" + blockedCode);
+                if (forceRetry || authRecovered) {
+                    // HF59 retries an older preserved queue once after the recovery-schema
+                    // upgrade, and releases an auth-paused queue once per process when a
+                    // matching native Firebase user becomes available. It never loops.
+                    if (retryEditor == null) retryEditor = retry.edit();
+                    retryEditor.remove(RETRY_AT_PREFIX + sessionId)
+                        .remove(RETRY_COUNT_PREFIX + sessionId)
+                        .remove(RETRY_BLOCK_CODE_PREFIX + sessionId)
+                        .remove(RETRY_BLOCK_AT_PREFIX + sessionId);
+                    if (sessionId.equals(currentSession)) {
+                        mainPrefs.edit().putBoolean("gtoTripSyncRetryPaused", false).apply();
+                    }
+                }
+            } else {
+                foreign++;
+            }
+        }
+        if (retryEditor != null) retryEditor.commit();
+
+        SharedPreferences.Editor diagnostics = mainPrefs.edit()
+            .putLong("gtoQueueRecoveryLastAt", now)
+            .putInt("gtoQueueRecoveryQueueCount", total)
+            .putInt("gtoQueueRecoveryOwnedCount", owned)
+            .putInt("gtoQueueRecoveryForeignCount", foreign)
+            .putInt("gtoQueueRecoveryInvalidCount", invalid)
+            .putBoolean("gtoQueueRecoveryCurrentSessionQueued", currentQueued)
+            .putString("gtoQueueRecoveryAuthUid", currentUid)
+            .putString("gtoQueueRecoveryPreviousMarker", previousMarker)
+            .putString("gtoQueueRecoveryBackgroundMarker", backgroundMarker)
+            .putString("gtoQueueRecoveryLastErrorCode", lastError)
+            .putString("gtoQueueRecoverySummary",
+                "queue=" + total
+                    + " owned=" + owned
+                    + " foreign=" + foreign
+                    + " invalid=" + invalid
+                    + " currentQueued=" + currentQueued
+                    + " forced=" + forceRetry);
+
+        if (!currentUid.isEmpty()) {
+            if (forceRetry) diagnostics
+                .putInt("gtoQueueRecoverySchema", 2)
+                .putString("gtoQueueRecoverySchemaUid", currentUid);
+            // A marker owned by another login must never make the current driver look
+            // permanently blocked. The sealed foreign queue itself is preserved intact.
+            if (!previousMarker.isEmpty() && !previousOwned) {
+                diagnostics.remove("gtoPreviousQueuedSessionId");
+            }
+            if (!backgroundMarker.isEmpty() && !backgroundOwned) {
+                diagnostics
+                    .remove("backgroundSyncPendingSessionId")
+                    .remove("backgroundSyncPendingDetail")
+                    .remove("backgroundSyncPendingAt");
+            }
+        }
+        diagnostics.commit();
+        reconcileBackgroundSyncMarkers(context, mainPrefs);
+    }
+
+    /** True only when another sealed queue entry belongs to the authenticated driver. */
+    static boolean hasQueuedOtherThanForDriver(Context context, String excludedSessionId, String driverUid) {
+        String excluded = clean(excludedSessionId);
+        String uid = clean(driverUid);
+        if (uid.isEmpty()) return false;
+        SharedPreferences queue = context.getSharedPreferences(QUEUE_PREFS, Context.MODE_PRIVATE);
+        for (Map.Entry<String, ?> entry : queue.getAll().entrySet()) {
+            String key = entry.getKey();
+            if (!key.startsWith(QUEUE_PREFIX)) continue;
+            String sessionId = clean(key.substring(QUEUE_PREFIX.length()));
+            Object value = entry.getValue();
+            if (sessionId.isEmpty() || sessionId.equals(excluded) || !(value instanceof String)) continue;
+            QueueRecord record = readQueueRecord((String) value);
+            if (record == null) continue;
+            if (uid.equals(clean(record.payload.optString("driverId", "")))) return true;
         }
         return false;
     }
@@ -411,10 +616,13 @@ final class GtoAutoTripSync {
         retry.edit()
             .remove(RETRY_AT_PREFIX + sessionId)
             .remove(RETRY_COUNT_PREFIX + sessionId)
+            .remove(RETRY_BLOCK_CODE_PREFIX + sessionId)
+            .remove(RETRY_BLOCK_AT_PREFIX + sessionId)
             .commit();
         mainPrefs.edit()
             .putString("gtoTripSyncStatus", STATUS_PENDING)
             .putString("gtoTripIntegrityStatus", "PAYLOAD_SEALED")
+            .putBoolean("gtoTripSyncRetryPaused", false)
             .remove("gtoRegisteredTripId")
             .remove("gtoTripSyncError")
             .remove("gtoTripIntegrityError")
@@ -425,29 +633,57 @@ final class GtoAutoTripSync {
     }
 
     static void flushPending(Context context, SharedPreferences mainPrefs, Listener listener) {
-        com.google.firebase.auth.FirebaseUser currentUser = FirebaseAuth.getInstance().getCurrentUser();
-        if (currentUser == null) {
-            mainPrefs.edit()
-                .putLong("gtoTripSyncLastAttemptAt", System.currentTimeMillis())
-                .putString("gtoTripSyncLastErrorCode", "NO_NATIVE_AUTH")
-                .apply();
-            String message = "Aguardando autenticação NVU para sincronizar a viagem.";
-            markPending(mainPrefs, message);
-            if (listener != null) listener.onPending(mainPrefs.getString("gtoTripSessionId", ""), message);
-            return;
-        }
-        String currentUid = clean(currentUser.getUid());
-
         SharedPreferences queue = context.getSharedPreferences(QUEUE_PREFS, Context.MODE_PRIVATE);
         SharedPreferences retry = context.getSharedPreferences(RETRY_PREFS, Context.MODE_PRIVATE);
         Map<String, ?> all = queue.getAll();
         if (all.isEmpty()) return;
-        long now = System.currentTimeMillis();
 
         List<String> keys = new ArrayList<>();
         for (String key : all.keySet()) {
             if (key.startsWith(QUEUE_PREFIX)) keys.add(key);
         }
+        if (keys.isEmpty()) return;
+
+        long now = System.currentTimeMillis();
+        String currentSessionId = clean(mainPrefs.getString("gtoTripSessionId", ""));
+        com.google.firebase.auth.FirebaseUser currentUser = FirebaseAuth.getInstance().getCurrentUser();
+        if (currentUser == null) {
+            String message = "Aguardando autenticação NVU para sincronizar a viagem.";
+            boolean currentSessionQueued = false;
+            boolean anyPauseChanged = false;
+            for (String key : keys) {
+                String queuedSessionId = key.substring(QUEUE_PREFIX.length());
+                if (queuedSessionId.equals(currentSessionId)) currentSessionQueued = true;
+                boolean pauseChanged = pauseRetryForReason(retry, queuedSessionId, "NO_NATIVE_AUTH");
+                anyPauseChanged = anyPauseChanged || pauseChanged;
+                if (listener != null && pauseChanged) listener.onPending(queuedSessionId, message);
+            }
+            // Once the same no-auth condition is already persisted, do not rewrite
+            // SharedPreferences or repaint the same driver message every observer poll.
+            // This is local cost/UX containment and performs no Google API call.
+            if (!anyPauseChanged
+                && (!currentSessionQueued || mainPrefs.getBoolean("gtoTripSyncRetryPaused", false))) {
+                return;
+            }
+            SharedPreferences.Editor editor = mainPrefs.edit()
+                .putLong("backgroundSyncPendingAt", now)
+                .putString("backgroundSyncPendingDetail", message)
+                .putString("backgroundSyncLastErrorCode", "NO_NATIVE_AUTH");
+            if (currentSessionQueued) {
+                editor
+                    .putLong("gtoTripSyncLastAttemptAt", now)
+                    .putString("gtoTripSyncLastErrorCode", "NO_NATIVE_AUTH")
+                    .putBoolean("gtoTripSyncRetryPaused", true)
+                    .apply();
+                markPending(mainPrefs, message);
+            } else {
+                // HF45: a queued PREVIOUS delivery must never turn the fresh/current
+                // freight session into PENDING. Keep the background problem orthogonal.
+                editor.apply();
+            }
+            return;
+        }
+        String currentUid = clean(currentUser.getUid());
 
         for (String key : keys) {
             String raw = queue.getString(key, "");
@@ -456,6 +692,35 @@ final class GtoAutoTripSync {
                 quarantine(context, queue, key, sessionId, raw == null ? "" : raw, "Entrada de fila vazia");
                 notifyIntegrityProblem(mainPrefs, listener, sessionId, "Fila local inválida preservada para diagnóstico.");
                 continue;
+            }
+
+            String blockedCode = clean(retry.getString(RETRY_BLOCK_CODE_PREFIX + sessionId, ""));
+            boolean authRelatedPause = "NO_NATIVE_AUTH".equals(blockedCode)
+                || "UNAUTHENTICATED".equals(blockedCode)
+                || "DRIVER_UID_MISMATCH".equals(blockedCode);
+            if (authRelatedPause) {
+                // HF59 in-process auth recovery: if the matching Firebase user becomes
+                // available after a temporary auth/profile interruption, release this
+                // local pause once for this exact reason. Parsing the sealed local record
+                // is cheap and no callable is issued unless ownership now matches.
+                QueueRecord recoveryRecord = readQueueRecord(raw);
+                String recoveryDriverId = recoveryRecord == null
+                    ? ""
+                    : clean(recoveryRecord.payload.optString("driverId", ""));
+                String recoveryKey = sessionId + ":" + blockedCode;
+                if (!recoveryDriverId.isEmpty()
+                    && currentUid.equals(recoveryDriverId)
+                    && AUTH_RECOVERY_RELEASED.add(recoveryKey)) {
+                    retry.edit()
+                        .remove(RETRY_AT_PREFIX + sessionId)
+                        .remove(RETRY_COUNT_PREFIX + sessionId)
+                        .remove(RETRY_BLOCK_CODE_PREFIX + sessionId)
+                        .remove(RETRY_BLOCK_AT_PREFIX + sessionId)
+                        .commit();
+                    if (sessionId.equals(currentSessionId)) {
+                        mainPrefs.edit().putBoolean("gtoTripSyncRetryPaused", false).apply();
+                    }
+                }
             }
 
             long retryAt = retry.getLong(RETRY_AT_PREFIX + sessionId, 0L);
@@ -491,10 +756,12 @@ final class GtoAutoTripSync {
                 // surfaces stale profile/native-auth mismatches that previously failed
                 // silently on only some devices.
                 IN_FLIGHT.remove(sessionId);
+                pauseRetryForReason(retry, sessionId, "DRIVER_UID_MISMATCH");
                 if (sessionId.equals(mainPrefs.getString("gtoTripSessionId", ""))) {
                     mainPrefs.edit()
                         .putLong("gtoTripSyncLastAttemptAt", System.currentTimeMillis())
                         .putString("gtoTripSyncLastErrorCode", "DRIVER_UID_MISMATCH")
+                        .putBoolean("gtoTripSyncRetryPaused", true)
                         .apply();
                     String message = "A sessão autenticada não corresponde ao motorista desta entrega. Reabra a NVU com o perfil correto; a viagem permanece preservada.";
                     markPending(mainPrefs, message);
@@ -513,6 +780,7 @@ final class GtoAutoTripSync {
             if (sessionId.equals(mainPrefs.getString("gtoTripSessionId", ""))) {
                 mainPrefs.edit()
                     .putString("gtoTripSyncStatus", STATUS_SYNCING)
+                    .putBoolean("gtoTripSyncRetryPaused", false)
                     .remove("gtoTripSyncError")
                     .apply();
             }
@@ -547,9 +815,15 @@ final class GtoAutoTripSync {
                     // proves it accepted this exact session under the current contract.
                     if (!success || tripId.isEmpty() || !sessionId.equals(responseSession) || responseContract < CONTRACT_VERSION) {
                         IN_FLIGHT.remove(sessionId);
-                        scheduleRetry(retry, sessionId, null);
-                        String message = "Resposta do backend incompatível com o contrato FIX18. Registro local preservado.";
-                        if (sessionId.equals(mainPrefs.getString("gtoTripSessionId", ""))) markPending(mainPrefs, message);
+                        pauseRetryForReason(retry, sessionId, "BACKEND_CONTRACT_MISMATCH");
+                        String message = "Resposta do backend incompatível com o contrato FIX18. Viagem salva; sincronização automática pausada.";
+                        if (sessionId.equals(mainPrefs.getString("gtoTripSessionId", ""))) {
+                            mainPrefs.edit()
+                                .putString("gtoTripSyncLastErrorCode", "BACKEND_CONTRACT_MISMATCH")
+                                .putBoolean("gtoTripSyncRetryPaused", true)
+                                .apply();
+                            markPending(mainPrefs, message);
+                        }
                         if (listener != null) listener.onPending(sessionId, message);
                         return;
                     }
@@ -588,6 +862,7 @@ final class GtoAutoTripSync {
                         boolean ackPersisted = mainPrefs.edit()
                             .putString("gtoTripSyncStatus", STATUS_SYNCED)
                             .putString("gtoTripIntegrityStatus", "ACKNOWLEDGED")
+                            .putBoolean("gtoTripSyncRetryPaused", false)
                             .remove("gtoTripSyncLastErrorCode")
                             .putString("gtoRegisteredTripId", tripId)
                             .putInt("gtoJobProgress", responseProgress)
@@ -630,6 +905,8 @@ final class GtoAutoTripSync {
                     retry.edit()
                         .remove(RETRY_AT_PREFIX + sessionId)
                         .remove(RETRY_COUNT_PREFIX + sessionId)
+                        .remove(RETRY_BLOCK_CODE_PREFIX + sessionId)
+                        .remove(RETRY_BLOCK_AT_PREFIX + sessionId)
                         .commit();
                     removeSnapshot(context, sessionId);
                     if (currentSession) {
@@ -637,7 +914,26 @@ final class GtoAutoTripSync {
                             .remove("gtoTripQueueCleanupPending")
                             .remove("gtoTripSyncLastErrorCode")
                             .apply();
+                    } else {
+                        // HF52: background ACK bookkeeping must not depend on a UI/service
+                        // listener. MainActivity can flush with listener=null, and HF51 then
+                        // left a permanent "Anterior em envio" marker even after success.
+                        SharedPreferences.Editor backgroundAck = mainPrefs.edit()
+                            .putString("backgroundSyncLastSessionId", sessionId)
+                            .putString("backgroundSyncLastTripId", tripId)
+                            .putLong("backgroundSyncLastAckAt", System.currentTimeMillis());
+                        if (sessionId.equals(clean(mainPrefs.getString("backgroundSyncPendingSessionId", "")))) {
+                            backgroundAck
+                                .remove("backgroundSyncPendingSessionId")
+                                .remove("backgroundSyncPendingDetail")
+                                .remove("backgroundSyncPendingAt");
+                        }
+                        if (sessionId.equals(clean(mainPrefs.getString("gtoPreviousQueuedSessionId", "")))) {
+                            backgroundAck.remove("gtoPreviousQueuedSessionId");
+                        }
+                        backgroundAck.apply();
                     }
+                    reconcileBackgroundSyncMarkers(context, mainPrefs);
                     if (listener != null) listener.onSynced(sessionId, tripId);
                 })
                 .addOnFailureListener(error -> {
@@ -646,15 +942,19 @@ final class GtoAutoTripSync {
                     if (error instanceof FirebaseFunctionsException) {
                         code = ((FirebaseFunctionsException) error).getCode();
                     }
+                    boolean retryPaused = shouldPauseAutomaticRetry(code);
                     scheduleRetry(retry, sessionId, code);
 
                     String message = clean(error.getMessage());
                     if (message.isEmpty()) message = "Sem conexão com o servidor";
                     String codeLabel = code == null ? "" : " [" + code.name() + "]";
-                    String retryMessage = message + codeLabel + ". Registro preservado; nova tentativa automática.";
+                    String retryMessage = retryPaused
+                        ? message + codeLabel + ". Viagem salva no aparelho; sincronização automática pausada para evitar tentativas repetitivas."
+                        : message + codeLabel + ". Registro preservado; nova tentativa automática.";
                     if (sessionId.equals(mainPrefs.getString("gtoTripSessionId", ""))) {
                         mainPrefs.edit()
                             .putString("gtoTripSyncLastErrorCode", code == null ? "CALL_FAILED" : code.name())
+                            .putBoolean("gtoTripSyncRetryPaused", retryPaused)
                             .putLong("gtoTripSyncLastAttemptAt", System.currentTimeMillis())
                             .apply();
                         markPending(mainPrefs, retryMessage);
@@ -911,18 +1211,56 @@ final class GtoAutoTripSync {
             .edit().remove(SNAPSHOT_PREFIX + sessionId).commit();
     }
 
-    private static void scheduleRetry(SharedPreferences retry, String sessionId, FirebaseFunctionsException.Code code) {
-        int attempt = retry.getInt(RETRY_COUNT_PREFIX + sessionId, 0) + 1;
-        boolean validationFailure = code == FirebaseFunctionsException.Code.INVALID_ARGUMENT
+    private static boolean shouldPauseAutomaticRetry(FirebaseFunctionsException.Code code) {
+        return code == FirebaseFunctionsException.Code.INVALID_ARGUMENT
             || code == FirebaseFunctionsException.Code.FAILED_PRECONDITION
             || code == FirebaseFunctionsException.Code.PERMISSION_DENIED
-            || code == FirebaseFunctionsException.Code.UNAUTHENTICATED;
-        long delayMs = validationFailure
-            ? MAX_RETRY_MS
-            : Math.min(MAX_RETRY_MS, BASE_RETRY_MS * (1L << Math.min(attempt - 1, 4)));
-        retry.edit()
+            || code == FirebaseFunctionsException.Code.UNAUTHENTICATED
+            || code == FirebaseFunctionsException.Code.ALREADY_EXISTS
+            || code == FirebaseFunctionsException.Code.OUT_OF_RANGE;
+    }
+
+    static boolean isRetryPaused(Context context, String sessionId) {
+        String cleanSession = clean(sessionId);
+        if (context == null || cleanSession.isEmpty()) return false;
+        SharedPreferences retry = context.getSharedPreferences(RETRY_PREFS, Context.MODE_PRIVATE);
+        return !clean(retry.getString(RETRY_BLOCK_CODE_PREFIX + cleanSession, "")).isEmpty();
+    }
+
+    private static boolean pauseRetryForReason(SharedPreferences retry, String sessionId, String reason) {
+        String blockReason = clean(reason).isEmpty() ? "PAUSED" : clean(reason);
+        String existingReason = clean(retry.getString(RETRY_BLOCK_CODE_PREFIX + sessionId, ""));
+        long existingRetryAt = retry.getLong(RETRY_AT_PREFIX + sessionId, 0L);
+        if (blockReason.equals(existingReason) && existingRetryAt == Long.MAX_VALUE) {
+            return false;
+        }
+        int attempt = retry.getInt(RETRY_COUNT_PREFIX + sessionId, 0) + 1;
+        boolean committed = retry.edit()
             .putInt(RETRY_COUNT_PREFIX + sessionId, attempt)
+            .putLong(RETRY_AT_PREFIX + sessionId, Long.MAX_VALUE)
+            .putString(RETRY_BLOCK_CODE_PREFIX + sessionId, blockReason)
+            .putLong(RETRY_BLOCK_AT_PREFIX + sessionId, System.currentTimeMillis())
+            .commit();
+        return committed;
+    }
+
+    private static void scheduleRetry(SharedPreferences retry, String sessionId, FirebaseFunctionsException.Code code) {
+        int attempt = retry.getInt(RETRY_COUNT_PREFIX + sessionId, 0) + 1;
+        if (shouldPauseAutomaticRetry(code)) {
+            // HF59 Sync Safe: immutable payload/context validation and auth/ownership errors
+            // do not become healthy merely by hammering the same callable. Keep the sealed
+            // trip intact but pause timed retries. Installing a newer recovery schema (or a
+            // genuinely new authenticated recovery event) may release it once, idempotently.
+            pauseRetryForReason(retry, sessionId, code == null ? "PERMANENT" : code.name());
+            return;
+        }
+        SharedPreferences.Editor editor = retry.edit()
+            .putInt(RETRY_COUNT_PREFIX + sessionId, attempt);
+        long delayMs = Math.min(MAX_RETRY_MS, BASE_RETRY_MS * (1L << Math.min(attempt - 1, 4)));
+        editor
             .putLong(RETRY_AT_PREFIX + sessionId, System.currentTimeMillis() + delayMs)
+            .remove(RETRY_BLOCK_CODE_PREFIX + sessionId)
+            .remove(RETRY_BLOCK_AT_PREFIX + sessionId)
             .commit();
     }
 

@@ -79,14 +79,17 @@ check("GTO print waits for OCR before submit",
   record.includes('gtoReceiptAnalysisStatus === "reading"') &&
   record.includes("Aguarde a NVU terminar a análise do print."));
 
-check("GTO print validates locally before receipt upload",
-  record.indexOf("const analysis = await analyzeGtoTripReceipt(file)") > 0 &&
-  record.indexOf("const analysis = await analyzeGtoTripReceipt(file)") < record.indexOf('phase = "firebase-upload"') &&
-  record.includes("return;\n          }\n\n          setGtoReceiptAnalysisStatus(\"ok\")"));
+check("GTO print keeps OCR independent from receipt upload while submit remains gated",
+  record.includes("void analyzeGtoTripReceipt(file)") &&
+  record.includes('phase = "firebase-upload"') &&
+  record.includes('gtoReceiptAnalysisStatus === "reading"') &&
+  record.includes("Aguarde a NVU terminar a análise do print."));
 
-check("unreadable GTO print fails closed",
-  record.includes('gtoReceiptAnalysisStatus === "failed"') &&
-  record.includes("Envie novamente um print nítido"));
+check("unreadable GTO print requires explicit audited manual fallback",
+  record.includes('gtoReceiptAnalysisStatus === "failed" && !gtoManualConfirmed') &&
+  record.includes("marque a confirmação manual para continuar") &&
+  record.includes("gtoReceiptManualConfirmation") &&
+  record.includes("gtoReceiptReviewRequired"));
 
 check("confirmed rewarded-ad/doubled print is blocked",
   record.includes("gtoAdDoubleDetected") &&

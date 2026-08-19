@@ -1,0 +1,56 @@
+HF31 — Android 1.0.83 / versionCode 83
+GitHub pelo Android + Codespaces
+
+1. Envie somente NVU-CAPACITOR-ANDROID-R3.34-PC-HF31.zip temporariamente para o main pelo GitHub web.
+
+2. No Codespace:
+   git pull
+   ls -lh *HF31*.zip
+
+3. Extraia em /tmp:
+   ZIP="NVU-CAPACITOR-ANDROID-R3.34-PC-HF31.zip"
+   rm -rf /tmp/hf31 && mkdir -p /tmp/hf31
+   unzip -q "$ZIP" -d /tmp/hf31
+   SRC="/tmp/hf31/NVU-CAPACITOR-ANDROID-R3.34-PC-HF31"
+
+4. Confira a identidade antes de substituir:
+   grep -nE "versionCode|versionName" "$SRC/android/app/build.gradle"
+   Esperado: versionCode 83 / versionName "1.0.83"
+
+5. Faça backup local e substitua de forma segura:
+   git branch -f backup-pre-hf31 HEAD
+   rsync -a --delete --exclude='.git' "$SRC/" ./
+   rm -f NVU-CAPACITOR-ANDROID-R3.34-PC-HF31.zip
+
+6. Valide:
+   npm ci
+   npm run verify:release
+
+7. Se tudo passar:
+   git add -A
+   git commit -m "NVU R3.34 PC-HF31 Android 1.0.83"
+   git push origin main
+
+8. GitHub > Actions > Build NVU R3.34 PC-HF31 Release > Run workflow > main > Run workflow.
+
+9. Se verde, baixe o artifact:
+   NVU-R3.34-PC-HF31-release
+
+O workflow HF31 preserva:
+- checkout limpo sem depender de assets Capacitor pré-gerados;
+- parser compatível com apksigner V3;
+- versionCode 83 / versionName 1.0.83;
+- validação opcional EXPECTED_SIGNING_CERT_SHA256;
+- concurrency group isolado da HF29;
+- build de Release assinado com os secrets/keystore configurados no repositório.
+
+TESTE FÍSICO BLOQUEADOR ANTES DE PRODUÇÃO
+1. Abrir GTO pelo fluxo NVU.
+2. Tocar Compartilhar uma vez.
+3. Deixar Star Games / tela preta / FPS 0 / carregamento demorar normalmente.
+4. Não forçar fechamento do app.
+5. Ao chegar à garagem/lista, o GTO Observe deve recuperar sozinho.
+6. Abrir lista de fretes e confirmar que a detecção ocorre.
+7. Sair do GTO e voltar; captura e viagem devem continuar.
+8. Testar notificação/painel rápido; ao voltar, o observador deve retomar.
+9. Só uma revogação real do Android pode exigir novo Compartilhar; nesse caso a tela deve reaparecer automaticamente.

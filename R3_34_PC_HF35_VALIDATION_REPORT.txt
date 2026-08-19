@@ -1,0 +1,180 @@
+NVU R3.34-PC-HF35 — RELATÓRIO DE CAUSA RAIZ E VALIDAÇÃO
+Data: 2026-08-17
+Android: 1.0.87
+versionCode: 87
+Base: R3.34-PC-HF34
+Escopo: Android nativo / GTO Observe. Sem alteração Web em relação à HF34.
+
+1. INCIDENTE QUE MOTIVOU HF35
+Durante uma viagem ativa no HUB do GTO, a HF34 classificou uma tela sem lista de fretes como retorno da lista. Como, na lógica HF34, o retorno da lista é a fronteira canônica que encerra a viagem anterior, um falso positivo visual tinha poder destrutivo sobre o estado da viagem.
+
+2. CAUSA RAIZ EXATA
+A falha não era apenas um limiar de cor isolado. Existia uma contradição de autoridade entre as camadas:
+
+A) GtoFastVisualDetector.hasFreightList()
+- Fazia reconhecimento OCR-free em tempo real.
+- Os limiares de textura/cartão eram permissivos o bastante para certas combinações de HUB/HUD produzirem candidato visual parecido com lista.
+- Em páginas multi-row, uma única linha forte podia contribuir excessivamente para validar a tela.
+- O agregado de cardEvidence existia, mas não era exigido por uma segunda política completa antes de permitir a classificação visual.
+
+B) GtoFreightSemanticCertificationPolicy
+- Já existia para certificar semanticamente páginas reais, mas não era autoridade obrigatória para o boundary destrutivo de uma viagem ativa.
+
+C) GtoObserverService.handleActiveTripFreightListEvidence()
+- Na HF34, dois frames visuais estáveis por ~55 ms podiam promover a página para retorno de lista e desconsiderar a viagem anterior.
+- Portanto: candidato visual -> boundary de lifecycle. Esse acoplamento era a regressão crítica.
+
+D) Sensor de toque
+- Um candidato visual falso podia manter armada a infraestrutura usada para correlacionar Aceitar, ampliando a superfície de erro durante a falsa página.
+
+3. NOVA REGRA DE AUTORIDADE HF35
+A detecção foi dividida em duas autoridades independentes:
+
+CAMADA 1 — VISUAL / TEMPO REAL
+- Continua rodando sem OCR pesado, por frame, para não perder responsividade.
+- Pode apenas declarar FREIGHT_LIST_VISUAL_CANDIDATE.
+- Não pode cancelar viagem, criar nova sessão, completar resultado ou selecionar frete.
+
+CAMADA 2 — SEMÂNTICA / DESTRUTIVA
+- Usa o snapshot congelado da mesma página detectada visualmente.
+- A página multi-row precisa repetir evidência semântica em pelo menos duas linhas.
+- A autorização de boundary exige também ao menos uma linha completa com:
+  Aceitar + distância Km + valor monetário, vinculados à geometria de uma linha visual real.
+- Só visual + semântico permitem FREIGHT_LIST_REOPENED_CERTIFIED.
+
+INVARIANTE HF35:
+Nenhum pixel, tempo decorrido, geometria isolada, HUB/HUD parecido ou toque isolado pode desconsiderar uma viagem ativa. A viagem só é substituída quando a página congelada é certificada semanticamente como lista real do GTO.
+
+4. MUDANÇAS IMPLEMENTADAS
+
+GtoFreightListEvidencePolicy.java
+- Multi-row agora exige pelo menos 2 strong row anchors.
+- Uma linha isolada não certifica mais uma página multi-row.
+
+GtoFastVisualDetector.java
+- Card texture mais estrita:
+  dark >= 0.68
+  light text >= 0.014
+  green info >= 0.0050
+  strong orange >= 0.18
+- hasFreightList() exige simultaneamente isPlausibleSimpleList() e isPlausibleList().
+- Mantidos alinhamento, largura, coluna e cadência vertical da lista real.
+- Uma página real de 1 frete continua suportada.
+
+GtoFreightSemanticCertificationPolicy.java
+- Multi-row exige pelo menos 2 anchors Aceitar + valor.
+- Novo isCertifiedLifecycleBoundaryPage(): exige página semanticamente certificada e ao menos 1 linha completa Aceitar + Km + valor.
+
+GtoSimpleScreenDetectionPolicy.java
+- Novo gate isCertifiedFreightListReturn(): retorno destrutivo requer visual estável + certificação semântica.
+
+GtoObserverService.java
+- O retorno visual durante viagem agora só arma candidato não destrutivo.
+- OCR semântico da página é disparado imediatamente sobre o painel congelado.
+- Certificação possui generation guard, freshness e retry/backoff para impedir callback velho ou mistura de páginas.
+- Falha semântica gera FREIGHT_LIST_VISUAL_CANDIDATE_REJECTED e mantém a viagem intacta.
+- Candidato rejeitado deixa de controlar o sensor de toque.
+- promoteReplacementFreightCandidateToWaiting() possui hard gate isReplacementFreightSemanticFresh() antes de qualquer discardSessionSnapshot/clearTripAnalysis/beginTrip.
+- Resultado com Receber latched continua protegido: a entrega concluída é persistida antes do próximo ciclo.
+
+5. COMPORTAMENTO CANÔNICO APÓS HF35
+
+VIAGEM ATIVA + HUB/GAMEPLAY
+- Detector visual pode observar a tela continuamente.
+- Se houver aparência parecida com lista, vira candidato.
+- Sem assinatura semântica real, candidato é rejeitado.
+- Viagem permanece TRIP_IN_PROGRESS, sem reset e sem nova seleção.
+
+VIAGEM ATIVA + LISTA REAL REABERTA
+- Frames visuais reconhecem a estrutura imediatamente.
+- OCR do snapshot confirma a assinatura real da página.
+- Após certificação, a lista torna-se boundary canônico.
+- Viagem anterior é desconsiderada conforme regra funcional solicitada.
+- Nova sessão WAITING_FREIGHT é preparada.
+- O motorista ainda precisa escolher Aceitar; nenhuma linha é auto-selecionada.
+
+LISTA REAL + TOQUE RÁPIDO
+- O visual continua rápido para preservar o frame de pressão.
+- O toque pode ser guardado durante a curta janela de certificação.
+- Mesmo um toque exato não pode cancelar a viagem antes da certificação semântica da página pré-toque.
+
+6. TESTES NOVOS HF35
+- Multi-row visual requer anchors fortes repetidos.
+- Multi-row semântico rejeita um único anchor acidental.
+- Boundary destrutivo exige linha completa Aceitar+Km+valor.
+- Candidato visual durante viagem é não destrutivo.
+- Promotion é impossível sem certificação semântica fresca.
+- Certificação usa o snapshot congelado da mesma página.
+- Página visual falsa é colocada em quarentena e não controla sensor de toque.
+- Screen policy exige concordância visual + semântica.
+- Cenários sintéticos HUB/list foram executados na policy Java.
+Resultado: 10/10 PASS.
+
+7. REGRESSÕES EXECUTADAS
+- JavaSyntaxCheck: PASS — 43 fontes.
+- validate:gto-native: 49/49 PASS.
+- validate:gto-auto-sync: 74/74 PASS.
+- R2 lifecycle: 26/26 PASS.
+- R3.3 freight re-arm: 21/21 PASS (gate histórico alinhado à nova autoridade semântica).
+- R3.5 result/sync recovery: 35/35 PASS (gate histórico alinhado à nova autoridade semântica).
+- R3.17 selection integrity: 20/20 PASS.
+- R3.19 end-to-end: 35/35 PASS (gate histórico alinhado à nova autoridade semântica).
+- R3.20 APK/Web parity: 36/36 PASS.
+- R3.21 capture stability: 13/13 PASS.
+- R3.22 menu selection: 8/8 PASS.
+- R3.23 data integrity: 16/16 PASS.
+- R3.24 bootstrap/origin: 14/14 PASS.
+- R3.25 detection flow: 16/16 PASS.
+- R3.27 runtime flow: 31/31 PASS.
+- R3.28 practical flow: 17/17 PASS.
+- R3.29 strict screen: 15/15 PASS.
+- R3.30 selected freight: 17/17 PASS.
+- R3.32 card continuity: 11/11 PASS.
+- R3.33 audit flow: 19/19 PASS.
+- R3.34 money integrity: 10/10 PASS.
+- R3.34 PC hotfix: 24/24 PASS.
+- HF10 projection/runtime: 33/33 PASS.
+- HF12 intelligent flow: 20/20 PASS.
+- HF14: 14/14 PASS.
+- HF15: 13/13 PASS.
+- HF17: 12/12 PASS.
+- HF18: 16/16 PASS.
+- HF19: 24/24 PASS.
+- HF20: 19/19 PASS.
+- HF21: 13/13 PASS.
+- HF22: 21/21 PASS (diagnóstico histórico alinhado à certificação).
+- HF23: 10/10 PASS.
+- HF24: 16/16 PASS.
+- HF25: 16/16 PASS.
+- HF27: 16/16 PASS.
+- HF28: 13/13 PASS.
+- HF29: 11/11 PASS.
+- HF30 continuous projection: 24/24 PASS.
+- HF31 bubble lifecycle: 16/16 PASS.
+- HF32 continuous recognition: 18/18 PASS.
+- HF34 deterministic lifecycle: 22/22 PASS.
+- HF35 freight-list authority: 10/10 PASS.
+
+O verify:release foi executado em segmentos por limite de tempo do executor. Os gates antigos que codificavam a regra HF34 "visual estável = boundary" foram atualizados para testar a regra mais forte HF35 "visual estável + semântica certificada = boundary", sem remover as garantias de seleção humana, snapshot imutável ou sincronização durável.
+
+8. BUILD GRADLE NESTE AMBIENTE
+Foi tentado:
+./gradlew :app:compileDebugJavaWithJavac --no-daemon
+
+O wrapper tentou baixar Gradle 8.14.3 de services.gradle.org, mas este ambiente não possui resolução de rede para esse host (UnknownHostException). Portanto o javac real via Gradle não pôde ser executado aqui. O pacote mantém workflow GitHub/Windows para esse gate obrigatório antes da instalação.
+
+9. DEPLOY
+HF35 altera apenas Android nativo em relação à HF34.
+- Gerar APK Android 1.0.87 / versionCode 87.
+- Não é necessário novo deploy Web/Netlify apenas por HF35, desde que o Web HF34 já esteja publicado.
+
+10. CRITÉRIO DE APROVAÇÃO FÍSICA
+A correção elimina por construção o poder destrutivo de um falso positivo puramente visual. Ainda assim, MediaProjection, ML Kit e frames são executados pelo Android/OEM real. A aprovação de produção requer reproduzir no aparelho que apresentou o HUB false-positive:
+1) viagem ativa;
+2) passar/repetir HUB e HUDs;
+3) nenhuma mudança de tripState sem lista real;
+4) abrir lista real;
+5) boundary deve ocorrer rapidamente após certificação;
+6) escolher Aceitar;
+7) frete exato deve ser coletado e bloqueado;
+8) viagem deve seguir normalmente.

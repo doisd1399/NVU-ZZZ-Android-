@@ -1,0 +1,92 @@
+NVU R3.34-PC-HF43 — RESPONSIVE DRIVER FEEDBACK
+Android 1.0.95 / versionCode 95
+Base funcional: R3.34-PC-HF42 (marcada estável no teste físico do usuário)
+Escopo: Android-only UX/feedback; src Web e Functions permanecem byte-equivalentes à HF42.
+
+OBJETIVO
+Reduzir a sensação de atraso sem enfraquecer nenhuma autoridade de detecção, seleção, proteção de resultado ou ACK de envio da HF42.
+
+CAUSA DA LATÊNCIA PERCEBIDA
+1. O chip/card Android já era renderizado imediatamente quando recebia um novo driverStage.
+2. O atraso percebido vinha do momento em que cada mensagem era emitida:
+   - lista: somente após certificação semântica autoritativa e com auto-hide curto;
+   - seleção: não havia feedback imediato no lock humano/visual; aguardava OCR/commit do frete;
+   - resultado: corretamente aguardava resultado semanticamente certificado;
+   - envio: a mensagem de sucesso dependia do ACK real do backend, portanto inclui latência de rede/Firebase.
+3. Logo, não era correto acelerar o produto relaxando detecção ou dizendo “enviada” antes do servidor confirmar.
+
+MUDANÇAS HF43
+A. LISTA DE FRETES
+- Após a mesma certificação visual + semântica já usada pela HF42/HF35+, exibe:
+  “Lista de fretes detectada ✓ · N opções.”
+- O estágio é sticky (sem timeout).
+- Permanece enquanto a lista certificada existir.
+- Ao fechamento real da lista, somente esse estágio sticky é limpo.
+- Ao reabrir a lista, a mensagem pode ser anunciada novamente.
+- Nenhum candidato visual não certificado ganha autoridade ou mensagem de “detectada”.
+
+B. FRETE SELECIONADO
+- No instante em que a linha tocada é travada pelo mecanismo humano/visual, antes do OCR preciso, exibe:
+  “Frete selecionado ✓ · confirmando dados…”
+- Isso informa imediatamente o sucesso do toque sem fingir que os cinco campos já foram confirmados.
+- Após commit dos dados:
+  “Frete confirmado ✓ · viagem em andamento.”
+
+C. RESULTADO
+- Resultado continua exigindo a prova semanticamente certificada da HF42.
+- Assim que certificado, exibe de forma sticky:
+  “Viagem concluída ✓ · toque em Receber.”
+  ou, quando disponível, “Viagem concluída ✓ · <valor> · toque em Receber.”
+- A mensagem permanece até ação/lifecycle autoritativo substituí-la.
+
+D. RECEBER / ENVIO
+- Após o latch durável de Receber:
+  “Receber confirmado ✓ · salvando viagem…”
+- Depois que o payload concluído está selado localmente:
+  “Viagem salva ✓ · enviando automaticamente…”
+- Se o próximo frete for liberado enquanto a fila segue em background:
+  “Viagem salva ✓ · enviando em segundo plano. Próximo frete liberado.”
+- “Viagem enviada ✓” aparece SOMENTE após callback onSynced/ACK real do backend.
+- Dessa forma a UI responde imediatamente, sem mentir sobre uma confirmação de servidor ainda não recebida.
+
+MENSAGENS ESSENCIAIS DO HAPPY PATH
+1. Lista de fretes detectada ✓
+2. Frete selecionado ✓
+3. Viagem concluída ✓
+4. Viagem enviada ✓
+
+Mensagens intermediárias (“confirmando dados”, “salvando”, “enviando”) são progressos curtos e verdadeiros; erros/recuperação aparecem somente quando relevantes.
+
+GARANTIAS PRESERVADAS DA HF42
+- resultado certificado permanece protegido/crash-safe;
+- viagem não é perdida após resultado certificado sem evidência positiva de anúncio assistido/recompensado;
+- HUD opcional (FPS/Desligado/km/h) não decide conclusão;
+- Observe READY continua exigindo overlay + GTO foreground + MediaProjection/pipeline + frames recentes + análise real;
+- falsa lista do HUB continua sem autoridade sem certificação semântica;
+- “enviada” continua atrelado ao ACK do servidor;
+- fila local durável/retry permanecem intactos.
+
+VALIDAÇÃO
+Executado sobre a árvore HF43 antes do empacotamento:
+- JavaSyntaxCheck: PASS (50 sources)
+- validate:gto-native: 49/49 PASS
+- validate:gto-auto-sync: 74/74 PASS
+- HF40 cancelled-list bootstrap: 14/14 PASS
+- HF41 irreversible Receive: 14/14 PASS
+- HF42 certified-result/readiness: 29/29 PASS
+- HF43 responsive messages: 17/17 PASS
+- regressões oficiais HF23–HF38 relevantes também foram executadas em blocos; gates atualizados de wording mantêm as invariantes funcionais.
+- src Web: sem alterações em relação à HF42
+- Functions: sem alterações em relação à HF42
+
+OBSERVAÇÃO SOBRE LATÊNCIA DE BACKEND
+O Android inicia o flush imediatamente após o payload local ser selado. O tempo entre “Viagem salva ✓ · enviando…” e “Viagem enviada ✓” contém rede, autenticação, callable Firebase, transação Firestore e ACK. Não é seguro mascarar esse tempo anunciando sucesso prematuro. Se for desejado reduzir também esse intervalo real, o próximo passo correto é instrumentar métricas de enqueue→call, call→backend e backend→ACK antes de considerar warm instances/minInstances, pois isso pode afetar custo de Firebase.
+
+TESTE FÍSICO RECOMENDADO
+Lista aberta por vários segundos -> mensagem permanece.
+Aceitar -> “Frete selecionado” deve surgir imediatamente antes do OCR terminar.
+Fechar lista -> mensagem da lista não deve ficar órfã.
+Resultado -> “Viagem concluída” aparece assim que resultado é certificado e permanece até ação.
+Receber -> confirmação de salvamento aparece imediatamente.
+Sem internet momentânea -> viagem continua salva e mostra envio pendente/background, nunca falso “enviada”.
+Com ACK do backend -> “Viagem enviada ✓”.

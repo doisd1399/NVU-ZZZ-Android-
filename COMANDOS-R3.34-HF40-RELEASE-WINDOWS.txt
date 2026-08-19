@@ -1,0 +1,38 @@
+NVU R3.34-PC-HF40 — Android 1.0.92 / versionCode 92
+
+1) Entre na raiz do projeto HF40.
+
+2) Validação rápida da fonte:
+node scripts/check-android-java-syntax.mjs
+node scripts/validate-gto-native-flow.mjs
+node scripts/validate-gto-auto-sync.mjs
+node scripts/test-gto-r3-34-hf39-certified-list-boundary.mjs
+node scripts/test-gto-r3-34-hf40-cancelled-list-bootstrap.mjs
+
+3) Preparação Android Windows/JDK 21 (use o script já incluído no projeto):
+PREPARAR-ANDROID-WINDOWS.bat
+
+4) Build Gradle real:
+cd android
+gradlew.bat clean assembleRelease
+
+5) Confirme no log/artefato:
+versionName = 1.0.92
+versionCode = 92
+
+APK esperado em uma árvore semelhante a:
+android\app\build\outputs\apk\release\
+
+TESTE FÍSICO OBRIGATÓRIO PARA ESTE HOTFIX:
+A) iniciar Observe e pegar uma viagem normalmente;
+B) cancelar a viagem pelo fluxo NVU/GTO até o estado ficar CANCELLED/observando;
+C) abrir imediatamente uma lista real de fretes;
+D) sem tocar na bolinha, a lista deve ser certificada e o estado deve entrar automaticamente em WAITING_FREIGHT;
+E) tocar Aceitar rapidamente em qualquer linha, inclusive antes de o card terminar de atualizar;
+F) o toque deve permanecer correlacionado à mesma página/linha e o frete selecionado deve virar a viagem atual;
+G) nenhum dado da viagem cancelada pode atravessar para a nova sessão;
+H) gameplay/HUB parecido com lista continua sem autoridade: sem Aceitar+Km+valor semânticos da própria página, não pode abrir novo ciclo;
+I) repetir cancelar -> abrir lista -> Aceitar pelo menos 5 vezes seguidas sem reiniciar Observe.
+
+
+HF40 é Android-only em relação à HF39. Não é necessário novo deploy Web/Netlify/Functions apenas por HF40.

@@ -17,11 +17,18 @@ check("HF24 baseline identity is preserved or advanced", currentCode >= 76 && cu
 check("release workflow remains aligned to current Android identity", workflow.includes(`EXPECTED_VERSION_CODE: "${currentCode}"`) && workflow.includes(`EXPECTED_VERSION_NAME: "1.0.${currentPatch}"`));
 check("clean checkout lifecycle audit no longer requires generated Capacitor assets", !lifecycle.includes("readdirSync('android/app/src/main/assets/public/assets')"));
 check("certificate parser accepts modern apksigner V3 output", workflow.includes("certificate SHA-256 digest:[[:space:]]"));
-check("drag outside GTO exposes remove target", service.includes("GtoBubbleDismissPolicy.shouldShowRemoveTarget(gtoForeground, true)") && service.includes("Remover e parar NVU"));
-check("dropping on remove target stops observer", service.includes("isBubbleDroppedOnRemoveTarget()") && service.includes("stopObserverFromFloatingBubble()") && service.includes("ACTION_STOP"));
-check("remove target is disabled inside GTO", service.includes("if (gtoForeground || windowManager == null || bubbleRemoveTargetView != null) return;"));
+check("drag outside GTO exposes generation-bound remove target", service.includes("GtoBubbleDismissPolicy.shouldShowRemoveTarget(") && service.includes("showBubbleRemoveTarget(bubbleActiveGestureGeneration)") && service.includes("Remover e parar NVU"));
+check("dropping on remove target stops observer only after fail-safe policy", service.includes("GtoBubbleDismissPolicy.canCommitStop(") && service.includes("stopObserverFromFloatingBubble(releaseGeneration)") && service.includes("ACTION_STOP"));
+check("remove target is disabled inside GTO", service.includes("if (gtoForeground || windowManager == null || bubbleRemoveTargetView != null"));
 check("capture loss can auto-request fresh authorization", service.includes("ensureProjectionAuthorizationIfNeeded(now)") && service.includes("AUTO_REAUTH_AFTER_CAPTURE_LOSS"));
-check("dead surface escalates after repeated recovery", service.includes("PROJECTION_SURFACE_REAUTH_ESCALATION_ATTEMPTS") && service.includes("escalateProjectionToFreshAuthorization"));
+const recoveryStart = service.indexOf("private void maybeRecoverProjectionFrameDelivery(long now)");
+const recoveryEnd = service.indexOf("private void rebindProjectionSurfaceWithoutReauthorization", recoveryStart);
+const recoveryBody = service.slice(recoveryStart, recoveryEnd);
+check("repeated frame stalls stay on same grant instead of permission escalation",
+  service.includes("PROJECTION_SURFACE_REAUTH_ESCALATION_ATTEMPTS")
+    && recoveryBody.includes("RECOVERING_SURFACE_PERSISTENT")
+    && recoveryBody.includes("rebindProjectionSurfaceWithoutReauthorization")
+    && !recoveryBody.slice(recoveryBody.indexOf("GtoCaptureHealthPolicy.shouldRecoverSurface")).includes("escalateProjectionToFreshAuthorization"));
 check("explicit permission denial suppresses prompt loop", service.includes('putBoolean("projectionReauthAutoAllowed", false)'));
 check("selected-row OCR remains primary", service.includes("immutable pre-touch row is a first-class evidence source") && service.includes("can never overwrite a valid precise read"));
 check("single frozen same-row evidence may fill a missing field", service.includes("GtoFrozenFreightFallbackPolicy.canUse") && service.includes("FROZEN_TOUCH_BASELINE"));

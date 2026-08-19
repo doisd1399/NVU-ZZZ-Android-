@@ -5,13 +5,13 @@ import { getStorage } from "firebase/storage";
 import { getFunctions } from "firebase/functions";
 
 const firebaseConfig = {
-  apiKey: ["A", "I", "z", "a", "SyCUoMAtCJHYSN1" + "U0MUKhbMf9kvwBAuL8pM"].join(""),
-  authDomain: "vtc-frota-log.firebaseapp.com",
-  projectId: "vtc-frota-log",
-  storageBucket: "vtc-frota-log.firebasestorage.app",
-  messagingSenderId: "451561168694",
-  appId: "1:451561168694:web:edc3202205655abdc45d97",
-  measurementId: "G-QQZJNEKZNR",
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || ["A", "I", "z", "a", "SyCUoMAtCJHYSN1" + "U0MUKhbMf9kvwBAuL8pM"].join(""),
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "vtc-frota-log.firebaseapp.com",
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "vtc-frota-log",
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "vtc-frota-log.firebasestorage.app",
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "451561168694",
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || "1:451561168694:web:edc3202205655abdc45d97",
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || "G-QQZJNEKZNR",
 };
 
 const app = initializeApp(firebaseConfig);

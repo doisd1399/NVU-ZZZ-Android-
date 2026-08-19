@@ -135,7 +135,7 @@ function auditReachability(relativeDir, relativeEntry, ignore = new Set()) {
 auditReachability("src", "src/main.tsx", new Set(["src/vite-env.d.ts"]));
 auditReachability("functions/src", "functions/src/index.ts");
 
-const unusedRuntimeDependencies = ["@google/genai", "dotenv", "react-medium-image-zoom"].filter(
+const unusedRuntimeDependencies = ["dotenv", "react-medium-image-zoom"].filter(
   (dependency) => packageJson.dependencies?.[dependency],
 );
 if (unusedRuntimeDependencies.length) {

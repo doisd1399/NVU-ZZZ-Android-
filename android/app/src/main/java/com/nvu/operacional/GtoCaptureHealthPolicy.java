@@ -25,6 +25,9 @@ final class GtoCaptureHealthPolicy {
         long lastAnalyzedAt
     ) {
         if (!projectionActive || !tokenPresent || !displayPresent || !readerPresent || !handlerPresent) return false;
+        // HF32: white means the detector is actually capable of interpreting the current
+        // GTO stream. Buffer delivery/stability alone is not enough, otherwise the UI can
+        // claim healthy while every classifier frame is being gated away.
         if (!gtoForeground || analysisPaused || !stabilityReady) return false;
         if (now <= 0L || lastFrameAt <= 0L || lastAnalyzedAt <= 0L) return false;
         if (now < lastFrameAt || now < lastAnalyzedAt) return false;
@@ -53,7 +56,7 @@ final class GtoCaptureHealthPolicy {
         long recoveryCooldownMs
     ) {
         if (!projectionActive || !tokenPresent || !displayPresent || !readerPresent || !handlerPresent) return false;
-        if (!gtoForeground || analysisPaused || surfacePending || permissionInFlight) return false;
+        if (surfacePending || permissionInFlight) return false;
         long frameReferenceAt = lastFrameAt > 0L ? lastFrameAt : Math.max(projectionStartedAt, lastRecoveryAt);
         if (frameReferenceAt <= 0L || now < frameReferenceAt) return false;
         long frameTimeout = lastFrameAt > 0L ? staleFrameTimeoutMs : firstFrameTimeoutMs;
@@ -62,7 +65,9 @@ final class GtoCaptureHealthPolicy {
         long analysisReferenceAt = lastAnalyzedAt > 0L
             ? lastAnalyzedAt
             : Math.max(projectionStartedAt, lastRecoveryAt);
-        boolean analysisStalled = analysisReferenceAt > 0L
+        boolean analysisStalled = gtoForeground
+            && !analysisPaused
+            && analysisReferenceAt > 0L
             && now >= analysisReferenceAt
             && now - analysisReferenceAt >= staleAnalysisTimeoutMs;
 

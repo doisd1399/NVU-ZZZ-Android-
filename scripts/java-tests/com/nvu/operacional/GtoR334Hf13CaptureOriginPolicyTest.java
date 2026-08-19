@@ -18,16 +18,20 @@ public final class GtoR334Hf13CaptureOriginPolicyTest {
             now, 9_500L, 7_000L), "stale analysis must not be reported healthy");
         require(!GtoCaptureHealthPolicy.isHealthy(
             true, true, true, true, true, false, true, false,
-            now, 9_900L, 9_900L), "background GTO must not report visual health");
+            now, 9_900L, 9_900L), "fresh buffers outside a ready GTO must not fake recognition health");
 
         require(GtoCaptureHealthPolicy.shouldRecoverSurface(
             true, true, true, true, true, true, false, false, false,
             20_000L, 15_000L, 19_500L, 10_000L, 18_000L, 2_800L, 3_200L, 4_200L, 1_500L),
             "surface recovery must remain repeatable after cooldown");
-        require(!GtoCaptureHealthPolicy.shouldRecoverSurface(
+        require(GtoCaptureHealthPolicy.shouldRecoverSurface(
             true, true, true, true, true, false, true, false, false,
             20_000L, 15_000L, 19_500L, 10_000L, 18_000L, 2_800L, 3_200L, 4_200L, 1_500L),
-            "surface must not be rebound while GTO is intentionally paused");
+            "real frame-delivery stall must self-heal even while foreground classification is paused");
+        require(!GtoCaptureHealthPolicy.shouldRecoverSurface(
+            true, true, true, true, true, false, true, false, false,
+            20_000L, 19_900L, 15_000L, 10_000L, 18_000L, 2_800L, 3_200L, 4_200L, 1_500L),
+            "analysis-only stall must stay neutral while GTO analysis is intentionally paused");
 
         require(GtoCaptureHealthPolicy.shouldRecoverSurface(
             true, true, true, true, true, true, false, false, false,
@@ -78,9 +82,9 @@ public final class GtoR334Hf13CaptureOriginPolicyTest {
                 "RESULT_CONFIRMED", true, false),
                 "ACKed trip " + trip + " must prepare next freight without ending automatic session");
         }
-        require(!GtoDeterministicFlowPolicy.mayProbeFreightListForCurrentState(
+        require(GtoDeterministicFlowPolicy.mayProbeFreightListForCurrentState(
             "TRIP_IN_PROGRESS", false),
-            "active trip replacement must remain gated even when informational list probing is enabled in service");
+            "active trip must always observe a returned jobs list; stable evidence decides the lifecycle transition");
 
         System.out.println("GtoR334Hf13CaptureOriginPolicyTest: PASS");
     }

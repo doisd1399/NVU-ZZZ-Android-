@@ -1,0 +1,40 @@
+NVU R3.34 PC-HF32 — CONTINUOUS GTO RECOGNITION
+Android 1.0.84 / versionCode 84
+
+ROOT CAUSE ADDRESSED
+- HF31 compared Image.getTimestamp() with System.nanoTime() to decide frame age. Android does not guarantee that a media Image producer timestamp shares System.nanoTime()'s absolute timebase. On affected OEM/source combinations this can discard every live detector frame before GtoFastVisualDetector runs.
+- The capture stability path also advanced lastProjectionAnalyzedFrameAt without running the screen classifier, allowing the white dot to report healthy while the detector was blind.
+- Recognition outside WAITING_FREIGHT was too state-scoped; screen observation and state mutation were coupled.
+
+HF32 CHANGES
+1. Image timestamps are used only as same-ImageReader producer ordering. No wall-clock subtraction and no System.nanoTime() comparison.
+2. Ordered WAITING_FREIGHT queue remains bounded by ImageReader(3); non-waiting states use acquireLatestImage().
+3. White capture-health dot now requires GTO foreground + stable capture + a real classifier heartbeat. Stability-only buffer qualification cannot fake health.
+4. The lightweight recognizer also runs while the stability gate is qualifying frames; the gate controls state mutation, never whether GTO is observed.
+5. Lightweight OCR-free visual recognition runs every 90 ms in every capture-required GTO state.
+6. Recognition is informational by default; deterministic state/human-evidence rules remain the only authority for journey mutation.
+7. Semantic result OCR fallback reduced from 1800 ms to 650 ms for near-real-time completion recognition without OCR on every frame.
+8. Producer-order baselines reset on geometry/session/surface invalidation.
+9. Both exact real user screenshots that failed in HF31 are packaged regression fixtures.
+10. HF31 fail-safe floating-button lifecycle protections remain intact.
+
+RELEASE RULE
+This source is an APK candidate after automated gates. Final production approval still requires signed-APK validation on the physical OEM device because MediaProjection/UsageStats delivery is Android/OEM controlled.
+
+AUTOMATED VALIDATION COMPLETED
+- Android Java syntax: PASS (42 native sources).
+- Exact user freight screenshots: PASS, both with the NVU card closed and open; 5/5 rows recognized by the production GtoFastVisualDetector.
+- R3.29 strict screen regression: 15/15 PASS.
+- HF10 projection/runtime: 33/33 PASS.
+- HF12 intelligent flow: 20/20 PASS.
+- HF13 capture/origin: 16/16 PASS.
+- HF16 simple flow: 12/12 PASS.
+- HF21 selected-row authority: 13/13 PASS.
+- HF22 observer diagnostics: 21/21 PASS.
+- HF23..HF29 regression gates: PASS.
+- HF30 continuous MediaProjection: 24/24 PASS.
+- HF31 floating-bubble lifecycle: 16/16 PASS.
+- HF32 continuous recognition: 18/18 PASS.
+
+NOTE
+This environment does not contain the Android SDK, so the signed physical APK is intentionally not claimed as device-certified here. The supplied ZIP is the source candidate for the normal Android release build; the signed APK must still be exercised on the affected OEM device before production promotion.

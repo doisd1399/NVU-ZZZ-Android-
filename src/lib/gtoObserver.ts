@@ -77,7 +77,6 @@ export interface GtoObserverStatus {
   screenAnalysisPauseReason?: string;
   tripStateWhenAnalysisPaused?: string;
   activeTripFreightListVisible?: boolean;
-  freightReplacementExplicitlyArmed?: boolean;
   frameProcessingErrorArea?: string;
   frameProcessingError?: string;
   frameProcessingErrorAt?: number;

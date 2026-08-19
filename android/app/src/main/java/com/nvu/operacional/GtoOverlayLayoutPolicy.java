@@ -170,6 +170,36 @@ final class GtoOverlayLayoutPolicy {
         return clamp(preferredY, top, maxY);
     }
 
+
+    // HF56: persist a preferred GTO location as a normalized value inside the current
+    // safe drag span. Pixel coordinates are still written for backwards diagnostics, but
+    // the normalized anchor survives resolution/inset changes without importing portrait
+    // coordinates into the landscape simulator.
+    static int normalizedPosition(int position, int min, int max, int scale) {
+        int safeScale = Math.max(1, scale);
+        if (max <= min) return 0;
+        int clamped = clamp(position, min, max);
+        return clamp(Math.round((clamped - min) * safeScale / (float) (max - min)), 0, safeScale);
+    }
+
+    static int positionFromNormalized(int normalized, int min, int max, int scale) {
+        int safeScale = Math.max(1, scale);
+        if (max <= min) return min;
+        int n = clamp(normalized, 0, safeScale);
+        return clamp(min + Math.round((max - min) * n / (float) safeScale), min, max);
+    }
+
+    static int defaultTopX(int safeLeft, int maxX) {
+        if (maxX <= safeLeft) return safeLeft;
+        // A quarter of the available horizontal span keeps the bubble away from the
+        // simulator's left HUD and top-right pause/camera controls on a fresh install.
+        return clamp(safeLeft + Math.round((maxX - safeLeft) * 0.25f), safeLeft, maxX);
+    }
+
+    static boolean isInsideSafeRange(int value, int min, int max) {
+        return value >= min && value <= max;
+    }
+
     private static int clamp(int value, int min, int max) {
         return Math.max(min, Math.min(max, value));
     }

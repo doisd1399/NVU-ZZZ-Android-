@@ -11,7 +11,23 @@ final class GtoFreightSemanticCertificationPolicy {
     static boolean isCertifiedPage(int visualRowCount, int parsedRowCount, int sameRowMoneyAnchors) {
         if (visualRowCount < 1 || visualRowCount > 6) return false;
         if (parsedRowCount < 1 || parsedRowCount > 6) return false;
-        return sameRowMoneyAnchors >= 1;
+        // HF35: multi-row freight pages must repeat the semantic template. A single
+        // accidental money-like OCR token can no longer certify an entire screen.
+        int requiredAnchors = visualRowCount == 1 ? 1 : Math.min(2, visualRowCount);
+        return sameRowMoneyAnchors >= requiredAnchors;
+    }
+
+    static boolean isCertifiedLifecycleBoundaryPage(
+        int visualRowCount,
+        int parsedRowCount,
+        int sameRowAcceptMoneyAnchors,
+        int sameRowCompleteAnchors
+    ) {
+        // Destructive lifecycle transitions are stricter than passive list display.
+        // At least one row must contain the complete repeated GTO freight signature:
+        // Aceitar text + monetary value + distance on the same visually anchored row.
+        return isCertifiedPage(visualRowCount, parsedRowCount, sameRowAcceptMoneyAnchors)
+            && sameRowCompleteAnchors >= 1;
     }
 
     static boolean selectedRowCanCertify(

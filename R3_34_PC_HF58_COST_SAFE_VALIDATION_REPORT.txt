@@ -1,0 +1,90 @@
+NVU R3.34-PC-HF58 — COST SAFE
+Android 1.0.110 / versionCode 110
+Data da revisão: 18/08/2026
+Base: R3.34-PC-HF57 / Android 1.0.109
+
+OBJETIVO
+Reduzir custos desnecessários de Google/Firebase/IA sem alterar o comportamento funcional aprovado da HF57 no Observador GTO.
+
+ALTERAÇÕES APLICADAS
+1. IA / GEMINI
+- Removido @google/genai de package.json e package-lock.json porque estava instalado sem qualquer uso executável.
+- Removida a declaração SERVER_SIDE_GEMINI_API de metadata.json.
+- Removido vestígio GEMINI_API_KEY do .env.example.
+- Auditoria confirma ausência de referências runtime a Gemini/GenAI, Generative Language, Cloud Vision, Maps/Places/Routes, Speech, Translate e Vertex AI nas áreas executáveis verificadas.
+
+2. FIREBASE FUNCTIONS — SINCRONIZAÇÃO DE ESTADO GTO
+- Antes de syncGtoTripState, o Android exige FirebaseAuth nativo válido e UID igual ao driverId; sem autenticação válida não é feita chamada Google.
+- Retry canônico agressivo foi substituído por backoff: 15s, 30s, 60s, 120s, 240s e teto de 5 min para falhas transitórias.
+- Falhas permanentes de contrato/permissão não entram em tempestade de retry.
+- Espera local de autenticação não consome callable.
+- Callbacks atrasados são isolados por geração e não podem reativar retry de estado antigo.
+- syncGtoTripState tornou-se idempotente quando o estado-alvo já foi confirmado no servidor, protegendo contra ACK perdido.
+
+3. FIRESTORE — PROGRESSO DO TRABALHO GTO
+- Trabalhos antigos fazem uma única reconciliação histórica segura.
+- Após a reconciliação, cada nova viagem atualiza progress atomicamente na mesma transação que cria a viagem, sem reler todo historico_viagens do trabalho.
+- Retry duplicado usa o progress já consolidado e não executa nova varredura histórica.
+- completedRoutes do modo simple continua preservado e atualizado.
+
+4. PROTEÇÕES DE RELEASE
+- audit:firebase-costs foi fortalecido para detectar reintrodução de GenAI/Gemini, retry canônico agressivo, ausência do gate de autenticação, perda da idempotência e regressão do fast path de progresso.
+- verify:release agora executa audit:firebase-costs obrigatoriamente.
+- Criado test:gto-r3.34-hf58-cost-safe.
+
+NÃO ALTERADO INTENCIONALMENTE
+- ML Kit OCR local.
+- Detecção visual GTO.
+- Fluxo de seleção/aceite de frete.
+- Resultado/Receber/ADS guard.
+- Mensagens instantâneas HF57 e correção 1 opção / N opções.
+- Posição/arraste da bolha HF56.
+- Vozes locais.
+- App Check não foi colocado em enforcement nesta versão para não bloquear APKs existentes.
+- Gatilhos de ranking/NVU News não foram refatorados nesta versão por representarem mudança de backend mais ampla.
+
+VALIDAÇÕES EXECUTADAS
+- verify:project: PASS.
+- verify:cap-remote: PASS.
+- JavaSyntaxCheck: PASS — 53 fontes Android.
+- audit:firebase-costs: PASS — 0 críticos / 0 avisos.
+- TypeScript das duas Functions alteradas (gtoTrips.ts + gtoState.ts) com stubs de API Firebase: PASS.
+- R3.25 detection-flow: 16/16 PASS, incluindo type-check real de gtoTrips.ts.
+- HF37: 19/19 PASS.
+- HF38: 18/18 PASS.
+- HF39 checks próprios: 17/17 PASS; regressões HF35/HF37/HF38 foram executadas independentemente e aprovadas.
+- HF40: 14/14 PASS.
+- HF41: 14/14 PASS.
+- HF42: 29/29 PASS.
+- HF43: 17/17 PASS.
+- HF44: 17/17 PASS.
+- HF45: 18/18 PASS.
+- HF46: 10/10 PASS.
+- HF47: 13/13 PASS.
+- HF48: 17/17 PASS.
+- HF49: 17/17 PASS.
+- HF50: 30/30 PASS.
+- HF51: 43/43 PASS.
+- HF53 AI Studio alignment: 15/15 PASS.
+- HF54: 23/23 PASS.
+- HF55: 20/20 PASS.
+- HF56: 14/14 PASS.
+- HF57 instant messages: 20/20 PASS.
+- HF58 Cost Safe: 21/21 PASS.
+- Diversos gates anteriores R3.7–HF36 também foram executados durante a auditoria e permaneceram verdes.
+
+LIMITAÇÕES DO AMBIENTE DE VALIDAÇÃO
+- O ZIP HF57 original não contém node_modules/tesseract.js/dist/worker.min.js. Por isso npm run build local exige npm install, exatamente como informa o próprio prebuild.
+- Este ambiente não tinha acesso ao registry npm, então npm ci/npm --prefix functions ci não puderam ser repetidos aqui.
+- Não há Android SDK configurado neste ambiente para executar assembleRelease local.
+- A auditoria estrutural mantém os mesmos achados preexistentes da HF57: NavigationProgress.tsx, UploadTest.tsx, PerformanceContext.tsx, Operations.tsx e nvuNewsBackfillService.ts sem caminho de execução; dotenv e react-medium-image-zoom como dependências diretas sem uso. Nenhum desses achados foi introduzido pela HF58.
+
+BARREIRA DE SEGURANÇA DO APK
+O workflow HF58 do GitHub foi mantido fail-closed: antes de entregar o APK ele executa npm ci, instala/builda Functions, verify:release (agora incluindo auditoria de custos), build Web, sincronização Capacitor, Gradle assembleRelease, verificação das vozes, assinatura, badging applicationId/version e SHA-256. Se qualquer etapa falhar, o APK de release não é produzido.
+
+DEPLOYMENT
+- Para obter as economias Android de retry, gerar/instalar o APK HF58 1.0.110.
+- Para ativar idempotência server-side e progresso O(1), publicar também as Firebase Functions HF58 (syncGtoTripState e registerGtoTrip/export correspondente). O workflow de build do APK compila Functions para validação, mas não faz deploy delas automaticamente.
+
+CONCLUSÃO
+As alterações HF58 foram deliberadamente limitadas a custo/robustez remota. Os componentes sensíveis do Observador e o comportamento aprovado da HF57 não foram refatorados. Não existe garantia absoluta sem o build e teste físico final do APK no dispositivo, mas não foi detectada regressão funcional nos gates disponíveis; o CI foi configurado para rejeitar o release se a compilação real ou qualquer validação obrigatória falhar.

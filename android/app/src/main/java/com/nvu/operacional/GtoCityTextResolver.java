@@ -140,6 +140,62 @@ final class GtoCityTextResolver {
         return new Resolution(precise, true, "VERIFIED_SELECTED_ROW_HIGHER_CONFIDENCE");
     }
 
+    /**
+     * Returns the single known GTO destination that is exactly one OCR edit away from
+     * the visible text. This is advisory only: callers must obtain an independent
+     * focused read before adopting the canonical spelling.
+     */
+    static String uniquePreferredNearCandidate(String visibleValue) {
+        String visible = clean(visibleValue);
+        if (visible.isEmpty()) return "";
+        String found = "";
+        for (String candidate : PREFERRED_DESTINATIONS) {
+            if (sameNormalized(visible, candidate)) return "";
+            if (!isSafeOneEditVariant(visible, candidate)) continue;
+            if (!found.isEmpty() && !sameNormalized(found, candidate)) return "";
+            found = candidate;
+        }
+        return found;
+    }
+
+
+    /**
+     * Returns a canonical GTO destination only when the visible OCR maps to exactly one
+     * official/trusted destination. Exact normalized matches (for example missing accents)
+     * and a single one-edit OCR variant are accepted. Ambiguous matches return an empty
+     * string so the caller can retry/review instead of guessing.
+     */
+    static String uniqueOfficialCanonicalCandidate(String visibleValue, List<String> trustedCities) {
+        String visible = clean(visibleValue);
+        if (visible.isEmpty()) return "";
+
+        LinkedHashMap<String, String> canonical = new LinkedHashMap<>();
+        for (String candidate : PREFERRED_DESTINATIONS) {
+            String cleanCandidate = clean(candidate);
+            String key = normalize(cleanCandidate);
+            if (!key.isEmpty() && !canonical.containsKey(key)) canonical.put(key, cleanCandidate);
+        }
+        if (trustedCities != null) {
+            for (String candidate : trustedCities) {
+                String cleanCandidate = clean(candidate);
+                String key = normalize(cleanCandidate);
+                if (!key.isEmpty() && !canonical.containsKey(key)) canonical.put(key, cleanCandidate);
+            }
+        }
+
+        String normalizedVisible = normalize(visible);
+        String exact = canonical.get(normalizedVisible);
+        if (exact != null && !exact.isEmpty()) return exact;
+
+        String found = "";
+        for (String candidate : canonical.values()) {
+            if (!isSafeOneEditVariant(visible, candidate)) continue;
+            if (!found.isEmpty() && !sameNormalized(found, candidate)) return "";
+            found = candidate;
+        }
+        return found;
+    }
+
     static boolean isSafeOneEditVariant(String first, String second) {
         String a = normalize(first);
         String b = normalize(second);

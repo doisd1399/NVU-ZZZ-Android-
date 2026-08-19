@@ -1,4 +1,8 @@
+import { withTimeout } from "../lib/asyncTimeout";
+
 const LOCAL_TESSDATA_PATH = "/tessdata";
+const LOCAL_TESSERACT_WORKER_PATH = "/tesseract/worker.min.js";
+const LOCAL_TESSERACT_CORE_PATH = "/tesseract/core";
 const VALUE_CROP = {
   x: 0.28,
   y: 0.35,
@@ -171,6 +175,37 @@ const detectDoubledByAdEvidence = (
 
   return {
     detected: evidence.length > 0,
+    evidence,
+  };
+};
+
+const detectResultScreenEvidence = (
+  rawText: string,
+  value: string | null,
+): { valid: boolean; evidence: string[] } => {
+  const normalized = normalizeEvidenceText(rawText);
+  if (!normalized) return { valid: false, evidence: [] };
+
+  const evidence: string[] = [];
+  const push = (label: string) => {
+    if (!evidence.includes(label)) evidence.push(label);
+  };
+
+  if (/\b(?:concluido|concluida|finalizado|finalizada)\b/.test(normalized)) {
+    push("tela-conclusao");
+  }
+  if (/\bvalor.{0,18}(?:a )?receber\b/.test(normalized) || /\breceber\b/.test(normalized)) {
+    push("contexto-recebimento");
+  }
+  if (/\bdobrar valor\b/.test(normalized) || /\bads?\b/.test(normalized)) {
+    push("acao-resultado");
+  }
+  if (value) push("valor-monetario");
+
+  // Require multiple independent clues. This rejects random HUD text while
+  // remaining tolerant when OCR misses one field on slower/blurrier devices.
+  return {
+    valid: evidence.length >= 2,
     evidence,
   };
 };
@@ -385,61 +420,92 @@ const ocrLogger = (message: { status: string; progress?: number }) => {
   }
 };
 
-const recognizeLocally = async (image: HTMLCanvasElement): Promise<string> => {
-  const tesseractModule = await import("tesseract.js");
-  const Tesseract = tesseractModule.default || tesseractModule;
+type GtoOcrWorker = {
+  recognize: (image: HTMLCanvasElement) => Promise<{ data?: { text?: string } }>;
+  terminate: () => Promise<unknown>;
+};
 
-  try {
-    const result = await Tesseract.recognize(image, "eng", {
+const createLocalWorker = async (): Promise<GtoOcrWorker> => {
+  const tesseractModule: any = await withTimeout(
+    import("tesseract.js"),
+    8_000,
+    "O mecanismo de leitura demorou para iniciar.",
+  );
+  const api = tesseractModule.default || tesseractModule;
+  const createWorker = tesseractModule.createWorker || api.createWorker;
+  if (typeof createWorker !== "function") {
+    throw new Error("Mecanismo OCR local indisponível.");
+  }
+
+  // The language model is bundled in public/tessdata so GTO print mode never
+  // depends on a CDN or mobile network just to analyze a receipt.
+  return await withTimeout(
+    createWorker("eng", undefined, {
+      workerPath: LOCAL_TESSERACT_WORKER_PATH,
+      corePath: LOCAL_TESSERACT_CORE_PATH,
       langPath: LOCAL_TESSDATA_PATH,
       logger: ocrLogger,
-    });
+    }),
+    15_000,
+    "O modelo OCR local demorou para carregar.",
+  );
+};
 
-    return result.data.text || "";
-  } catch (localModelError) {
-    // Free network fallback. It is only used when the bundled language file
-    // cannot be loaded, keeping older deployments compatible.
-    console.warn("[NVU GTO OCR] local model fallback", localModelError);
-    const result = await Tesseract.recognize(image, "eng", {
-      logger: ocrLogger,
-    });
-    return result.data.text || "";
-  }
+const recognizeWithWorker = async (
+  worker: GtoOcrWorker,
+  image: HTMLCanvasElement,
+  timeoutMs: number,
+): Promise<string> => {
+  const result = await withTimeout(
+    worker.recognize(image),
+    timeoutMs,
+    "A leitura do comprovante excedeu o tempo seguro neste aparelho.",
+  );
+  return result?.data?.text || "";
 };
 
 export async function analyzeGtoTripReceipt(
   file: File,
 ): Promise<GtoReceiptAnalysis> {
+  let worker: GtoOcrWorker | null = null;
+
   try {
     console.log("[NVU GTO OCR] receipt analysis start", file.name, file.size);
+    worker = await createLocalWorker();
 
     const resultCanvas = await buildResultAnalysisCanvas(file);
-    const resultText = await recognizeLocally(resultCanvas);
+    const resultText = await recognizeWithWorker(worker, resultCanvas, 22_000);
     const normalizedResultText = resultText.replace(/\s+/g, " ").trim();
-    const adEvidence = detectDoubledByAdEvidence(normalizedResultText);
     let value = extractValueFromText(normalizedResultText);
 
-    // The wider result crop normally finds both value and confirmation text.
-    // If it misses only the value, use the legacy narrow value crop as a
-    // precision fallback instead of performing two OCR passes every time.
+    // Reuse the same initialized worker for the narrow value crop. This avoids
+    // paying the model/worker startup cost twice on low-end Android devices.
     let combinedText = normalizedResultText;
     if (!value) {
       const valueCanvas = await buildValueBandCanvas(file);
-      const valueText = await recognizeLocally(valueCanvas);
+      const valueText = await recognizeWithWorker(worker, valueCanvas, 12_000);
       const normalizedValueText = valueText.replace(/\s+/g, " ").trim();
       value = extractValueFromText(normalizedValueText);
       combinedText = `${normalizedResultText} ${normalizedValueText}`.trim();
     }
 
+    const screenEvidence = detectResultScreenEvidence(combinedText, value);
+    const finalAdEvidence = detectDoubledByAdEvidence(combinedText);
+
     console.log("[NVU GTO OCR] receipt text", combinedText);
     console.log("[NVU GTO OCR] receipt value", value);
-    console.log("[NVU GTO OCR] doubled by ad", adEvidence.detected, adEvidence.evidence);
+    console.log(
+      "[NVU GTO OCR] doubled by ad",
+      finalAdEvidence.detected,
+      finalAdEvidence.evidence,
+    );
+    console.log("[NVU GTO OCR] result evidence", screenEvidence.evidence);
 
     return {
       value,
-      doubledByAd: adEvidence.detected,
-      evidence: adEvidence.evidence,
-      analysisOk: Boolean(combinedText),
+      doubledByAd: finalAdEvidence.detected,
+      evidence: finalAdEvidence.evidence,
+      analysisOk: screenEvidence.valid || finalAdEvidence.detected,
       rawText: combinedText,
     };
   } catch (error) {
@@ -451,6 +517,18 @@ export async function analyzeGtoTripReceipt(
       analysisOk: false,
       rawText: "",
     };
+  } finally {
+    if (worker) {
+      try {
+        await withTimeout(
+          worker.terminate(),
+          3_000,
+          "Tempo excedido ao encerrar OCR.",
+        );
+      } catch (error) {
+        console.warn("[NVU GTO OCR] worker termination warning", error);
+      }
+    }
   }
 }
 
@@ -464,4 +542,5 @@ export const __gtoOcrTestUtils = {
   normalizeMonetaryCandidate,
   normalizeEvidenceText,
   detectDoubledByAdEvidence,
+  detectResultScreenEvidence,
 };

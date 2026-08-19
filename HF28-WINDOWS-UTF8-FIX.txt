@@ -1,0 +1,21 @@
+NVU R3.34 PC-HF28 — Windows UTF-8 Fix
+Android 1.0.80 / versionCode 80
+
+Causa raiz corrigida:
+- O teste HF28 chamava javac diretamente sem -encoding UTF-8.
+- No Windows, javac herdava windows-1252 e falhava ao ler fontes UTF-8 contendo "Águas Velhas".
+
+Correções:
+- scripts/test-gto-r3-34-hf28-known-destination.mjs: javac fixado em -encoding UTF-8.
+- scripts/java-tests/JavaSyntaxCheck.java: compilador também fixado em UTF-8.
+- PREPARAR-ANDROID-WINDOWS.bat: textos/identidade alinhados à HF28.
+- Gradle já possuía options.encoding = 'UTF-8' e foi preservado.
+
+Validações após a correção:
+- HF28 known destination: 12/12 PASS
+- JavaSyntaxCheck: 41 fontes PASS
+- R3.34 PC hotfix: 24/24 PASS
+- HF27 capture/destination: 16/16 PASS
+- HF26 human evidence: 20/20 PASS + 3080 assertions
+
+Nenhuma lógica do observador GTO, seleção, OCR, MediaProjection, sincronização ou backend foi alterada.

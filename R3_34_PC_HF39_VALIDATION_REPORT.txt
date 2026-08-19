@@ -1,0 +1,200 @@
+NVU R3.34-PC-HF39 — AUDITORIA / CAUSA RAIZ / VALIDAÇÃO
+Data: 2026-08-17
+Android: 1.0.91
+versionCode: 91
+Base: R3.34-PC-HF38
+Escopo desta hotfix: Android nativo GTO Observe. Web/Netlify/Functions permanecem sem alteração em relação ao alinhamento anterior.
+
+======================================================================
+1. INCIDENTE FÍSICO QUE REPROVOU HF38
+======================================================================
+
+Fixtures permanentes adicionadas a esta release:
+- scripts/fixtures/hf39-state-boundary/list-visible-stale-review.png
+- scripts/fixtures/hf39-state-boundary/gameplay-review.png
+- scripts/fixtures/hf39-state-boundary/gameplay-toast.png
+
+A captura list-visible-stale-review.png prova uma contradição de estado, não apenas um erro de OCR:
+- existe uma NOVA lista real de fretes visível e reconhecível;
+- a linha atual "Tijolos Maciços" mostra R$ 15.600;
+- o card NVU ainda mostra R$ 16.386,00, dado de uma seleção/lista anterior;
+- portanto o REVIEW_REQUIRED antigo permaneceu autoritativo mesmo depois de o GTO já ter voltado à lista.
+
+Regra funcional canônica informada e confirmada:
+UMA LISTA REAL DE FRETES QUE REAPARECE É UMA FRONTEIRA DE CICLO.
+A seleção/viagem/review anterior deixa de ser autoritativa e somente a nova página pode alimentar o próximo frete.
+
+======================================================================
+2. CAUSA RAIZ CRÍTICA CONFIRMADA
+======================================================================
+
+HF38 possuía uma exclusão explícita de CONFIRMING_FREIGHT/REVIEW_REQUIRED do caminho que trata uma lista reaberta durante um contexto ativo.
+
+Em termos de fluxo:
+  nova lista visível
+      -> detector visual reconhece estrutura
+      -> porém estado = CONFIRMING_FREIGHT + REVIEW_REQUIRED
+      -> isReplaceableActiveSessionState(...) retornava FALSE
+      -> handleActiveTripFreightListEvidence(...) não recebia autoridade
+      -> review antigo continuava vivo
+      -> snapshot/dados antigos podiam permanecer na tela e no estado
+
+Essa exclusão havia sido criada para proteger o snapshot congelado durante a confirmação automática do frete. A regra era válida para CONFIRMING_FREIGHT automático, mas foi aplicada também ao REVIEW_REQUIRED humano. Isso produziu a contradição vista no aparelho.
+
+A causa raiz, portanto, é uma colisão de duas autoridades:
+- autoridade do snapshot antigo de seleção/review;
+- autoridade da nova lista real do GTO.
+
+HF38 favorecia incorretamente o snapshot antigo quando havia REVIEW_REQUIRED.
+
+======================================================================
+3. CORREÇÃO ESTRUTURAL HF39 — FRONTEIRA DE LISTA CERTIFICADA
+======================================================================
+
+Foi criada a política pura:
+android/app/src/main/java/com/nvu/operacional/GtoFreightLifecycleBoundaryPolicy.java
+
+Nova invariante:
+- candidato visual sozinho NUNCA altera/cancela sessão;
+- lista deve passar a proteção HF35: evidência visual repetida + certificação semântica da MESMA página;
+- quando essa lista certificada reaparece em:
+    * TRIP_IN_PROGRESS
+    * RESULT_DETECTED
+    * AWAITING_BONUS_VALIDATION
+    * CONFIRMING_FREIGHT com REVIEW_REQUIRED
+  ela passa a ser a fronteira autoritativa do ciclo;
+- CONFIRMING_FREIGHT ainda executando OCR automático, sem REVIEW_REQUIRED, continua protegido para que o frame original da lista não reinicie a própria seleção.
+
+Para REVIEW_REQUIRED, a substituição exige:
+- semanticamente certificado = true;
+- pelo menos 2 frames visuais válidos;
+- pelo menos 55 ms de persistência visual;
+
+Somente depois desses gates o estado antigo é descartado.
+
+======================================================================
+4. SUBSTITUIÇÃO ATÔMICA — ZERO HERANÇA DA SESSÃO ANTERIOR
+======================================================================
+
+Ao promover a nova lista certificada:
+1. os buffers/linhas certificados da NOVA página são destacados temporariamente;
+2. a sessão/snapshot anterior é descartada;
+3. clearTripAnalysis() elimina review, seleção e dados antigos;
+4. beginTrip(false) cria uma NOVA sessão WAITING_FREIGHT;
+5. somente os FreightOption certificados da NOVA página são semeados;
+6. OCR de background continua para enriquecimento, mas não reduz a página já certificada para count=0/candidate;
+7. o próximo toque em Aceitar pertence exclusivamente à nova geração.
+
+Para review antigo substituído, a telemetria registra:
+- completionStatus = SELECTION_REPLACED
+- lastCancellationReason = PENDING_FREIGHT_REVIEW_REPLACED_BY_CERTIFIED_LIST
+
+Nenhum campo da seleção antiga é reutilizado para a nova seleção.
+
+======================================================================
+5. SEGUNDA INCONSISTÊNCIA — CARGA AINDA PODIA CAIR EM REVIEW
+======================================================================
+
+HF38 corrigiu linhas OCR mistas como "Tijolos Maciços 600Km", mas ainda existia uma última lacuna operacional:
+se OCR geral da linha + duas releituras focalizadas continuassem perdendo SOMENTE a carga, o fluxo entrava em REVIEW_REQUIRED.
+
+Isso é desnecessário quando a carga continua visualmente presente na própria linha selecionada.
+
+HF39 adiciona:
+android/app/src/main/java/com/nvu/operacional/GtoCargoTextRecoveryPolicy.java
+
+e runFocusedCargoOnlyRecovery(...) no GtoObserverService.
+
+Antes de revisão manual de CARGO:
+- usa EXCLUSIVAMENTE o bitmap imutável da linha selecionada;
+- recorta somente a banda superior-esquerda da própria linha;
+- tenta OCR em 1,85x e 2,30x;
+- remove tokens operacionais Km/R$/Aceitar sem descartar o texto restante;
+- aceita apenas texto literal cargo-like;
+- não usa dicionário, fuzzy matching, resolver de cidade ou outra linha;
+- se recuperar, marca cargoSelectedRowEvidence e segue commit normal;
+- review humano somente permanece se a carga realmente continuar ilegível.
+
+Essa recuperação não pode trocar o frete nem inventar carga.
+
+======================================================================
+6. FLUXO CANÔNICO RESULTANTE
+======================================================================
+
+Observe ativo
+  -> captura contínua / watchdog HF30
+  -> classificador visual contínuo
+  -> lista visual candidata
+  -> certificação semântica HF35
+  -> LISTA REAL CERTIFICADA
+       se contexto antigo ativo/review pendente:
+          descarta contexto antigo atomicamente
+       cria/garante WAITING_FREIGHT da nova geração
+       preserva snapshot/linhas SOMENTE da nova página
+  -> motorista toca Aceitar
+  -> identidade geométrica exata da linha + snapshot imutável
+  -> parser da linha + consenso da página
+  -> retries focalizados
+  -> se somente carga faltar: OCR cargo-only da mesma linha
+  -> commitPreciseFreight somente com campos seguros
+  -> TRIP_IN_PROGRESS
+
+HUB/gameplay parecido com lista:
+  -> no máximo FREIGHT_LIST_VISUAL_CANDIDATE
+  -> sem certificação semântica = NÃO cancela, NÃO substitui, NÃO escolhe frete.
+
+======================================================================
+7. TESTES / GATES EXECUTADOS
+======================================================================
+
+Executados sobre a fonte HF39:
+- JavaSyntaxCheck: PASS (46 fontes)
+- validate-gto-native-flow: 49/49 PASS
+- validate-gto-auto-sync: 74/74 PASS
+- HF30 continuous projection: 24/24 PASS
+- HF35 freight-list authority/HUB protection: 10/10 PASS
+- HF37 replacement session isolation: 19/19 PASS (regressão incorporada ao gate HF39)
+- HF38 mixed-line recovery: 18/18 PASS
+- HF39 certified-list boundary: 20/20 PASS em execução isolada anterior; políticas e fixtures também recompiladas/rodadas na auditoria final
+- GtoHf39CargoTextRecoveryPolicyTest: PASS
+- GtoHf39LifecycleBoundaryPolicyTest: PASS
+- GtoHf39UserStateBoundaryScreenshotTest: PASS
+
+A fixture física crítica foi validada assim:
+- list-visible-stale-review.png = lista real reconhecível mesmo com card NVU antigo sobreposto;
+- gameplay-review.png = não é lista;
+- gameplay-toast.png = não é lista.
+
+O gate HF39 também mantém verdes as regressões HF35, HF36, HF37 e HF38.
+
+Observação do executor:
+A execução agregada muito longa pode atingir o timeout do ambiente por repetir suites aninhadas, mas não apresentou falha funcional antes do timeout. Os gates críticos foram executados isoladamente/por regressão e passaram.
+
+======================================================================
+8. GRADLE / APK
+======================================================================
+
+Foi tentado iniciar o Gradle Wrapper local. O executor não possui Gradle 8.14.3 em cache e não consegue resolver services.gradle.org, resultando em UnknownHostException. Portanto este ambiente não consegue executar o Javac/assemble real do APK.
+
+Isso é uma limitação do executor, não um erro detectado na fonte. O build Android real continua obrigatório no ambiente Windows/GitHub com rede/JDK 21.
+
+======================================================================
+9. VEREDITO TÉCNICO
+======================================================================
+
+A causa raiz do estado mostrado nas capturas foi identificada diretamente no código:
+REVIEW_REQUIRED em CONFIRMING_FREIGHT não obedecia à mesma fronteira de nova lista real usada pelo restante do ciclo.
+
+HF39 corrige essa autoridade de estado sem enfraquecer a proteção contra falso positivo no HUB.
+
+A causa recorrente de "Confirme somente carga" também recebeu um último caminho automático restrito à própria linha selecionada, depois dos retries já existentes, sem inferência externa.
+
+Invariantes que HF39 passa a impor:
+1. lista visual não certificada nunca destrói estado;
+2. lista real certificada nunca pode coexistir com review antigo autoritativo;
+3. nova lista = nova geração; dados antigos não atravessam a fronteira;
+4. toque Aceitar só pertence à geração/lista atual;
+5. cargo não cai em ação humana enquanto ainda houver leitura literal segura da própria linha;
+6. HUB/gameplay não ganha autoridade por semelhança visual.
+
+HF39 é a candidata Android para o próximo APK: 1.0.91 / versionCode 91.

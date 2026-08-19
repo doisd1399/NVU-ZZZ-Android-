@@ -2,5 +2,5 @@
   "name": "Sistema NVU",
   "description": "Plataforma de gestão operacional e logística para frotas e motoristas",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": []
 }

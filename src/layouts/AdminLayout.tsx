@@ -57,7 +57,14 @@ import {
 } from "../lib/rankingPhotoWarmup";
 
 export default function AdminLayout() {
-  const { currentUser, switchRole, activeRole, logOutApp } = useSessionStore();
+  const {
+    currentUser,
+    switchRole,
+    activeRole,
+    logOutApp,
+    seniorCompanyId,
+    setSeniorCompanyId,
+  } = useSessionStore();
   const {
     companies,
     activeCompanyId,
@@ -71,6 +78,12 @@ export default function AdminLayout() {
   const { theme, toggleTheme } = useTheme();
   const location = useLocation();
   const isSeniorPanelRoute = location.pathname.startsWith("/admin/senior");
+  const isSeniorCompanyPreview = Boolean(
+    seniorCompanyId &&
+      activeCompanyId === seniorCompanyId &&
+      sessionStorage.getItem("seniorAccess") === "true" &&
+      !isSeniorPanelRoute,
+  );
   // The Senior route has its own Firebase-backed password/claim gate. Admin users
   // must be able to see and open that gate even before the senior claim has been
   // granted; hiding the entry behind the claim makes the panel impossible to discover.
@@ -284,6 +297,74 @@ export default function AdminLayout() {
     void preloadRoute(target).catch(() => undefined);
   };
 
+  const handleReturnToSeniorPanel = React.useCallback(() => {
+    // A Senior inspection is a temporary workspace. Restore the company that
+    // was active before the inspection and clear only the temporary company
+    // scope; the Firebase Senior authorization itself remains authenticated.
+    const storedOriginCompanyId = String(
+      sessionStorage.getItem("seniorOriginCompanyId") || "",
+    ).trim();
+    const currentUserCompanyId = String(currentUser?.companyId || "").trim();
+
+    const ownCompanyIds = new Set(
+      memberships
+        .filter((membership) => membership.status === "active")
+        .map((membership) => String(membership.companyId || "").trim())
+        .filter(Boolean),
+    );
+    if (currentUserCompanyId) ownCompanyIds.add(currentUserCompanyId);
+
+    const fallbackAdminMembership = memberships.find(
+      (membership) =>
+        membership.status === "active" &&
+        membershipHasRole(membership, "admin", currentUser),
+    );
+    const fallbackMembership = memberships.find(
+      (membership) => membership.status === "active",
+    );
+
+    const originCompanyId =
+      (storedOriginCompanyId && ownCompanyIds.has(storedOriginCompanyId)
+        ? storedOriginCompanyId
+        : "") ||
+      (currentUserCompanyId && ownCompanyIds.has(currentUserCompanyId)
+        ? currentUserCompanyId
+        : "") ||
+      String(
+        fallbackAdminMembership?.companyId ||
+          fallbackMembership?.companyId ||
+          "",
+      ).trim();
+
+    sessionStorage.removeItem("seniorAccess");
+    sessionStorage.removeItem("seniorCompanyId");
+    sessionStorage.removeItem("seniorOriginCompanyId");
+    sessionStorage.removeItem("seniorOriginRole");
+    setSeniorCompanyId(null);
+
+    if (originCompanyId) {
+      // Commit the user's own company before the route changes. The Senior
+      // panel therefore never inherits the inspected company's active scope.
+      setActiveCompanyId(originCompanyId);
+      void switchRole("admin", originCompanyId);
+    }
+
+    setIsNotificationsOpen(false);
+    setIsProfileMenuOpen(false);
+    setIsMobileMenuOpen(false);
+    navigate("/admin/senior", {
+      replace: true,
+      state: { activeTab: "approved", selectedCompanyId: null },
+    });
+  }, [
+    currentUser,
+    memberships,
+    navigate,
+    setActiveCompanyId,
+    setSeniorCompanyId,
+    switchRole,
+  ]);
+
   const handleLogout = async () => {
     await logOutApp();
     navigate("/login");
@@ -384,6 +465,17 @@ export default function AdminLayout() {
 
         {/* Right Box: Bell and User */}
         <div className="flex items-center gap-1.5 md:gap-4">
+          {isSeniorCompanyPreview && (
+            <button
+              type="button"
+              onClick={handleReturnToSeniorPanel}
+              aria-label="Voltar ao Painel Sênior"
+              title="Voltar ao Painel Sênior"
+              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-amber-200 bg-amber-50 text-amber-700 transition-colors hover:bg-amber-100 focus:outline-none focus:ring-2 focus:ring-amber-400 focus:ring-offset-1 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300 dark:hover:bg-amber-500/20 dark:focus:ring-offset-[#09090b]"
+            >
+              <Crown size={16} strokeWidth={2.2} />
+            </button>
+          )}
           <NotificationCenter
             notifications={notifications}
             onRead={markNotificationAsRead}
@@ -693,6 +785,10 @@ export default function AdminLayout() {
             {hasSeniorPanelAccess && (
               <button
                 onClick={() => {
+                  if (isSeniorCompanyPreview) {
+                    handleReturnToSeniorPanel();
+                    return;
+                  }
                   navigate("/admin/senior");
                   setIsMobileMenuOpen(false);
                 }}

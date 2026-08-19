@@ -1,0 +1,21 @@
+NVU R3.34-PC-HF54 — RECUPERAÇÃO CRÍTICA DE FILA LEGADA
+Android 1.0.106 (versionCode 106)
+
+Objetivo
+- Atualizar por cima de HF51/HF52/HF53 sem apagar dados.
+- Preservar toda viagem já selada na fila FIX18.
+- Reconciliar marcadores antigos de “anterior em envio” contra a fila real.
+- Forçar uma tentativa idempotente imediata, uma única vez, das filas pertencentes ao motorista autenticado.
+- Não apagar filas pertencentes a outro login em aparelho compartilhado; apenas impedir que elas apareçam como bloqueio do motorista atual.
+- Expor diagnóstico de recuperação no GtoObserverPlugin.
+
+Invariantes
+1. Nenhuma entrada selada é removida pela rotina de upgrade.
+2. Apenas ACK válido do registerGtoTrip continua removendo a fila.
+3. O backoff é zerado somente para entradas cujo driverId coincide com o FirebaseAuth atual.
+4. A viagem atual continua independente de viagens anteriores em retry.
+5. A instalação deve ocorrer por cima do APK existente; não limpar dados antes do primeiro start autenticado.
+6. O Web/Functions reconciliado HF53 deve estar publicado antes do teste de recuperação.
+
+Correção adicional
+- removido server.allowedHosts = "all" de vite.config.ts por incompatibilidade de tipo com Vite 6.

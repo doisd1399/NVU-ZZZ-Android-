@@ -1,0 +1,81 @@
+NVU R3.34-PC-HF47 — Android 1.0.99 / versionCode 99
+
+CAUSA RAIZ CONFIRMADA — HF46 PODIA CONTINUAR PRESA EM "TOQUE EM RECEBER"
+
+Sintoma físico reproduzido:
+1) A tela Concluído / Valor a receber era certificada e a viagem ficava protegida.
+2) O motorista tocava em Receber e o modal realmente desaparecia.
+3) A NVU podia continuar exibindo "Viagem concluída ✓ · toque em Receber".
+4) Ao abrir posteriormente uma lista de fretes, a viagem anterior era finalmente selada/enviada.
+
+O que a auditoria comprovou:
+- O gate visual estrito criado na HF46 está correto nas DUAS capturas físicas exatas do incidente:
+  * result-before-receive.png => modal certificado presente = TRUE;
+  * gameplay-after-receive.png => modal certificado presente = FALSE.
+- Portanto, o falso positivo visual que existia na HF45 foi realmente removido na HF46, mas havia um segundo deadlock de lifecycle/sincronização.
+
+Causa raiz 1 — prova durável x relógio volátil:
+- A HF42+ preserva resultCertifiedLatched/resultCertifiedAt em armazenamento durável.
+- Após recriação sticky do serviço/processo, GtoResultProofStore restaurava corretamente o resultado certificado e o estado RESULT_DETECTED.
+- Porém HF46 só executava a continuidade visual do modal quando o campo EM MEMÓRIA resultScreenLastSeenAt era > 0.
+- Esse campo não era restaurado no recovery. Assim, era possível ter:
+  RESULTADO DURÁVEL = SIM + RESULT_DETECTED = SIM + FRAMES CHEGANDO = SIM + CONTINUIDADE DO MODAL = DESLIGADA.
+- Nesse estado o desaparecimento de Concluído nunca criava resultReceiveLatched.
+- Quando a lista de fretes aparecia mais tarde, a proteção separada sealCertifiedResultForReplacementBoundary() selava a viagem, explicando exatamente o envio tardio observado pelo usuário.
+
+Causa raiz 2 — decisão terminal dependente de callback OCR futuro:
+- Mesmo sem reinício, HF46 ainda chamava shouldInferReceiveFromCertifiedExit() principalmente dentro de handleOcrResult().
+- Os frames de captura podiam já provar que o modal havia desaparecido, mas um callback OCR atrasado, invalidado por geração, foreground ou ML Kit podia impedir a transição terminal.
+- Uma decisão irreversível de viagem já certificada não pode depender de um callback assíncrono futuro para existir.
+
+Correção HF47:
+1) resultCertifiedLatched passa a ser a verdade que arma a continuidade terminal; resultScreenLastSeenAt deixa de ser condição de autoridade.
+2) No recovery de resultado certificado, o relógio volátil é restaurado de resultCertifiedAt (ou recebe âncora atual segura em legado).
+3) Cada frame capturado durante um resultado certificado executa o gate estrito looksLikeCertifiedResultStillVisible().
+4) O desaparecimento persistente do modal incrementa contador próprio, registra resultExitSeenAt e agenda um resolvedor terminal no mainHandler.
+5) O resolvedor é FRAME-DRIVEN e independe de qualquer callback OCR futuro.
+6) OCR continua sendo forçado/advisory somente para dar oportunidade de detectar evidência positiva de anúncio/recompensa assistida antes da conclusão normal.
+7) Após a janela segura, sem watched-ad evidence, o sistema persiste sincronicamente:
+   resultReceiveLatched=true
+   resultAction=RECEIVE_CERTIFIED_EXIT
+   completionStatus=RECEIVE_LATCHED
+   e chama confirmNormalResultAutomatically().
+8) confirmNormalResultAutomatically() persiste a conclusão, sela a fila FIX18, protege o payload e inicia o envio automático.
+9) A fronteira de uma nova lista continua existente apenas como recuperação secundária; não é mais necessária para finalizar Receber.
+10) Tasks atrasadas usam generation token; se o modal reaparece, a geração é invalidada e nenhuma resolução antiga pode disparar.
+
+Invariante terminal HF47:
+"Concluído + valor" certificado prova que a viagem foi executada. Depois disso a viagem nunca pode desaparecer. Se o modal certificado some de forma persistente, a saída normal é resolvida e enfileirada automaticamente, exceto quando existir evidência positiva de anúncio/recompensa assistida.
+
+Capturas físicas exatas incorporadas ao pacote:
+- scripts/fixtures/hf47-certified-result-lifecycle/result-before-receive.png
+- scripts/fixtures/hf47-certified-result-lifecycle/gameplay-after-receive.png
+Os hashes dessas fixtures são idênticos aos anexos físicos usados na investigação.
+
+Regressões adicionadas:
+- GtoHf47CertifiedResultLifecycleTest reproduz o estado pós-restart: resultado certificado durável + resultScreenLastSeenAt=0.
+- O teste exige que a continuidade permaneça armada apenas pela verdade durável.
+- Exige restauração do relógio a partir de resultCertifiedAt.
+- Exige que 4 frames estritos ausentes armem resolução e que a política conclua normal depois da graça sem ADS.
+- GtoHf46ReceiveExitScreenshotsTest permanece e comprova que o resultado real é presente, o gameplay pós-Receber é ausente e a inferência normal é válida.
+- test-gto-r3-34-hf47-certified-result-lifecycle.mjs verifica também que a chamada terminal frame-driven existe fora do callback OCR.
+
+Validações principais executadas na árvore HF47:
+- JavaSyntaxCheck: PASS (51 fontes)
+- validate:gto-native: 49/49 PASS
+- validate:gto-auto-sync: 74/74 PASS
+- HF21/HF22 históricos alinhados à autoridade durável/strict continuity e verdes
+- HF23-HF38 regressões executadas/compatíveis
+- HF46 exact physical Receive-exit: PASS
+- HF47 certified-result lifecycle: 13/13 PASS
+
+Escopo de deploy:
+- Android nativo alterado em relação à HF46.
+- src Web: byte/tree hash idêntico à HF46.
+- Functions: byte/tree hash idêntico à HF46.
+- Não é necessário novo deploy Netlify/Functions por esta hotfix.
+
+Build:
+- Workflow GitHub atualizado para NVU R3.34-PC-HF47, Android 1.0.99 / versionCode 99.
+- Artifact esperado: NVU-R3.34-PC-HF47-release.
+- PREPARAR-ANDROID-WINDOWS.bat e comandos de release alinhados.

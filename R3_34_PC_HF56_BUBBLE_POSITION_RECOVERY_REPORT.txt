@@ -1,0 +1,89 @@
+NVU R3.34 PC-HF56 — BUBBLE POSITION / FIRST-DRAG RECOVERY
+Android versionCode: 108
+Android versionName: 1.0.108
+Base: PC-HF55 / Android 1.0.107
+
+PROBLEMA OBSERVADO
+- Ao iniciar o modo GTO automatizado, em alguns ciclos o botão flutuante parecia preso na primeira tentativa de arraste.
+- Após soltar e tentar novamente, o botão passava a se mover normalmente.
+- Em alguns aparelhos/ciclos o botão também nascia muito baixo na tela, apesar de a região superior ser a posição operacional preferida.
+
+CAUSA-RAIZ CONFIRMADA NO HF55
+O problema não estava no listener de toque isoladamente. Era uma corrida entre a rotação/retomada do GTO e o espaço de coordenadas absoluto usado pelo WindowManager:
+
+1. O serviço podia criar/manter o overlay enquanto as métricas de tela ainda eram de portrait ou estavam transitando para landscape.
+2. A posição era salva/restaurada apenas como pixels absolutos (bubbleX/bubbleY), inclusive após geometrias diferentes.
+3. O Android podia limitar visualmente o overlay dentro da tela landscape, mas bubbleParams.x/y ainda podiam representar a origem antiga/stale.
+4. ACTION_DOWN gravava essa origem stale antes de qualquer normalização.
+5. O primeiro ACTION_MOVE somava o deslocamento do dedo à origem antiga e depois aplicava clamp; por isso o botão podia aparentar estar bloqueado.
+6. No ACTION_UP os valores já clampados eram persistidos. A segunda tentativa começava da coordenada corrigida e então funcionava.
+
+Esse mesmo mecanismo explica o botão nascer na região inferior: uma coordenada Y legada de portrait era reaplicada/clampada no espaço landscape.
+
+CORREÇÃO HF56
+1. Spawn somente com geometria landscape estável
+- Um botão novo só é anexado após largura>altura permanecer estável por 260 ms.
+- Isso impede a criação contra métricas transitórias de rotação.
+- O fluxo de permissão MediaProjection continua preservado: a autorização inicial já aguardava o bubble ser anexado.
+
+2. Rebase obrigatório no primeiro ACTION_DOWN
+- Antes de registrar a origem do gesto, HF56 rebasa bubbleParams para os limites reais do display atual.
+- Se Android/OEM tiver mantido/clampado a janela durante uma mudança de orientação, a primeira tentativa de arraste já usa a coordenada correta.
+
+3. Posição preferida normalizada e exclusiva do GTO landscape
+- O local escolhido pelo motorista agora é salvo como bubbleGtoXNorm / bubbleGtoYNorm (escala 0..10000), dentro da área segura.
+- Assim a preferência sobrevive a diferenças de resolução, insets e pequenos ajustes de janela.
+- Arrastes feitos fora do GTO / em portrait / SystemUI não sobrescrevem a posição preferida do simulador.
+
+4. Posição inicial superior
+- Sem preferência válida, o botão nasce no topo seguro da tela e aproximadamente a 25% da faixa horizontal disponível.
+- Essa posição evita tanto o HUD esquerdo quanto os controles superiores direitos do GTO.
+
+5. Migração segura da HF55
+- bubbleX/bubbleY antigos só são migrados se já estiverem dentro da área segura landscape atual.
+- Coordenadas antigas incompatíveis (padrão típico de portrait) são rejeitadas em vez de serem clampadas para o fundo.
+- Após migração, a posição passa para o modelo normalizado.
+
+6. Retorno ao GTO
+- Se o bubble permaneceu vivo durante ligação, SystemUI ou outro aplicativo, quando a geometria landscape estabiliza a preferência normalizada do GTO é restaurada.
+
+7. Sem regressão nas proteções existentes
+- Mantida a política destrutiva de remover/parar observador.
+- Mantida a recuperação HF55 da tela de resultado após ligação/troca de app.
+- Mantidos os limites de segurança do overlay e a regra de não contaminar a preferência GTO com movimento fora do simulador.
+
+ARQUIVOS PRINCIPAIS ALTERADOS
+- android/app/src/main/java/com/nvu/operacional/GtoObserverService.java
+- android/app/src/main/java/com/nvu/operacional/GtoOverlayLayoutPolicy.java
+- scripts/java-tests/com/nvu/operacional/GtoHf56BubblePositionPolicyTest.java
+- scripts/test-gto-r3-34-hf56-bubble-position.mjs
+- scripts/test-gto-r3-34-hf55-return-result-recovery.mjs (compatibilidade de identidade HF55+)
+- package.json
+- .github/workflows/build-android-release.yml
+- android/app/build.gradle
+
+VALIDAÇÃO EXECUTADA NA FONTE HF56
+- test:gto-r3.34-hf56-bubble-position ........ 14/14 PASS
+- test:gto-r3.34-hf20-overlay-anchor ......... 19/19 PASS
+- test:gto-r3.34-hf31-bubble-lifecycle ...... 16/16 PASS
+- test:gto-r3.34-hf55-return-result-recovery  20/20 PASS
+- test:gto-r3.34-hf24-resilience ............. 16/16 PASS
+- test:gto-r3.34-hf30-continuous-projection . 24/24 PASS
+- test:gto-r3.34-hf43-responsive-messages ... 17/17 PASS
+- test:gto-r3.34-hf45-critical-flow ......... 18/18 PASS
+- test:gto-r3.34-hf54-upgrade-recovery ...... 23/23 PASS
+- validate:gto-native ........................ 49/49 PASS
+- audit:gto-r3.7 ............................. 63/63 PASS
+- check:android-java-syntax .................. PASS (53 fontes)
+
+NOTA SOBRE verify:release LOCAL
+O verify:release completo foi iniciado e avançou por diversas suítes, mas a cópia fonte entregue não possui functions/node_modules nem o diretório functions/lib gerado. A suíte test:gto-r3.34-money-integrity depende de functions/lib/gtoMoney.js e, por isso, o gate completo não consegue terminar localmente sem antes compilar Functions.
+
+Isso não indica regressão HF56. O workflow GitHub executa a instalação/build de Functions antes de verify:release, gerando functions/lib. Os testes Android/GTO diretamente relacionados à alteração foram executados e aprovados conforme listado acima.
+
+TESTE FÍSICO RECOMENDADO
+1. Instalar/atualizar para HF56 (1.0.108 / 108).
+2. Iniciar o modo GTO automatizado: em ausência de preferência válida, o botão deve nascer no topo seguro.
+3. Arrastar na primeira tentativa: o movimento deve responder imediatamente, sem precisar soltar e tentar uma segunda vez.
+4. Posicionar o botão no local preferido, sair/voltar do GTO e reiniciar o modo: a posição relativa deve ser restaurada.
+5. Durante uma viagem, receber uma ligação ou abrir SystemUI, retornar ao GTO: o botão deve recuperar a posição preferida sem bloquear o primeiro arraste e sem comprometer a recuperação de detecção HF55.

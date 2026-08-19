@@ -1137,7 +1137,7 @@ function DashboardComponent({
           <OperationalSuspensionNotice user={currentUser as any} />
         </div>
         {isGtoWork && currentCompany && (
-          <div className="order-3 sm:order-3 w-full mb-0 sm:mb-3">
+          <div className="hidden" aria-hidden="true">
             <GtoObserverSetup
               context={{
                 driverId: currentUser.id,

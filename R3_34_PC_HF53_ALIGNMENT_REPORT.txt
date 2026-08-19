@@ -1,0 +1,39 @@
+NVU R3.34-PC-HF53-ALIGNED — RELATÓRIO DE ALINHAMENTO DO DEV ATUAL
+
+Base Web analisada: export atual do Google AI Studio fornecido em 18/08/2026.
+Base Android de referência: HF52 (fila durável/ACK/background sync hardening).
+
+CAUSA-RAIZ ADICIONAL ENCONTRADA NO DEV ATUAL
+O arquivo functions/src/gtoTrips.ts ainda continha a validação anterior à HF14:
+  assertBoundedText(destinationCompany, "destinationCompany");
+
+Em rotas GTO válidas nas quais a empresa de destino não é exposta (ex.: destino rural), o Android HF14+ aceita e sela corretamente a viagem com destinationCompany vazio, mas um registerGtoTrip antigo rejeita o payload com INVALID_ARGUMENT. A fila local então permanece preservada para retry e a interface pode mostrar uma viagem anterior em envio.
+
+Isto é compatível com o relato observado: a captura do motorista mostra um frete com destino "Area Rural" e nenhum campo de empresa de destino aparente.
+
+CORREÇÕES APLICADAS NESTE DEV
+1. Firebase Function: destinationCompany volta a ser metadado opcional, como definido desde HF14.
+2. Web remoto HF34: removido status obsoleto freightReplacementExplicitlyArmed e restaurada a semântica canônica de lista reaberta.
+3. Print: a faixa de progresso do comprovante depende somente de uploadPhase. O envio final da viagem pode usar o busy global sem reexibir falso "Enviando comprovante... 0%".
+4. Todas as demais alterações mais novas encontradas no Dev atual (OCR local, timeouts, confirmação manual para leitura inconclusiva, correções Senior/Admin e configuração Firebase por env) foram preservadas.
+
+DEPLOY OBRIGATÓRIO
+- Firebase: publicar registerGtoTrip atualizado.
+- Netlify: publicar este Web reconciliado.
+- Android: instalar o APK gerado do pacote HF53 correspondente, que herda o hardening nativo HF52.
+
+Sem atualizar registerGtoTrip, um APK novo sozinho não consegue corrigir a rejeição de backend para destinationCompany ausente sem inventar dados.
+
+PACOTE APK HF53
+- Android herda exatamente as correcoes de sincronizacao/ACK do HF52.
+- versionName 1.0.105 / versionCode 105.
+- Web-fonte dentro do pacote corresponde ao Dev atual reconciliado.
+- Firebase Function source corresponde ao contrato HF14+ (destinationCompany opcional).
+
+RISCO ADICIONAL DO EXPORT DO GOOGLE AI STUDIO
+O ZIP atual trazia public/tesseract/worker.min.js e os runtimes core com 0 bytes. Isso não é a causa da fila de sincronização, mas explica o "Failed to download file" visto no editor e poderia degradar a leitura automática por print caso um ambiente servisse esses placeholders sem executar o ciclo npm.
+
+HF53 remove os placeholders vazios do fonte e endurece scripts/prepare-tesseract-assets.mjs: predev/prebuild geram os runtimes a partir das dependências instaladas e o build agora falha se worker/core estiver ausente ou com tamanho inválido, em vez de publicar silenciosamente um OCR quebrado.
+
+REPRODUTIBILIDADE DO DEV
+O export recebido continha bun.lock vazio (0 bytes) e não trazia package-lock.json. Como as dependências declaradas em package.json são idênticas às da base HF52 já certificada, o Dev alinhado remove o lock vazio e restaura o package-lock.json compatível, evitando detecção ambígua de gerenciador de pacotes e mantendo versões resolvidas reproduzíveis no npm/Netlify.

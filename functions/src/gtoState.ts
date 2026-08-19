@@ -63,6 +63,13 @@ export const syncGtoTripState = functions.region("us-central1").https.onCall(asy
     const current = currentSnap.exists ? (currentSnap.data() || {}) : null;
     const currentState = text(current?.state, 60).toUpperCase() || "IDLE";
 
+    // HF58 Cost Safe: a lost callable response must be idempotent. If the first
+    // transaction already committed the requested target state, the retry returns
+    // success without another pair of Firestore writes or an ABORTED retry loop.
+    if (currentSnap.exists && currentState === state) {
+      return { previousState: currentState, state, duplicate: true };
+    }
+
     if (!currentSnap.exists && state !== "WAITING_FREIGHT" && state !== "IDLE") {
       throw new functions.https.HttpsError("failed-precondition", "A sessão precisa começar em WAITING_FREIGHT.");
     }

@@ -1,0 +1,31 @@
+NVU HF33 — Windows
+Android 1.0.85 / versionCode 85
+
+Use somente a pasta extraída do ZIP HF33. Não misture arquivos de builds anteriores.
+
+VALIDAR FONTE
+npm run test:gto-r3.34-hf33-realtime-observer
+npm run verify:release
+
+GERAR APK
+cd android
+gradlew.bat assembleRelease
+
+IDENTIDADE ESPERADA
+versionCode 85
+versionName 1.0.85
+
+FOCO HF33
+- Observe GTO é o proprietário da captura: a máquina de estados não pode desligar o detector.
+- classificador visual leve roda em cadência de ~70 ms enquanto a captura GTO está apta.
+- lista visível em IDLE/CANCELLED inicia automaticamente o fluxo; não existe botão manual de nova viagem.
+- lista reaparecendo durante TRIP_IN_PROGRESS é apenas informativa e não descarta a viagem.
+- troca de frete durante viagem exige armação explícita + nova evidência humana de Aceitar.
+- OCR da linha selecionada usa recognizer/crop dedicado e não espera o OCR de página.
+- origem usa separador visível, geometria de tokens/ROI, consenso conservador da mesma página e retry automático antes de revisão.
+- resultado semântico é reavaliado em cadência de ~320 ms quando aplicável.
+- bolinha branca representa frame + GTO + estabilidade + execução real do reconhecedor.
+- supervisor MediaProjection HF30 e lifecycle fail-safe da bolinha HF31 permanecem.
+
+GATE FÍSICO OBRIGATÓRIO
+Instale o APK 1.0.85 no mesmo aparelho que reprovou a HF32 e valide o fluxo completo antes de promover para produção.

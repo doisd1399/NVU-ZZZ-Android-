@@ -1,0 +1,33 @@
+NVU R3.34-PC-HF39 — BUILD GATE FIX 1
+Data: 2026-08-17
+Android runtime: INALTERADO — 1.0.91 / versionCode 91
+
+CAUSA DA INTERRUPCAO 19/21
+O gate historico scripts/audit-gto-r3-3-freight-rearm.mjs ainda procurava duas assinaturas textuais da arquitetura anterior, embora a HF39 tenha substituido esses pontos por regras mais fortes:
+
+1) Touch-pulse replacement candidate
+   Gate antigo exigia a string GtoDeterministicFlowPolicy.mayObserveFreightListOutsideWaiting(state).
+   HF39 passou a centralizar essa autoridade em isReplaceableActiveSessionState(state) e adicionou quarantine por replacementFreightSemanticRejectedAt <= 0L.
+   A protecao de runtime existe; o teste textual estava obsoleto.
+
+2) Certified-list cancellation boundary
+   Gate antigo exigia mayProbeFreightListForCurrentState e a assinatura de certificacao anterior.
+   HF39 usa handleActiveTripFreightListEvidence + GtoFreightSemanticCertificationPolicy.isCertifiedLifecycleBoundaryPage + isReplacementFreightSemanticFresh + GtoFreightLifecycleBoundaryPolicy.mayReplaceCurrentContext.
+   Novamente, a protecao de runtime existe; o teste textual estava obsoleto.
+
+CORRECAO
+- Atualizado somente scripts/audit-gto-r3-3-freight-rearm.mjs para validar a arquitetura HF39 real.
+- PREPARAR-ANDROID-WINDOWS.bat teve apenas textos/nomes de release atualizados de HF35 para HF39.
+- Nenhum arquivo em android/ foi alterado.
+- Nenhum arquivo em functions/ foi alterado.
+- versionName/versionCode permanecem 1.0.91 / 91.
+
+VALIDACAO
+- audit:gto-r3.3: 21/21 PASS
+- JavaSyntaxCheck: PASS (46 sources)
+- validate-gto-native-flow: 49/49 PASS
+- validate-gto-auto-sync: 74/74 PASS
+- HF39 core boundary/cargo/user-fixture gates: PASS antes das suites regressivas aninhadas longas.
+
+VEREDITO
+A parada observada no PREPARAR-ANDROID-WINDOWS.bat era um falso negativo do gate historico de auditoria, nao uma nova falha funcional do GTO. Use este pacote no lugar do ZIP HF39 anterior para preparar e gerar o mesmo APK Android 1.0.91 / versionCode 91.

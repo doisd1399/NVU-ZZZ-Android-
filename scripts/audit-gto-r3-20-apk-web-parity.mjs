@@ -12,6 +12,7 @@ const files = {
   index: 'functions/src/index.ts',
   rules: 'firestore.rules',
   package: 'package.json',
+  lifecycle: 'android/app/src/main/java/com/nvu/operacional/GtoFreightLifecycleBoundaryPolicy.java',
 };
 const text = Object.fromEntries(Object.entries(files).map(([k,p]) => [k,fs.readFileSync(p,'utf8')]));
 const checks=[];
@@ -35,10 +36,14 @@ check('server rejects impossible transitions', text.backendState.includes('Trans
 check('new WAITING session retires prior active session', text.backendState.includes('REPLACED_BY_NEW_FREIGHT_SESSION') && text.backendState.includes('activeSessionId'));
 check('active pointer avoids composite Firestore query/index dependency', text.backendState.includes('gto_active_gto_sessions') && text.webCanonical.includes('gto_active_gto_sessions'));
 check('Firestore exposes read-only canonical state to owner', text.rules.includes('match /gto_active_gto_sessions/{driverId}') && text.rules.includes('allow write: if false'));
-check('APK publishes every accepted state transition', text.service.includes('GtoAutoTripSync.syncCanonicalState(this, prefs, previous, state, event)'));
+check('APK publishes every accepted state transition', text.service.includes('attemptCanonicalStateSync(') && text.service.includes('GtoAutoTripSync.syncCanonicalState(this, prefs, from, state, event)'));
 check('APK retries canonical state publication after transient failure', text.service.includes('retryCanonicalStateSync') && text.service.includes('gtoCanonicalStatePending'));
-check('CONFIRMING_FREIGHT is isolated from reopened-list replacement', text.service.includes('GtoDeterministicFlowPolicy.mayObserveFreightListOutsideWaiting(state)') && !/mayObserveFreightListOutsideWaiting[\s\S]{0,500}\"CONFIRMING_FREIGHT\"/.test(fs.readFileSync('android/app/src/main/java/com/nvu/operacional/GtoDeterministicFlowPolicy.java','utf8')));
-check('explicit replacement still retires old durable freight snapshot only through guarded promotion', text.service.includes('isExplicitFreightReplacementActive') && text.service.includes('promoteReplacementFreightCandidateToWaiting') && text.service.includes('GtoAutoTripSync.discardSessionSnapshot(this, cancelledSessionId)'));
+check('CONFIRMING_FREIGHT automatic OCR is isolated while stale REVIEW_REQUIRED may be replaced by a certified list',
+  text.service.includes('mayHandleCertifiedFreightBoundary(state)')
+  && text.service.includes('STATE_CONFIRMING_FREIGHT.equals(state) && isFreightReviewPending()')
+  && text.lifecycle.includes('return "CONFIRMING_FREIGHT".equals(state) && freightReviewPending')
+  && text.lifecycle.includes('mustClearStaleReviewOnCertifiedList'));
+check('stable returned jobs list retires old durable freight snapshot only through guarded promotion', text.service.includes('FREIGHT_LIST_REOPENED') && text.service.includes('promoteReplacementFreightCandidateToWaiting') && text.service.includes('GtoAutoTripSync.discardSessionSnapshot(this, cancelledSessionId)') && !text.service.includes('isExplicitFreightReplacementActive'));
 check('selection is still fail-closed', text.service.includes('coordinateEvidenceAgreesWithRow') && !text.service.includes('findFreightAt(') && !text.service.includes('findFreightFlexible('));
 check('snapshot identity remains server-verifiable', text.sync.includes('freightFingerprint') && text.backendTrip.includes('expectedFreightFingerprint'));
 check('no stale root-level GTO Java implementation', !fs.readdirSync('.').some(n => /^Gto.*\.java$/.test(n)));

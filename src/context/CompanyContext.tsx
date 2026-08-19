@@ -13,6 +13,7 @@ import React, {
 import {
   collection,
   doc,
+  getDoc,
   getDocFromServer,
   getDocs,
   getDocsFromServer,
@@ -188,6 +189,8 @@ export interface CompanyDataController {
   companyCatalogLoaded: boolean;
   companyCatalogAttempted: boolean;
   loadCompanyCatalog: (force?: boolean) => Promise<CompanyProfile[]>;
+  loadCompanyById: (companyId: string) => Promise<CompanyProfile | null>;
+  primeCompanyProfile: (company: CompanyProfile) => CompanyProfile | null;
   companiesRef: React.MutableRefObject<CompanyProfile[]>;
   companyCatalogLoadedRef: React.MutableRefObject<boolean>;
 }
@@ -233,7 +236,9 @@ export const useCompanyDataController = ({
   const companyCatalogPromiseRef = useRef<Promise<CompanyProfile[]> | null>(
     null,
   );
-  const companyDocumentLoadsRef = useRef<Set<string>>(new Set());
+  const companyDocumentLoadsRef = useRef<
+    Map<string, Promise<CompanyProfile | null>>
+  >(new Map());
   const companyDocumentRetryTimerRef = useRef<
     ReturnType<typeof setTimeout> | null
   >(null);
@@ -289,6 +294,113 @@ export const useCompanyDataController = ({
     }
   };
 
+  // Senior company handoff must not depend on a second catalog round-trip.
+  // Merge the company card already selected in the Senior Panel immediately,
+  // then let the targeted Firestore listener refresh it in the background.
+  const primeCompanyProfile = (company: CompanyProfile): CompanyProfile | null => {
+    const companyId = String(company?.id || "").trim();
+    if (!companyId) return null;
+
+    const normalized = normalizeCompanyProfile(
+      companyId,
+      company as unknown as Record<string, unknown>,
+    );
+    setCompanies((current) => {
+      const next = mergeCompanyProfile(current, normalized);
+      companiesRef.current = next;
+      return next;
+    });
+    return normalized;
+  };
+
+  // Resolve one company deterministically. The previous implementation kept
+  // only a Set of in-flight ids inside an effect. If that effect was cleaned
+  // up while a Senior workspace switch was still reading Firestore, the
+  // successful result could be discarded while the next effect saw the id as
+  // already in-flight. Once the request finished there was no trigger left to
+  // read it again, leaving CompanyTab on "Sincronizando empresa" forever.
+  //
+  // Keep the promise itself instead: every caller joins the same request and
+  // the resolved public company identity is safe to merge even if the original
+  // effect has already re-rendered. A normal getDoc fallback also lets a warm
+  // WebView cache paint the company when a server-only read is temporarily
+  // unavailable.
+  const loadCompanyById = (rawCompanyId: string): Promise<CompanyProfile | null> => {
+    const companyId = String(rawCompanyId || "").trim();
+    if (!companyId) return Promise.resolve(null);
+
+    const existing = companiesRef.current.find(
+      (company) => String(company.id) === companyId,
+    );
+    if (existing) return Promise.resolve(existing);
+
+    const inFlight = companyDocumentLoadsRef.current.get(companyId);
+    if (inFlight) return inFlight;
+
+    beginCompaniesLoad();
+    const companyRef = doc(db, "frotas", companyId);
+    const request = getDocFromServer(companyRef)
+      .catch(async (serverError) => {
+        if (!isAuthTeardownActive() && import.meta.env.DEV) {
+          console.warn(
+            "[CompanyContext] Leitura direta da empresa no servidor falhou; tentando cache padrão:",
+            companyId,
+            serverError,
+          );
+        }
+        return getDoc(companyRef);
+      })
+      .then((snapshot) => {
+        if (isAuthTeardownActive() || !snapshot.exists()) return null;
+        const company = normalizeCompanyProfile(
+          snapshot.id,
+          snapshot.data(),
+        );
+        setCompanies((current) => {
+          const next = mergeCompanyProfile(current, company);
+          companiesRef.current = next;
+          if (companyCatalogLoadedRef.current) writeCachedCompanies(next);
+
+          const liveUid = auth.currentUser?.uid;
+          if (liveUid && liveUid === currentUser?.id) {
+            const scopedIds = new Set(
+              [
+                ...memberships
+                  .filter((membership) => membership.status === "active")
+                  .map((membership) => membership.companyId),
+                activeCompanyId,
+                currentUser?.companyId,
+                companyId,
+              ].filter((value): value is string => Boolean(value)),
+            );
+            writeCachedScopedCompanies(
+              liveUid,
+              next.filter((item) => scopedIds.has(item.id)),
+            );
+          }
+          return next;
+        });
+        return company;
+      })
+      .catch((error) => {
+        if (!isAuthTeardownActive()) {
+          console.warn(
+            "[CompanyContext] Falha ao resolver empresa por id:",
+            companyId,
+            error,
+          );
+        }
+        return null;
+      })
+      .finally(() => {
+        companyDocumentLoadsRef.current.delete(companyId);
+        endCompaniesLoad();
+      });
+
+    companyDocumentLoadsRef.current.set(companyId, request);
+    return request;
+  };
+
   // PUBLIC_COMPANY_CATALOG_ON_DEMAND
   // The complete public catalog is fetched only by collective pages.
   const loadCompanyCatalog = async (
@@ -335,9 +447,11 @@ export const useCompanyDataController = ({
     return request;
   };
 
-  // Load only documents referenced by the authenticated user's memberships.
+  // Load only documents referenced by the authenticated user's memberships
+  // plus the explicit Senior target. Requests are promise-deduped by
+  // loadCompanyById, so an effect cleanup can no longer orphan a successful
+  // company read during a workspace transition.
   useEffect(() => {
-    let cancelled = false;
     if (!authInitialized || !membershipsLoaded || !currentUser?.id) return;
 
     const companyIds = Array.from(
@@ -356,70 +470,18 @@ export const useCompanyDataController = ({
     const knownIds = new Set(
       companiesRef.current.map((company) => String(company.id)),
     );
-    const missingIds = companyIds.filter(
-      (companyId) =>
-        !knownIds.has(companyId) &&
-        !companyDocumentLoadsRef.current.has(companyId),
-    );
+    const missingIds = companyIds.filter((companyId) => !knownIds.has(companyId));
     if (missingIds.length === 0) return;
 
-    missingIds.forEach((companyId) =>
-      companyDocumentLoadsRef.current.add(companyId),
-    );
-    beginCompaniesLoad();
-    // Membership-linked cards must never disappear because Android reused a
-    // stale document cache or one targeted request failed. Read only the
-    // referenced company ids from the server, keep fulfilled cards visible,
-    // and schedule another pass when any server confirmation fails. Successful
-    // ids leave the missing set immediately, so retries stay scoped. This cache
-    // never marks the public catalog as complete.
-    void Promise.allSettled(
-      missingIds.map((companyId) =>
-        getDocFromServer(doc(db, "frotas", companyId)),
-      ),
-    )
-      .then((results) => {
-        if (cancelled) return;
-
-        const failedIds: string[] = [];
-        const scopedCompanies = results.flatMap((result, index) => {
-          if (result.status === "rejected") {
-            failedIds.push(missingIds[index]);
-            if (import.meta.env.DEV) {
-              console.warn(
-                "[CompanyContext] Falha ao confirmar empresa vinculada no servidor:",
-                missingIds[index],
-                result.reason,
-              );
-            }
-            return [];
-          }
-          if (!result.value.exists()) return [];
-          return [
-            normalizeCompanyProfile(
-              result.value.id,
-              result.value.data(),
-            ),
-          ];
-        });
-
-        if (scopedCompanies.length > 0) {
-          setCompanies((current) => {
-            const next = scopedCompanies.reduce(
-              (catalog, company) => mergeCompanyProfile(catalog, company),
-              current,
-            );
-            companiesRef.current = next;
-            if (companyCatalogLoadedRef.current) writeCachedCompanies(next);
-            const scopedIds = new Set(companyIds);
-            writeCachedScopedCompanies(
-              currentUser.id,
-              next.filter((company) => scopedIds.has(company.id)),
-            );
-            return next;
-          });
+    void Promise.all(missingIds.map((companyId) => loadCompanyById(companyId))).then(
+      (resolvedCompanies) => {
+        if (isAuthTeardownActive() || auth.currentUser?.uid !== currentUser.id) {
+          return;
         }
 
+        const failedIds = missingIds.filter(
+          (_companyId, index) => !resolvedCompanies[index],
+        );
         if (failedIds.length === 0) {
           companyDocumentRetryAttemptRef.current = 0;
           if (companyDocumentRetryTimerRef.current) {
@@ -441,17 +503,8 @@ export const useCompanyDataController = ({
             setCompanyDocumentRetryTick((value) => value + 1);
           }, delay);
         }
-      })
-      .finally(() => {
-        missingIds.forEach((companyId) =>
-          companyDocumentLoadsRef.current.delete(companyId),
-        );
-        endCompaniesLoad();
-      });
-
-    return () => {
-      cancelled = true;
-    };
+      },
+    );
   }, [
     activeCompanyId,
     authInitialized,
@@ -533,6 +586,8 @@ export const useCompanyDataController = ({
     companyCatalogLoaded,
     companyCatalogAttempted,
     loadCompanyCatalog,
+    loadCompanyById,
+    primeCompanyProfile,
     companiesRef,
     companyCatalogLoadedRef,
   };
@@ -821,6 +876,8 @@ export interface CompanyStoreType {
   companyCatalogLoaded: boolean;
   companyCatalogAttempted: boolean;
   loadCompanyCatalog: (force?: boolean) => Promise<CompanyProfile[]>;
+  loadCompanyById: (companyId: string) => Promise<CompanyProfile | null>;
+  primeCompanyProfile: (company: CompanyProfile) => CompanyProfile | null;
   activeCompanyId: string | null;
   setActiveCompanyId: (id: string | null) => void;
   memberships: CompanyMember[];

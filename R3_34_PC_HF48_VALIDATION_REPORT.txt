@@ -1,0 +1,130 @@
+NVU R3.34-PC-HF48 — Android 1.0.100 / versionCode 100
+Data da correção: 2026-08-17
+Base: R3.34-PC-HF47
+Escopo: Android nativo / GTO Observe
+
+INCIDENTE FÍSICO REPRODUZIDO
+===========================
+Cenário informado:
+1. GTO Observe já autorizado e funcional.
+2. Motorista sai do GTO para outro app.
+3. Motorista retorna ao GTO.
+4. Uma lista real de 5 fretes está visível.
+5. A bolinha continua com ponto branco, porém a lista não entra no fluxo e o card permanece em “Escolha seu frete”.
+
+A captura física exata do incidente foi incorporada em:
+scripts/fixtures/hf48-return-recognition/list-after-app-return.png
+SHA-256 da fixture:
+8db913be1889a873b3805e20f952b8cb2b59865149b1c1c8561d0bd94904683e
+
+O detector visual real de produção GtoFastVisualDetector executado sobre essa imagem reconhece a lista e os 5 botões Aceitar. Portanto, a falha não estava na geometria/pixels da lista nem no MediaProjection básico.
+
+CAUSA RAIZ COMPROVADA
+=====================
+A autoridade da lista possui duas fases:
+- detector visual OCR-free, executado continuamente nos frames;
+- certificação semântica por ML Kit OCR, necessária antes de a lista poder alterar a máquina de estados.
+
+Na HF47, toda a OCR global de tela/página compartilhava um único AtomicBoolean ocrBusy.
+Ao sair do GTO, analysisOcrGeneration era incrementada e o resultado da OCR anterior ficava logicamente obsoleto. Porém, a tarefa ML Kit antiga continuava sendo proprietária de ocrBusy até que seu callback de conclusão fosse entregue.
+
+Ao retornar:
+- o detector visual voltava imediatamente e encontrava a lista;
+- a captura continuava atualizando lastProjectionAnalyzedFrameAt;
+- por isso a bolinha podia permanecer branca;
+- refreshTransientVisualContextAfterGtoReturn invalidava a evidência semântica antiga e exigia nova certificação da página;
+- scheduleFreightPageOcr tentava recertificar, mas retornava enquanto ocrBusy ainda estivesse ocupado pela tarefa criada antes da troca de app;
+- se o callback ML Kit antigo atrasasse/perdesse a conclusão no lifecycle OEM, a página visualmente detectada podia permanecer sem certificação semântica.
+
+Assim existiam duas verdades conflitantes: “captura/detector visual saudável” e “autoridade semântica da lista bloqueada”. Esse é exatamente o estado mostrado pela captura física.
+
+CORREÇÃO HF48
+=============
+1. OCR global passou de booleano sem ownership para lease geracional.
+   - Cada tarefa recebe um token/geração.
+   - Callback antigo só pode liberar o mesmo token que recebeu.
+   - Callback de tarefa abandonada nunca libera uma tarefa nova.
+
+2. Retorno ao GTO invalida explicitamente a lease OCR pré-troca.
+   - GTO_RETURN_INVALIDATES_PREVIOUS_SCREEN_OCR.
+   - A primeira página atual pode iniciar nova certificação sem esperar a tarefa da tela anterior.
+
+3. Lease sem callback tem recuperação limitada.
+   - GLOBAL_OCR_LEASE_STALE_MS = 2500 ms.
+   - Uma lease realmente órfã deixa de bloquear permanentemente o sistema.
+
+4. Lista visual presente e ainda não certificada recebe retry semântico contínuo.
+   - LIVE_FREIGHT_SEMANTIC_RETRY_MS = 140 ms.
+   - O retry acontece a partir dos frames vivos da mesma página e mesma freightPageGeneration.
+   - Não depende mais somente do refresh esparso do snapshot.
+
+5. Retorno em WAITING_FREIGHT limpa somente evidência de tela/página.
+   - viagem/estado funcional são preservados;
+   - snapshot visual, geometria e certificação semântica da página antiga são invalidados;
+   - a página atual é reconstruída com pixels frescos.
+
+6. Ponto branco passou a refletir também saúde semântica quando há lista visível.
+   - Se o detector visual vê uma lista fresca mas ela permanece sem certificação por mais de 900 ms, READY deixa de ser verdadeiro.
+   - Assim bolinha branca não pode mais mascarar exatamente esse tipo de falha.
+
+7. Proteções anteriores preservadas.
+   - MediaProjection contínua HF30;
+   - lifecycle da bolinha HF31;
+   - reconhecimento contínuo HF32;
+   - certificação forte contra falso positivo no HUB HF35;
+   - isolamento da nova viagem HF37;
+   - resultado/Receber protegido HF42-HF47.
+
+INVARIANTE NOVA
+===============
+Dentro do GTO, se WAITING_FREIGHT recebe frames atuais que o detector visual classifica como lista real, a certificação semântica precisa:
+- executar imediatamente após o retorno;
+- continuar tentando enquanto a lista permanecer visível;
+- nunca ficar bloqueada indefinidamente por OCR criada antes da troca de app.
+
+A viagem/estado não é reiniciado pela saída/retorno. Apenas evidência visual transitória é reconstruída.
+
+VALIDAÇÕES EXECUTADAS
+=====================
+PASS JavaSyntaxCheck: 51 fontes
+PASS validate:gto-native: 49/49
+PASS validate:gto-auto-sync: 74/74
+PASS R3.5 result/sync recovery: 35/35
+PASS HF29 post-consent/list recovery: 11/11
+PASS HF30 continuous projection: 24/24
+PASS HF31 bubble lifecycle: 16/16
+PASS HF32 continuous recognition: 18/18
+PASS HF37 replacement session: 19/19
+PASS HF39 certified-list boundary: 20/20
+PASS HF40 cancelled-list bootstrap: 14/14
+PASS HF41 irreversible Receive: 14/14
+PASS HF42 result proof/readiness: 29/29
+PASS HF43 responsive messages: 17/17
+PASS HF44 live list message/count: 17/17
+PASS HF45 critical flow: 18/18
+PASS HF46 Receive exit: 10/10
+PASS HF47 certified-result lifecycle: 13/13
+PASS HF48 return recognition: 17/17
+PASS fixture física HF48: GtoFastVisualDetector reconhece visibleFreights=5
+
+O verify:release completo foi percorrido parcialmente neste ambiente e chegou aos gates históricos HF24 antes do limite de execução da sandbox; os gates posteriores relevantes foram executados individualmente/segmentados e estão listados acima.
+
+GRADLE REAL
+===========
+A tentativa de iniciar o Gradle wrapper neste ambiente falha antes da compilação porque services.gradle.org não resolve nesta sandbox:
+java.net.UnknownHostException: services.gradle.org
+
+O pacote contém workflow GitHub e PREPARAR-ANDROID-WINDOWS.bat para executar o build Gradle real em ambiente com acesso à distribuição Gradle 8.14.3.
+
+IDENTIDADE DA RELEASE
+=====================
+functionalRelease: R3.34-PC-HF48
+applicationId: com.nvu.operacional
+versionName: 1.0.100
+versionCode: 100
+GitHub artifact esperado: NVU-R3.34-PC-HF48-release
+
+DEPLOY
+======
+HF48 é Android-only em relação à HF47.
+Web/Netlify e Firebase Functions não precisam de novo deploy apenas por esta hotfix.

@@ -48,8 +48,9 @@ public final class GtoHf24ResilienceProbe {
     }
 
     private static void testBubbleRemovePolicy() {
-        require(GtoBubbleDismissPolicy.shouldShowRemoveTarget(false, true), "remove target appears while dragging outside GTO");
-        require(!GtoBubbleDismissPolicy.shouldShowRemoveTarget(true, true), "remove target never interferes inside GTO");
+        require(GtoBubbleDismissPolicy.shouldShowRemoveTarget(false, true, true, true), "remove target appears while a live drag that started outside GTO is active");
+        require(!GtoBubbleDismissPolicy.shouldShowRemoveTarget(true, true, true, true), "remove target never interferes inside GTO");
+        require(!GtoBubbleDismissPolicy.shouldShowRemoveTarget(false, true, true, false), "a gesture that started over GTO never becomes destructive after leaving");
         require(GtoBubbleDismissPolicy.isDropInside(100, 100, 70, 56, 80, 80, 180, 80), "bubble centre inside remove target");
         require(!GtoBubbleDismissPolicy.isDropInside(400, 100, 70, 56, 80, 80, 180, 80), "far bubble does not stop observer");
     }

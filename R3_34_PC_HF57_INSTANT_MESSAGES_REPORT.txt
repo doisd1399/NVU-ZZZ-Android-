@@ -1,0 +1,132 @@
+NVU R3.34-PC-HF57 — RELATÓRIO DE CORREÇÃO E VALIDAÇÃO
+Data: 2026-08-18
+Base: NVU-CAPACITOR-ANDROID-R3.34-PC-HF56
+Android: 1.0.109
+versionCode: 109
+
+OBJETIVO
+Reduzir de forma segura a latência percebida das mensagens do observador GTO, corrigir
+a pluralização exibida na lista de fretes e impedir mensagens assíncronas antigas de
+aparecerem depois que o fluxo já avançou.
+
+CAUSAS RAIZ CONFIRMADAS NO HF56
+
+1. A primeira mensagem visível da lista aguardava a conclusão da certificação semântica
+   via OCR/ML Kit. Os frames visuais já indicavam uma lista forte antes disso, mas o
+   motorista não recebia feedback até o OCR terminar.
+
+2. showStatusChip(...) sempre usava mainHandler.post(...), inclusive quando a chamada já
+   estava na thread principal. Isso impunha um salto adicional na fila da UI. Callbacks
+   de sincronização ainda faziam um post antes de chamar showStatusChip, criando uma
+   passagem redundante.
+
+3. O OCR da página de fretes é assíncrono. Uma resposta antiga podia chegar depois que
+   a lista já havia fechado ou depois de o motorista selecionar um frete e, sem uma
+   barreira temporal/estado suficiente, repintar a mensagem de lista por cima de uma
+   etapa mais nova. Esse caso produz a sensação de mensagem atrasada ou fora de ordem.
+
+4. A mensagem de contagem era construída concatenando "opção" + "ões", gerando
+   "opçãoões" no plural.
+
+CORREÇÕES HF57
+
+A. FEEDBACK VISUAL RÁPIDO, SEM REDUZIR A SEGURANÇA
+- Uma lista visual forte (2 ou mais botões/linhas de Aceitar) pode gerar imediatamente
+  um feedback PROVISÓRIO de UI antes do OCR semântico.
+- A confirmação é amortecida por 2 frames coerentes e piso de 24 ms.
+- Texto provisório: "Lista de fretes encontrada · N opções · validando valores…".
+- Esse caminho é SOMENTE visual: não altera tripState, screenState, geração semântica,
+  identidade do frete, seleção ou envio.
+- O OCR/ML Kit continua sendo a autoridade exclusiva para certificar a lista.
+- Após certificação, a mensagem oficial continua sendo
+  "Lista de fretes detectada ✓ · N opções." e permanece enquanto a lista estiver aberta.
+
+B. UI SEM SALTO REDUNDANTE
+- Foi criado um dispatcher que executa imediatamente quando já está na main thread e
+  usa post somente quando a chamada vem de outra thread.
+- showStatusChip e callbacks de sincronização usam esse caminho.
+- Resultado: remoção determinística de pelo menos um ciclo de fila da UI nos casos em
+  que o evento já chega pela main thread, sem executar UI fora da thread correta.
+
+C. PROTEÇÃO CONTRA OCR ATRASADO / MENSAGEM FORA DE ORDEM
+- A certificação assíncrona só pode atualizar a UI de lista enquanto a lista estiver
+  fisicamente recente e o estado ainda for compatível.
+- Durante CONFIRMING_FREIGHT, o OCR pode preservar evidência necessária da linha tocada,
+  mas não repinta a mensagem da lista por cima da etapa "frete selecionado".
+- Ao fechar fisicamente a lista, a mensagem provisória/oficial é removida antes do
+  restante da transição.
+
+D. PLURALIZAÇÃO CORRETA
+- 1 opção
+- 2+ opções
+- Exemplo solicitado: "Lista de fretes detectada ✓ · 5 opções."
+- A construção defeituosa "opção" + "ões" foi removida do código de produção.
+
+E. SEGURANÇA PRESERVADA
+- A tela de resultado continua usando autoridade semântica; não foi reativado gate
+  destrutivo por pixel/cor.
+- O fallback OCR do resultado ativo continua em 220 ms.
+- A mensagem de sucesso de envio continua surgindo somente após callback real SYNCED /
+  ACK do backend. A UI foi acelerada, mas nenhum sucesso é inventado antes da rede.
+- O toque crítico em Aceitar bloqueia o feedback provisório para não competir com a
+  seleção real.
+
+GANHO REAL
+
+O ganho não depende de "dormir menos" nem de reduzir o rigor do OCR. O caminho foi
+estruturalmente encurtado:
+- antes: primeira mensagem de lista -> dependia da conclusão do OCR semântico;
+- HF57: primeira resposta visual -> 2 frames fortes + >=24 ms, antes do OCR;
+- antes: atualização de chip já na main thread -> ainda entrava novamente na fila;
+- HF57: atualização já na main thread -> executa no mesmo ciclo;
+- antes: callback OCR antigo podia gerar mensagem tardia;
+- HF57: callback incompatível com o estado/tela atual é impedido de repintar a UI.
+
+Isso garante ganho real no caminho de execução do software. A latência absoluta em
+milissegundos em um aparelho físico ainda depende do FPS, carga do dispositivo, ML Kit
+e rede, portanto não é declarada uma latência universal que não foi medida em hardware.
+
+VALIDAÇÃO FINAL
+
+npm run verify:release: PASS (exit code 0)
+
+Gates finais relevantes:
+- HF43 responsive messages: 17/17 PASS
+- HF44 live list message: 17/17 PASS
+- HF45 critical flow: 18/18 PASS
+- HF50 ready voice: 30/30 PASS
+- HF51 dual voice: 43/43 PASS
+- HF53 AI Studio alignment: 15/15 PASS
+- HF54 upgrade recovery: 23/23 PASS
+- HF55 return-result recovery: 20/20 PASS
+- HF56 bubble position: 14/14 PASS
+- HF57 instant messages: 20/20 PASS
+- validate-gto-native-flow: 49/49 PASS
+- validate-gto-auto-sync: 74/74 PASS
+- audit-gto-r3.7-full-stability: 63/63 PASS
+- Android Java syntax: PASS (53 sources)
+
+OBSERVAÇÃO SOBRE DOIS TESTES HISTÓRICOS
+HF55 alterou intencionalmente GtoProjectionContinuityPolicy.java para a recuperação de
+resultado ao retornar ao GTO. Os testes históricos HF50/HF51 ainda comparavam o hash
+antigo de HF49 e, por isso, o verify completo do próprio baseline posterior acusava uma
+invariante obsoleta. Os dois guards foram atualizados para o hash aprovado presente no
+HF55/HF56. O arquivo de produção GtoProjectionContinuityPolicy.java NÃO foi alterado
+pelo HF57. Depois desse alinhamento, verify:release passou integralmente.
+
+ARQUIVOS DE PRODUÇÃO ALTERADOS NO HF57
+- android/app/build.gradle
+- android/app/src/main/java/com/nvu/operacional/GtoObserverService.java
+- .github/workflows/build-android-release.yml
+- NVU_RELEASE_METADATA.json
+- package.json (registro do gate HF57)
+
+TESTES ALTERADOS/ADICIONADOS
+- scripts/test-gto-r3-34-hf50-ready-voice.mjs (guard histórico HF55+)
+- scripts/test-gto-r3-34-hf51-dual-voice.mjs (guard histórico HF55+)
+- scripts/test-gto-r3-34-hf56-bubble-position.mjs (identidade forward-compatible HF56+)
+- scripts/test-gto-r3-34-hf57-instant-messages.mjs (novo; 20 checks)
+
+ENTREGA
+Este pacote mantém a estrutura fonte do HF56, sem node_modules, functions/lib ou dist
+gerados localmente. Está preparado como sucessor HF57 para o fluxo normal de build APK.

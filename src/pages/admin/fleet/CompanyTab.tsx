@@ -58,6 +58,7 @@ function CompanyTab({
     companyCatalogLoaded,
     companyCatalogAttempted,
     loadCompanyCatalog,
+    loadCompanyById,
     activeCompanyId,
     memberships,
     updateCompany,
@@ -66,10 +67,66 @@ function CompanyTab({
   } = useCompanyStore();
   const { jobs, contracts, simulators } = useOperationalStore();
   const [performanceReady, setPerformanceReady] = useState(false);
+  const [companyResolution, setCompanyResolution] = useState<{
+    companyId: string;
+    status: "idle" | "loading" | "ready" | "failed";
+  }>({ companyId: "", status: "idle" });
   const activeCompany =
     companies.find((company) => company.id === activeCompanyId) ||
     allCompanies.find((company) => company.id === activeCompanyId);
   const [resolvedCompanyEmail, setResolvedCompanyEmail] = useState("");
+
+  const resolveActiveCompany = React.useCallback(
+    async (companyId: string) => {
+      const direct = await loadCompanyById(companyId);
+      if (direct) return direct;
+
+      // Rare recovery path: if the targeted read is unavailable, reconcile the
+      // complete public catalog once. This is intentionally not the normal
+      // Senior navigation path, which is primed before route transition.
+      const catalog = await loadCompanyCatalog(true);
+      return catalog.find((company) => company.id === companyId) || null;
+    },
+    [loadCompanyById, loadCompanyCatalog],
+  );
+
+  useEffect(() => {
+    const companyId = String(activeCompanyId || "").trim();
+    if (!companyId) {
+      setCompanyResolution({ companyId: "", status: "idle" });
+      return;
+    }
+    if (activeCompany) {
+      setCompanyResolution({ companyId, status: "ready" });
+      return;
+    }
+
+    let cancelled = false;
+    setCompanyResolution({ companyId, status: "loading" });
+    void resolveActiveCompany(companyId).then((company) => {
+      if (cancelled) return;
+      setCompanyResolution({
+        companyId,
+        status: company ? "ready" : "failed",
+      });
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeCompany?.id, activeCompanyId, resolveActiveCompany]);
+
+  const retryCompanyResolution = () => {
+    const companyId = String(activeCompanyId || "").trim();
+    if (!companyId) return;
+    setCompanyResolution({ companyId, status: "loading" });
+    void resolveActiveCompany(companyId).then((company) => {
+      setCompanyResolution({
+        companyId,
+        status: company ? "ready" : "failed",
+      });
+    });
+  };
   const companyDirectEmail = useMemo(() => {
     if (!activeCompany) return "";
     const emailCandidates = [
@@ -715,11 +772,19 @@ function CompanyTab({
     );
   }
 
+  const companyTargetId = String(
+    activeCompanyId || currentUser?.companyId || "",
+  ).trim();
+  const resolutionFailed =
+    Boolean(companyTargetId) &&
+    companyResolution.companyId === companyTargetId &&
+    companyResolution.status === "failed";
   const isStillLoading =
     !activeCompany &&
-    (activeCompanyId ||
-      currentUser?.companyId ||
-      (memberships && memberships.length > 0));
+    Boolean(
+      companyTargetId || (memberships && memberships.length > 0),
+    ) &&
+    !resolutionFailed;
 
   if (isStillLoading) {
     return (
@@ -735,6 +800,32 @@ function CompanyTab({
           <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">
             Sincronizando empresa
           </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!activeCompany && resolutionFailed) {
+    return (
+      <div className="flex min-h-[220px] items-center justify-center px-4">
+        <div className="w-full max-w-sm rounded-2xl border border-amber-200 bg-amber-50 p-5 text-center dark:border-amber-900/50 dark:bg-amber-950/20">
+          <AlertTriangle
+            size={24}
+            className="mx-auto mb-2 text-amber-600 dark:text-amber-400"
+          />
+          <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+            Não foi possível sincronizar esta empresa.
+          </p>
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+            O painel não ficará preso. Tente novamente para refazer a leitura.
+          </p>
+          <Button
+            type="button"
+            onClick={retryCompanyResolution}
+            className="mt-4 h-9 rounded-xl bg-blue-600 px-4 text-white hover:bg-blue-700"
+          >
+            Tentar novamente
+          </Button>
         </div>
       </div>
     );

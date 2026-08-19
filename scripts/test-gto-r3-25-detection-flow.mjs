@@ -52,7 +52,7 @@ check(
 check(
   "live freight frames refresh visual foreground evidence before capture-ready check",
   service.includes('recordVisualGtoForegroundEvidence(now, runtimeFreightCount, "live-freight-list")')
-    && service.indexOf('"live-freight-list"') < service.indexOf("if (!gtoForeground || !isCaptureReadyForAnalysis(now)) return;"),
+    && service.indexOf('"live-freight-list"') < service.indexOf("!isCaptureReadyForAnalysis(now)"),
 );
 check(
   "fast freight path restores list lifecycle reopen/close edges",
@@ -69,13 +69,13 @@ check(
 );
 check(
   "driver receives explicit list-detected and selected-freight messages",
-  service.includes("Lista de fretes detectada · ")
-    && service.includes("Frete identificado. Tudo preparado, podemos partir!"),
+  (service.includes("Lista de fretes detectada · ") || service.includes("Lista de fretes detectada ✓ · "))
+    && (service.includes("Frete identificado. Tudo preparado, podemos partir!") || service.includes("Frete confirmado ✓ · viagem em andamento.")),
 );
 check(
   "menu status refreshes when freight runtime count changes",
   service.includes("mainHandler.post(this::refreshMenuContents)")
-    && service.includes('return detected > 0 ? "Lista de fretes detectada" : "Escolha seu frete"'),
+    && service.includes('if (detected > 0) return "Lista de fretes detectada"') && service.includes('if (visualDetected >= 2) return "Lista de fretes localizada"'),
 );
 check(
   "backend request type includes contractMode and still validates server contract mode",

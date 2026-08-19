@@ -1,0 +1,24 @@
+NVU R3.34-PC-HF54 — PUBLICACAO ALINHADA
+
+ORDEM RECOMENDADA
+1. FIREBASE FUNCTION (obrigatorio para eliminar rejeicao de destinationCompany ausente):
+   npm --prefix functions ci
+   npm --prefix functions run build
+   firebase deploy --only functions:registerGtoTrip
+
+2. WEB / NETLIFY (Dev atual reconciliado):
+   npm ci
+   npm run test:gto-r3.34-hf53-aistudio-alignment
+   npm run build
+   publicar a pasta dist pelo fluxo Netlify usado em producao
+
+3. APK ANDROID:
+   executar PREPARAR-ANDROID-WINDOWS.bat
+   gerar release assinada R3.34-PC-HF54 / Android 1.0.106 (106)
+
+CRITERIO DE LIBERACAO
+- Frete GTO com destino rural/sem destinationCompany deve concluir e receber ACK.
+- A tela Concluido deve selar a viagem antes da tentativa de rede.
+- Uma viagem anterior em retry nao pode bloquear a viagem atual.
+- Depois do ACK, 'Anterior em envio' deve desaparecer por reconciliacao da fila real.
+- No modo print, envio final da viagem nao pode reabrir 'Enviando comprovante... 0%'.

@@ -3,6 +3,7 @@ import fs from "node:fs";
 const read = p => fs.readFileSync(p, "utf8");
 const service = read("android/app/src/main/java/com/nvu/operacional/GtoObserverService.java");
 const priority = read("android/app/src/main/java/com/nvu/operacional/GtoDriverMessagePriorityPolicy.java");
+const simple = read("android/app/src/main/java/com/nvu/operacional/GtoSimpleScreenDetectionPolicy.java");
 const diagnostics = read("android/app/src/main/java/com/nvu/operacional/GtoObserverDiagnostics.java");
 const fieldStatus = read("android/app/src/main/java/com/nvu/operacional/GtoFreightFieldStatusPolicy.java");
 const gradle = read("android/app/build.gradle");
@@ -21,8 +22,10 @@ check("workflow remains aligned to current HF22+ release", workflow.includes(`EX
 
 check("driver messages have explicit INFO/SUCCESS/ACTION/CRITICAL priority", 
   priority.includes("static final int INFO") && priority.includes("static final int CRITICAL") && priority.includes("priorityFor"));
-check("lower-priority stage cannot erase a stage before minimum readable time",
-  service.includes("shouldQueueUntilReadable") && service.includes("DRIVER_STAGE_MIN_VISIBLE_MS"));
+check("new authoritative stage replaces stale message immediately while auto-hide remains bounded",
+  service.includes("journey-state messages are live state, not a slideshow queue")
+    && service.includes("DRIVER_STAGE_MIN_VISIBLE_MS = 650L")
+    && service.includes("long acknowledgementDelay = 0L;"));
 check("critical/action stage can preempt lower-priority messaging without touching trip state",
   priority.includes("incomingPriority > currentPriority") && !priority.includes("tripState"));
 
@@ -49,21 +52,30 @@ check("selection failure captures incident evidence before returning to waiting"
 check("capture health transition creates evidence without changing capture policy",
   service.includes('recordObserverEvent("CAPTURE_HEALTHY"') && service.includes('recordObserverIncident("CAPTURE_UNHEALTHY"'));
 
-check("replacement flow has explicit PENDING diagnostic state until a new accept is committed",
-  service.includes('putString("freightReplacementStatus", "PENDING")')
-    && service.includes('recordObserverEvent("FREIGHT_REPLACEMENT_COMMITTED"'));
-check("old trip is not discarded merely because a list appears",
-  service.includes("mayReplaceCancelledTripOnNewAccept") && service.includes("newAcceptEvidence"));
+check("replacement diagnostic follows the semantically certified canonical list lifecycle",
+  service.includes('FREIGHT_LIST_REOPENED_CERTIFIED')
+    && service.includes('"FREIGHT_REPLACEMENT_COMMITTED"')
+    && service.includes('isReplacementFreightSemanticFresh')
+    && !service.includes('putString("freightReplacementStatus", "PENDING")'));
+check("stable jobs list retires stale trip while one unconfirmed frame cannot",
+  service.includes("stableReturnedList")
+    && service.includes("promoteReplacementFreightCandidateToWaiting")
+    && simple.includes("observedFrames >= 2")
+    && simple.includes("visibleForMs >= 55L"));
 
 check("sync pending is visible but remains backed by durable queue behavior",
   service.includes('announceDriverStage("SYNC_PENDING"') && service.includes("GtoAutoTripSync.enqueueConfirmedTrip"));
 check("operation card exposes only simple observer/sync status in expanded summary",
   service.includes('"\\nObservador: " + observerStatus') && service.includes('"\\nSincronização: " + syncLabel'));
 
-check("route OCR cadence remains HF21 low-risk semantic fallback (no new detector authority)",
-  service.includes("ACTIVE_TRIP_RESULT_FALLBACK_OCR_MS = 1800L")
+const resultFallbackMs = Number((service.match(/ACTIVE_TRIP_RESULT_FALLBACK_OCR_MS = (\d+)L/) || [])[1] || 0);
+check("route OCR cadence remains real-time semantic authority while certified visual exit is terminal-only",
+  resultFallbackMs >= 180 && resultFallbackMs <= 500
     && service.includes("tripCandidateOcrDue = false")
-    && !service.includes("resultVisualGate.looksLikeResultDialog"));
+    && service.includes("GtoCertifiedResultLifecyclePolicy.shouldTrack")
+    && service.includes("resultVisualGate.looksLikeCertifiedResultStillVisible")
+    && service.includes("observeCertifiedResultVisualContinuity")
+    && !service.includes("tripResultCandidate = resultVisualGate.looksLikeResultDialog"));
 check("frame freshness and session-generation guards remain intact",
   service.includes("GtoFrameFreshnessPolicy.shouldConsume")
     && service.includes("generation != analysisOcrGeneration")

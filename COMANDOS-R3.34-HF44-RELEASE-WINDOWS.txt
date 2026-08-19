@@ -1,0 +1,26 @@
+NVU R3.34-PC-HF44 — Android 1.0.96 / versionCode 96
+
+1) Extraia o ZIP HF44 em uma pasta nova e entre na raiz do projeto.
+
+2) Preparação e certificação automática:
+PREPARAR-ANDROID-WINDOWS.bat
+
+3) Build Gradle real, caso queira executar manualmente após a preparação:
+cd android
+gradlew.bat clean assembleRelease
+
+4) Confirme no APK/log:
+versionName = 1.0.96
+versionCode = 96
+
+APK esperado em:
+android\app\build\outputs\apk\release\
+
+TESTE FÍSICO HF44:
+A) abra uma lista real e confirme que "Lista de fretes detectada" permanece enquanto a lista estiver aberta;
+B) navegue entre páginas com quantidades diferentes de fretes sem fechar a lista;
+C) o número mostrado deve acompanhar a página atual em tempo real (ex.: 3 -> 5), sem manter o número da página anterior;
+D) toque rapidamente em Aceitar e confirme que a contagem não cai temporariamente por causa da animação do botão;
+E) confirme que seleção, viagem, resultado, Receber e envio continuam iguais à HF43/HF42.
+
+HF44 é Android-only em relação à HF43. Não é necessário novo deploy Web/Netlify/Functions apenas por esta correção.

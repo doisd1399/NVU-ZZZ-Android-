@@ -5,6 +5,7 @@ const service = fs.readFileSync('android/app/src/main/java/com/nvu/operacional/G
 const fast = fs.readFileSync('android/app/src/main/java/com/nvu/operacional/GtoFastVisualDetector.java');
 const coordinator = fs.readFileSync('android/app/src/main/java/com/nvu/operacional/GtoSelectionCoordinator.java');
 const gradle = fs.readFileSync('android/app/build.gradle', 'utf8');
+const simple = fs.readFileSync('android/app/src/main/java/com/nvu/operacional/GtoSimpleScreenDetectionPolicy.java', 'utf8');
 const backend = fs.readFileSync('functions/src/gtoTrips.ts');
 const sha = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
 
@@ -14,11 +15,11 @@ const WORKING_COORD = 'd84fe0848f5a054225cf939786156c07a291a4eb74a362ca9f72878d9
 const checks = [
   ['working freight detector preserves OCR-free selection contract', fast.toString('utf8').includes('PressCandidate') && fast.toString('utf8').includes('detectButtons') && !fast.toString('utf8').includes('TextRecognizer')],
   ['working selection coordinator remains byte-identical', sha(coordinator) === WORKING_COORD],
-  ['replacement freight candidate is armed only inside the guarded list-observation path', service.includes('replacementFreightCandidateArmed') && service.includes('armOrRefreshReplacementFreightCandidate(image, frame, now)') && service.includes('isExplicitFreightReplacementActive(now)')],
-  ['touch pulse sensor observes a replacement candidate without bypassing state policy', service.includes('replacementSelectionArmed = replacementFreightCandidateArmed') && service.includes('isReplaceableActiveSessionState(state)') && service.includes('GtoDeterministicFlowPolicy.mayObserveFreightListOutsideWaiting(state)')],
-  ['touch marker promotion is guarded by the explicit active-trip replacement arm', /STATE_TRIP_IN_PROGRESS\.equals\(replacedState\)[\s\S]*!isExplicitFreightReplacementActive/.test(service) && service.includes('promoteReplacementFreightCandidateToWaiting(')],
-  ['single permissive frame cannot cancel a real route on arbitrary touch', service.includes('GtoFreightBootstrapPolicy.shouldAwaitSecondListFrame(') && service.includes('replacementFreightTouchPending = true') && service.includes('if (STATE_TRIP_IN_PROGRESS.equals(activeState) && !explicitReplacement)')],
-  ['pending fast touch still requires list evidence and guarded promotion', service.includes('replacementFreightTouchPending') && service.includes('activeTripFreightListFrames >= 2') && service.includes('promoteReplacementFreightCandidateToWaiting(')],
+  ['returned jobs list creates a replacement candidate only through the list-observation path', service.includes('replacementFreightCandidateArmed') && service.includes('armOrRefreshReplacementFreightCandidate(image, frame, now)') && service.includes('handleActiveTripFreightListEvidence')],
+  ['touch pulse sensor observes a replacement candidate without bypassing state policy', service.includes('replacementSelectionArmed = replacementFreightCandidateArmed') && service.includes('replacementFreightSemanticRejectedAt <= 0L') && service.includes('mayHandleCertifiedFreightBoundary(state)')],
+  ['touch/list promotion is guarded by stable returned-list or exact new-Accept evidence', /promoteReplacementFreightCandidateToWaiting[\s\S]{0,2200}stableReturnedList[\s\S]{0,600}exactNewAccept[\s\S]{0,500}return false/.test(service)],
+  ['single permissive frame cannot cancel a real route', simple.includes('observedFrames >= 2') && simple.includes('visibleForMs >= 55L') && service.includes('activeTripFreightListFrames >= ACTIVE_TRIP_FREIGHT_LIST_CONFIRM_FRAMES')],
+  ['pending fast touch still requires a captured jobs-list candidate and guarded promotion', service.includes('replacementFreightTouchPending') && service.includes('replacementFreightCandidateArmed') && service.includes('promoteReplacementFreightCandidateToWaiting(')],
   ['pre-touch freight page is frozen before state replacement', service.includes('captureReplacementFreightPanel(image, frame)') && service.includes('replacementFreightPanelFrame')],
   ['candidate survives short list-close race until touch marker arrives', service.includes('CRITICAL_TOUCH_WINDOW_MS + 260L')],
   ['page navigation refreshes replacement baseline instead of mixing pages', service.includes('!fastVisualDetector.samePage(replacementFreightBaseline, frame)')],
@@ -28,7 +29,7 @@ const checks = [
   ['pre-touch panel and button geometry are restored into new session', service.includes('latestFreightPanelFrame = savedPanel') && service.includes('realtimeAcceptRects.add(new Rect(rect))')],
   ['selection coordinator receives restored baseline sequence', service.includes('long baselineSequence = selectionCoordinator.onFrameProcessed()') && service.includes('recordFastFreightFrame(savedBaseline, baselineSequence)')],
   ['new page OCR is scheduled after replacement session is armed', service.includes('scheduleFreightPageOcr(') && service.includes('freightPageGeneration, savedPanel, savedOffset, savedButtons')],
-  ['active route treats list-like pixels as candidate and requires a real new Accept', service.includes('mayProbeFreightListForCurrentState') && service.includes('if (STATE_TRIP_IN_PROGRESS.equals(activeState) && !explicitReplacement)') && service.includes('FREIGHT_LIST_CANDIDATE_AFTER_TRIP') && service.includes('boolean selectedNewRow = replacementFreightTouchPending')],
+  ['active route treats only a semantically certified real jobs list as the canonical cancellation boundary without a manual arm', service.includes('handleActiveTripFreightListEvidence') && service.includes('FREIGHT_LIST_REOPENED_CERTIFIED') && service.includes('GtoFreightSemanticCertificationPolicy.isCertifiedLifecycleBoundaryPage') && service.includes('GtoSimpleScreenDetectionPolicy.isCertifiedFreightListReturn') && service.includes('isReplacementFreightSemanticFresh') && service.includes('GtoFreightLifecycleBoundaryPolicy.mayReplaceCurrentContext') && !service.includes('isExplicitFreightReplacementActive')],
   ['completed delivery remains outside replacement cancellation path', (() => { const a=service.indexOf('private boolean isReplaceableActiveSessionState'); const b=service.indexOf('private boolean hasRecentNormalResultActionEvidence', a); return a>=0 && b>a && !service.slice(a,b).includes('STATE_RESULT_CONFIRMED'); })()],
   ['automatic result flow remains present', service.includes('confirmNormalResultAutomatically()') && service.includes('GtoAutoTripSync.enqueueConfirmedTrip')],
   ['R3.2 semantic-only fallback remains present', service.includes('hasPartialResultSemanticEvidence(normalized)')],

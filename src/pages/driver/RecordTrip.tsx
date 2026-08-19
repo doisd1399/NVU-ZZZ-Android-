@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { db } from "../../lib/firebase";
+import { withTimeout } from "../../lib/asyncTimeout";
 import {
   doc,
   getDoc,
@@ -52,6 +53,8 @@ import {
 } from "../../lib/tripDistance";
 import { TRIP_RECEIPT_RETENTION_DAYS } from "../../lib/tripReceiptRetention";
 import { launchGtoWork } from "../../services/gtoWorkLauncher";
+
+type ReceiptUploadPhase = "idle" | "preparing" | "validating" | "uploading";
 
 const generateImageHash = async (
   arrayBuffer: ArrayBuffer,
@@ -118,7 +121,9 @@ export default function RecordTrip() {
   const [gtoReceiptAnalysisStatus, setGtoReceiptAnalysisStatus] = useState<"idle" | "reading" | "ok" | "failed" | "blocked">("idle");
   const [gtoAdDoubleDetected, setGtoAdDoubleDetected] = useState(false);
   const [gtoAdEvidence, setGtoAdEvidence] = useState<string[]>([]);
+  const [gtoManualConfirmed, setGtoManualConfirmed] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<number>(0);
+  const [uploadPhase, setUploadPhase] = useState<ReceiptUploadPhase>("idle");
   const [isNavigating, setIsNavigating] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const ocrRequestIdRef = useRef(0);
@@ -199,7 +204,7 @@ export default function RecordTrip() {
       ? activeContract.deliveries
       : null;
   const currentRouteIndex = activeJob ? (activeJob.progress || 0) : 0;
-  
+
   const isContractCompletedState = predefinedRoutes && currentRouteIndex >= predefinedRoutes.length;
   const currentPredefinedRoute = (predefinedRoutes && !isContractCompletedState) ? predefinedRoutes[currentRouteIndex] : null;
 
@@ -430,7 +435,7 @@ export default function RecordTrip() {
     if (selectedFile) {
       const now = Date.now();
       const recentUploads = uploadCountMinute.filter(time => now - time < 60000);
-      
+
       if (recentUploads.length >= 3) {
         toast.error("Limite de uploads atingido. Aguarde um minuto.");
         return;
@@ -441,6 +446,7 @@ export default function RecordTrip() {
       }
 
       setIsUploading(true);
+      setUploadPhase("preparing");
       setUploadProgress(0);
       setImageHash(null);
       let localPreviewUrl: string | null = null;
@@ -464,6 +470,7 @@ export default function RecordTrip() {
         setGtoReceiptAnalysisStatus("idle");
         setGtoAdDoubleDetected(false);
         setGtoAdEvidence([]);
+        setGtoManualConfirmed(false);
         setImagePreview(localPreviewUrl);
 
         const simulatorId = resolveSimulatorId(currentCompany, simulators) || "";
@@ -484,49 +491,67 @@ export default function RecordTrip() {
           isToe3OcrSimulator,
         });
 
-        // OCR is non-blocking and always reads the stable in-memory copy.
-        // GTO keeps its existing value-only flow. ATS/ETS2 use the SCS parser
-        // for route, distance and earnings. TOE3 has its own mobile-result
-        // parser and fills only distance and earnings.
+        // OCR always reads the stable browser-owned snapshot, but it must never
+        // hold the receipt upload hostage. On low-end Android devices the OCR
+        // worker and Firebase upload now progress independently. The launch
+        // gate below still requires a successful GTO analysis before saving a
+        // normal trip, so anti-ADS validation remains conservative.
         if (isGto) {
           setIsReadingValue(true);
           setGtoReceiptAnalysisStatus("reading");
 
-          const analysis = await analyzeGtoTripReceipt(file);
-          if (ocrRequestIdRef.current !== requestId) return;
+          void analyzeGtoTripReceipt(file)
+            .then((analysis) => {
+              if (ocrRequestIdRef.current !== requestId) return;
 
-          setIsReadingValue(false);
+              if (!analysis.analysisOk) {
+                setGtoManualConfirmed(false);
+                setGtoReceiptAnalysisStatus("failed");
+                toast.warning(
+                  "Leitura automática inconclusiva. Confira o print e use a confirmação manual para continuar.",
+                );
+                return;
+              }
 
-          if (!analysis.analysisOk) {
-            setGtoReceiptAnalysisStatus("failed");
-            toast.error(
-              "Não foi possível validar o print do GTO. Envie uma imagem nítida da tela de conclusão.",
-            );
-            return;
-          }
+              if (analysis.value) {
+                setValor(analysis.value);
+              }
 
-          if (analysis.value) {
-            setValor(analysis.value);
-          }
+              if (analysis.doubledByAd) {
+                setGtoManualConfirmed(false);
+                setGtoAdDoubleDetected(true);
+                setGtoAdEvidence(analysis.evidence);
+                setGtoReceiptAnalysisStatus("blocked");
+                toast.error(
+                  "Anúncio/valor dobrado detectado no print. Esta viagem não será aceita como resultado normal.",
+                );
+                return;
+              }
 
-          if (analysis.doubledByAd) {
-            setGtoAdDoubleDetected(true);
-            setGtoAdEvidence(analysis.evidence);
-            setGtoReceiptAnalysisStatus("blocked");
-            toast.error(
-              "Anúncio/valor dobrado detectado no print. Esta viagem não será aceita como resultado normal.",
-            );
-            return;
-          }
-
-          setGtoReceiptAnalysisStatus("ok");
-          if (analysis.value) {
-            toast.success(`Valor identificado: R$ ${analysis.value}`);
-          } else {
-            toast.warning(
-              "Print validado sem indício de anúncio/dobro, mas o valor não foi identificado. Confira e preencha manualmente.",
-            );
-          }
+              setGtoManualConfirmed(false);
+              setGtoReceiptAnalysisStatus("ok");
+              if (analysis.value) {
+                toast.success(`Valor identificado: R$ ${analysis.value}`);
+              } else {
+                toast.warning(
+                  "Print validado sem indício de anúncio/dobro, mas o valor não foi identificado. Confira e preencha manualmente.",
+                );
+              }
+            })
+            .catch((error) => {
+              if (ocrRequestIdRef.current !== requestId) return;
+              console.error("[NVU GTO OCR] async analysis failure", error);
+              setGtoManualConfirmed(false);
+              setGtoReceiptAnalysisStatus("failed");
+              toast.warning(
+                "A leitura automática não pôde ser concluída. Confira o print e use a confirmação manual para continuar.",
+              );
+            })
+            .finally(() => {
+              if (ocrRequestIdRef.current === requestId) {
+                setIsReadingValue(false);
+              }
+            });
         } else if (isScsOcrSimulator) {
           setIsReadingValue(true);
           void extractScsTripData(file, resolvedSimulatorCode)
@@ -627,12 +652,21 @@ export default function RecordTrip() {
           setIsReadingValue(false);
         }
 
+        setUploadPhase("validating");
         phase = "hashing";
-        const hash = await generateImageHash(bytes, file);
-        
+        const hash = await withTimeout(
+          generateImageHash(bytes, file),
+          10_000,
+          "A validação local da imagem demorou demais.",
+        );
+
         phase = "duplicate-check";
-        const isDuplicate = await TripsRepository.checkImageHash(hash);
-        
+        const isDuplicate = await withTimeout(
+          TripsRepository.checkImageHash(hash),
+          12_000,
+          "A verificação de duplicidade demorou demais.",
+        );
+
         if (isDuplicate) {
           toast.error("Esta imagem já foi utilizada em um lançamento anterior.");
           ocrRequestIdRef.current += 1;
@@ -642,12 +676,14 @@ export default function RecordTrip() {
           setGtoReceiptAnalysisStatus("idle");
           setGtoAdDoubleDetected(false);
           setGtoAdEvidence([]);
+          setGtoManualConfirmed(false);
           receiptOriginalNameRef.current = "";
           if (localPreviewUrl) URL.revokeObjectURL(localPreviewUrl);
           return;
         }
 
         phase = "firebase-upload";
+        setUploadPhase("uploading");
         const url = await uploadService.uploadImage({
           file,
           companyId: currentCompany?.id || "Geral",
@@ -682,11 +718,13 @@ export default function RecordTrip() {
         setGtoReceiptAnalysisStatus("idle");
         setGtoAdDoubleDetected(false);
         setGtoAdEvidence([]);
+        setGtoManualConfirmed(false);
         receiptOriginalNameRef.current = "";
         if (localPreviewUrl) URL.revokeObjectURL(localPreviewUrl);
         toast.error(`Falha no envio da imagem. ${userMessage}`);
       } finally {
         setIsUploading(false);
+        setUploadPhase("idle");
         setUploadProgress(0);
         if (fileInputRef.current) {
           fileInputRef.current.value = "";
@@ -713,20 +751,28 @@ export default function RecordTrip() {
         toast.warning("Aguarde a NVU terminar a análise do print.");
         return;
       }
-      if (gtoReceiptAnalysisStatus === "failed") {
-        toast.error("Envie novamente um print nítido para validar valor e anúncio/dobro.");
-        return;
-      }
       if (gtoAdDoubleDetected || gtoReceiptAnalysisStatus === "blocked") {
         toast.error("Viagem bloqueada: o print indica anúncio/valor dobrado.");
         return;
       }
-      if (imagePreview && gtoReceiptAnalysisStatus !== "ok") {
-        toast.error("Aguarde a validação automática do print do GTO.");
+      if (gtoReceiptAnalysisStatus === "failed" && !gtoManualConfirmed) {
+        toast.error(
+          "A leitura automática ficou inconclusiva. Confira o print e marque a confirmação manual para continuar.",
+        );
+        return;
+      }
+      const gtoManualFallbackAccepted =
+        gtoReceiptAnalysisStatus === "failed" && gtoManualConfirmed;
+      if (
+        imagePreview &&
+        gtoReceiptAnalysisStatus !== "ok" &&
+        !gtoManualFallbackAccepted
+      ) {
+        toast.error("Aguarde a validação do print do GTO.");
         return;
       }
     }
-    
+
     const finalOrigem = currentPredefinedRoute ? currentPredefinedRoute.origin : origem;
     const finalDestino = currentPredefinedRoute ? currentPredefinedRoute.destination : destino;
 
@@ -802,7 +848,7 @@ export default function RecordTrip() {
         completedAt: serverTimestamp(),
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
-        
+
         // Audit fields
         imageHash: imageHash,
         deviceId: deviceId,
@@ -816,6 +862,11 @@ export default function RecordTrip() {
           ? {
               gtoEntryMode: "print",
               gtoReceiptAnalyzed: gtoReceiptAnalysisStatus === "ok",
+              gtoReceiptValidationMode:
+                gtoReceiptAnalysisStatus === "ok" ? "ocr" : "manual-fallback",
+              gtoReceiptManualConfirmation:
+                gtoReceiptAnalysisStatus === "failed" && gtoManualConfirmed,
+              gtoReceiptReviewRequired: gtoReceiptAnalysisStatus === "failed",
               gtoRewardedAdDetected: false,
             }
           : {}),
@@ -826,7 +877,7 @@ export default function RecordTrip() {
       }
 
       const docRef = await TripsRepository.addTrip(data);
-      
+
       // Save tripId inside doc
       await updateDoc(docRef, { tripId: docRef.id });
 
@@ -848,6 +899,7 @@ export default function RecordTrip() {
       setGtoReceiptAnalysisStatus("idle");
       setGtoAdDoubleDetected(false);
       setGtoAdEvidence([]);
+      setGtoManualConfirmed(false);
       receiptOriginalNameRef.current = "";
       if (fileInputRef.current) fileInputRef.current.value = "";
 
@@ -1189,7 +1241,13 @@ export default function RecordTrip() {
                   size={14}
                   className={isUploading ? "animate-pulse" : ""}
                 />
-                {isUploading ? "Enviando..." : "Enviar imagem"}
+                {uploadPhase !== "idle"
+                  ? (uploadPhase === "uploading"
+                      ? "Enviando..."
+                      : uploadPhase === "validating"
+                        ? "Validando..."
+                        : "Preparando...")
+                  : "Enviar imagem"}
               </button>
             </div>
 
@@ -1208,7 +1266,24 @@ export default function RecordTrip() {
               >
                 {gtoReceiptAnalysisStatus === "reading" && "Analisando valor e confirmação de anúncio/dobro…"}
                 {gtoReceiptAnalysisStatus === "ok" && "Print validado · nenhum anúncio/valor dobrado confirmado."}
-                {gtoReceiptAnalysisStatus === "failed" && "Não foi possível validar o print. Envie uma imagem nítida da tela de conclusão."}
+                {gtoReceiptAnalysisStatus === "failed" && (
+                  <div className="space-y-2">
+                    <div>
+                      Leitura automática inconclusiva. Confira a imagem e o valor; o comprovante ficará marcado para auditoria.
+                    </div>
+                    <label className="flex items-start gap-2 normal-case tracking-normal font-medium cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={gtoManualConfirmed}
+                        onChange={(event) => setGtoManualConfirmed(event.target.checked)}
+                        className="mt-0.5"
+                      />
+                      <span>
+                        Confirmo que este print é da tela Concluído do GTO e que não usei anúncio/valor dobrado.
+                      </span>
+                    </label>
+                  </div>
+                )}
                 {gtoReceiptAnalysisStatus === "blocked" && (
                   <>
                     Anúncio/valor dobrado confirmado no print. O lançamento normal está bloqueado.
@@ -1238,11 +1313,12 @@ export default function RecordTrip() {
                       setGtoReceiptAnalysisStatus("idle");
                       setGtoAdDoubleDetected(false);
                       setGtoAdEvidence([]);
+                      setGtoManualConfirmed(false);
                       if (fileInputRef.current) fileInputRef.current.value = "";
                     }}
                     className={cn(
                       "flex items-center gap-1 text-[10px] font-medium py-1 px-2 rounded-full transition-colors",
-                      isUploading 
+                      isUploading
                        ? "bg-gray-100 text-gray-400 dark:bg-gray-800 dark:text-gray-600 cursor-not-allowed opacity-50"
                        : "text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200 bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700"
                     )}
@@ -1257,27 +1333,42 @@ export default function RecordTrip() {
                       <img
                         src={imagePreview}
                         alt="Prévia do comprovante"
-                        className={cn("w-full h-auto max-h-[160px] object-cover sm:object-contain rounded-lg cursor-pointer transition-opacity", isUploading ? "opacity-70" : "opacity-100")}
+                        className={cn("w-full h-auto max-h-[160px] object-cover sm:object-contain rounded-lg cursor-pointer transition-opacity", uploadPhase !== "idle" ? "opacity-70" : "opacity-100")}
                       />
                     </PhotoView>
                   </PhotoProvider>
 
-                  {isUploading && (
+                  {uploadPhase !== "idle" && (
                     <div className="absolute inset-x-0 bottom-0 bg-white/95 dark:bg-[#1A1F26]/95 backdrop-blur-md p-3 border-t border-gray-200/50 dark:border-gray-700/50 flex flex-col gap-1.5">
                        <div className="flex justify-between text-[10px] items-center text-blue-600 dark:text-blue-400 font-bold tracking-widest uppercase">
-                         <span className="flex items-center gap-1.5"><UploadCloud size={12} className="animate-pulse" /> Enviando comprovante...</span>
-                         <span>{uploadProgress.toFixed(0)}%</span>
+                         <span className="flex items-center gap-1.5">
+                           <UploadCloud size={12} className="animate-pulse" />
+                           {uploadPhase === "uploading"
+                             ? "Enviando comprovante..."
+                             : uploadPhase === "validating"
+                               ? "Validando comprovante..."
+                               : "Preparando comprovante..."}
+                         </span>
+                         {uploadPhase === "uploading" && <span>{uploadProgress.toFixed(0)}%</span>}
                        </div>
                        <div className="w-full h-1 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
-                          <div 
-                            className="h-full bg-blue-600 dark:bg-blue-500 rounded-full transition-all duration-300" 
-                            style={{ width: `${Math.max(2, uploadProgress)}%` }}
+                          <div
+                            className={cn(
+                              "h-full bg-blue-600 dark:bg-blue-500 rounded-full transition-all duration-300",
+                              uploadPhase !== "uploading" && "animate-pulse",
+                            )}
+                            style={{
+                              width:
+                                uploadPhase === "uploading"
+                                  ? `${Math.max(2, uploadProgress)}%`
+                                  : "35%",
+                            }}
                           />
                        </div>
                     </div>
                   )}
 
-                  {!isUploading && imageHash && (
+                  {uploadPhase === "idle" && imageHash && (
                     <div className="absolute bottom-2 right-2 bg-green-500/90 text-white text-[10px] px-2.5 py-1.5 rounded-lg font-semibold shadow-sm backdrop-blur-sm flex items-center gap-1.5">
                       <CheckCircle2 size={12} className="stroke-[2.5]" />
                       Comprovante enviado com sucesso

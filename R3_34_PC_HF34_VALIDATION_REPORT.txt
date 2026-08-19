@@ -1,0 +1,210 @@
+NVU R3.34 PC-HF34 — AUDITORIA E REORGANIZAÇÃO CANÔNICA DO GTO OBSERVE
+Android 1.0.86 / versionCode 86
+Data da revisão: 2026-08-17
+Base: R3.34-PC-HF33, incorporando supervisor de MediaProjection HF30, lifecycle fail-safe da bolinha HF31 e correção de timebase/saúde de reconhecimento HF32.
+
+1. OBJETIVO FUNCIONAL CANÔNICO
+
+O sistema GTO Observe deve operar como observador contínuo do simulador e não como uma coleção de telas independentes:
+
+  IDLE/CANCELLED + LISTA REAL
+      -> WAITING_FREIGHT automaticamente
+
+  WAITING_FREIGHT + toque humano real em ACEITAR + identidade da linha
+      -> CONFIRMING_FREIGHT
+
+  CONFIRMING_FREIGHT + dados automáticos seguros
+      -> TRIP_IN_PROGRESS
+
+  TRIP_IN_PROGRESS + LISTA REAL reaberta e estável
+      -> encerrar/desconsiderar totalmente a sessão anterior
+      -> novo WAITING_FREIGHT limpo
+
+  TRIP_IN_PROGRESS + resultado semântico válido
+      -> RESULT_DETECTED / AWAITING_BONUS conforme conteúdo
+
+  RESULT_DETECTED + RECEBER durável
+      -> RESULT_CONFIRMED -> fila/sincronização automática
+
+  RESULT_DETECTED sem RECEBER + LISTA REAL estável
+      -> abandonar resultado não confirmado -> novo WAITING_FREIGHT
+
+  RESULT/ADS/bonus
+      -> manter reconhecimento semântico contínuo até resolver o estado
+
+A lista cancela a viagem antiga, mas nunca inventa qual novo frete foi escolhido. O novo frete continua exigindo o toque real do motorista no botão Aceitar e a correlação dessa ação com a linha exata.
+
+2. CAUSAS-RAIZ ENCONTRADAS
+
+2.1 Captura/reconhecimento dependiam historicamente do estado da viagem
+A lógica anterior permitia que IDLE/CANCELLED desabilitassem a própria observação que deveria detectar a lista e iniciar o fluxo. Isso criava um deadlock circular: o estado esperava a lista, mas o estado desligava o detector.
+CORREÇÃO: captureIsNeededForCurrentState() agora pertence ao Observe habilitado, não ao enum da viagem.
+
+2.2 Contradição de lifecycle da lista durante viagem ativa
+Havia regras de versões anteriores em que a lista reaparecida era “informativa” e a viagem ficava imutável até uma armação explícita de troca. Isso contradiz o comportamento real do GTO informado pelo produto: abrir novamente a lista significa que a viagem anterior já deixou de ser a viagem operacional válida.
+CORREÇÃO: lista estrita, semanticamente compatível e estável em 2 frames/55 ms é boundary canônico. A sessão anterior é retirada e um novo ciclo WAITING_FREIGHT começa. Uma única imagem não basta para cancelar.
+
+2.3 IDLE/CANCELLED possuíam política de bootstrap, mas o estabilizador não aceitava esses estados
+GtoDeterministicFlowPolicy permitia bootstrap, enquanto GtoSimpleScreenDetectionPolicy só considerava retorno de lista em estados de viagem/resultado. O detector podia reconhecer a lista e, ainda assim, não ocorrer transição.
+CORREÇÃO: IDLE, CANCELLED, TRIP_IN_PROGRESS, RESULT_DETECTED e AWAITING_BONUS usam a mesma fronteira estável de lista (2 frames, 55 ms).
+
+2.4 RESULT_DETECTED/AWAITING_BONUS paravam o OCR semântico
+isResultTrackingState() tratava o resultado como uma borda quase one-shot. Depois da primeira detecção, o próximo Receber, ADS/bonus ou retorno à lista podia deixar de ser processado em tempo real.
+CORREÇÃO: resultado é estado visual contínuo. TRIP_IN_PROGRESS, RESULT_DETECTED e AWAITING_BONUS continuam recebendo OCR semântico.
+
+2.5 Fila de mensagens podia exibir estado antigo
+Mensagens antigas tinham tempo de leitura que podia atrasar uma mensagem mais nova. Isso fazia a UI contar uma história diferente do estado real do GTO.
+CORREÇÃO: nova etapa autoritativa substitui imediatamente a anterior. DRIVER_STAGE_MIN_VISIBLE_MS só limita auto-hide; acknowledgementDelay é zero.
+
+2.6 OCR da linha selecionada competia com OCR de página
+A coleta da linha tocada podia aguardar trabalho semântico geral da página, gerando lentidão justamente após Aceitar.
+CORREÇÃO: selectionTextRecognizer/crop da linha selecionada tem caminho dedicado e prioridade própria. OCR de página é contexto/fallback, não bloqueio.
+
+2.7 Origem podia cair em revisão apesar de estar recuperável
+Separadores pequenos como “>” podem desaparecer no OCR. Em versões anteriores isso levava a “Origem não confirmada” mesmo com a rota disponível na página.
+CORREÇÃO: antes de qualquer revisão humana, a origem passa por: geometria de tokens, destination-company anchor, ROI/linhas, snapshot imutável da linha, fresh same-row semantic evidence, consenso conservador da página e retries automáticos.
+
+2.8 Fallback perigoso de origem podia resolver o problema de forma errada
+Aceitar uma frase mesclada como “Metalúrgica Dalavan” como origem inteira removeria a revisão, mas produziria dado incorreto.
+CORREÇÃO: frase única/ambígua não vira origem. Só evidência geometricamente/semanticamente separável é automática. Fail-closed é preferido a dado inventado.
+
+2.9 UI Web ainda carregava semântica antiga de troca explícita
+Texto dizia que uma lista reaberta mantinha o frete atual em andamento e havia status de troca explicitamente autorizada.
+CORREÇÃO: removidos campos/status/armas explícitas da camada atual. UI passa a refletir que a lista reaberta encerra o contexto anterior e prepara o próximo frete. Como o Capacitor usa runtime remoto, HF34 é uma alteração Android + Web e o Netlify precisa ser publicado junto para manter paridade.
+
+2.10 Timebase/saúde visual da HF32 permanece corrigido
+Image.getTimestamp() não é comparado a System.nanoTime() como relógio absoluto. Timestamp serve apenas para ordenar frames do mesmo produtor. Bolinha branca exige frame real + contexto GTO + estabilidade + execução real do reconhecedor.
+
+3. MAPA DAS FUNÇÕES DO SISTEMA DE AUTOMAÇÃO
+
+3.1 Ownership e saúde da captura
+- captureIsNeededForCurrentState(): Observe habilitado é a autoridade da captura.
+- onImageAvailable(): roteador central de frames.
+- consumeCaptureStabilityFrame(): mantém classificação visual leve mesmo durante estabilização; barreira decide mutação, não observação.
+- createProjectionSurface()/resizeProjectionSurface(): ImageReader/VirtualDisplay.
+- invalidateCaptureBoundAnalysis(): limpa somente evidência dependente da geometria; não apaga snapshot durável da viagem concluída.
+- MediaProjection.Callback.onStop() / supervisor HF30: única autoridade do Android para token realmente encerrado; stall de frames não vira revogação.
+
+3.2 Reconhecimento instantâneo de tela
+- GtoFastVisualDetector.analyze(): classificador OCR-free de lista/Accept; alvo ~32 ms.
+- onFreightFrameAvailable(): caminho ordenado no WAITING_FREIGHT para não perder a transição de botão pressionado.
+- GtoFreightListEvidencePolicy / GtoFreightSemanticCertificationPolicy: separam geometria candidata de página semanticamente certificada.
+- recordVisualGtoForegroundEvidence(): permite recuperar OEM/UsageStats atrasado a partir de pixels estritos do GTO sem aceitar app terceiro conhecido.
+
+3.3 Reducer/lifecycle da lista
+- handleActiveTripFreightListEvidence(): transforma lista real em boundary de lifecycle nos estados compatíveis.
+- GtoSimpleScreenDetectionPolicy.isStableFreightListReturn(): exige lista real + estado canônico + 2 frames + 55 ms.
+- promoteReplacementFreightCandidateToWaiting(): retira snapshot/sessão antiga, limpa análise transitória, inicia nova sessão e preserva a página recém-detectada para seleção.
+- GtoDeterministicFlowPolicy: matriz de transições válidas; não depende de “replacement arm”.
+
+3.4 Evidência humana e identidade da seleção
+- queueFreightTouchMarker(): registra o toque fora da bolha sem tornar o overlay modal.
+- GtoSelectionCoordinator / GtoSelectionIdentityPolicy: correlacionam touch, sequência de frames e linha exata.
+- armFastVisualSelection()/finalizeFastVisualSelection(): usa transição visual do botão Aceitar sem adivinhar row.
+- FreightSelectionTransaction: congela bitmap/geometria/OCR de página do instante correto antes de qualquer mudança de estado.
+
+3.5 Coleta automática dos dados da viagem
+- runPreciseSelectedRowOcr(): OCR dedicado da linha selecionada.
+- parseFreightOptions()/refinePreciseRowFields(): carga, rota, destino, km e valor.
+- GtoOriginGeometryPolicy: separador, tokens, anchor, ROI e fail-closed para origem.
+- mergeVerifiedPreciseWithStable(): só funde evidência que pertence à mesma identidade.
+- enrichSelectedFreightFromFreshSameRow(): usa última cópia semanticamente certificada da MESMA linha.
+- recoverMissingOriginFromCurrentPage(): consenso seguro de origem entre rows visíveis.
+- focused retry policies: releitura automática em escalas/crops específicos antes de revisão.
+- firstReviewField()/startFreightReview(): revisão humana existe apenas como último recurso para campo realmente não recuperado com segurança.
+
+3.6 Commit da viagem
+- commitPreciseFreight()/commitReviewedFreight(): só aceitam identidade humana confirmada e campos operacionais válidos.
+- transitionConfirmedFreightToTripInProgress(): trava snapshot imutável antes de iniciar viagem.
+- GtoAutoTripSync.lockSelectedFreight(): persistência durável/fingerprint da seleção.
+
+3.7 Resultado e conclusão
+- isResultTrackingState(): mantém OCR em TRIP_IN_PROGRESS + RESULT_DETECTED + AWAITING_BONUS.
+- handleOcrResult()/parseResultScreen(): semântica “Concluído” + valor, sem assinatura de cor/pixel como autoridade.
+- latch de Receber: ação durável para confirmar entrega realmente concluída.
+- confirmNormalResultAutomatically(): sela resultado confirmado e envia à fila.
+- GtoAutoTripSync.enqueueConfirmedTrip()/ACK: fila durável, idempotência e remoção só após confirmação do backend.
+
+4. CADÊNCIAS HF34
+
+- Classificação visual de tela: ~32 ms.
+- Fronteira estável de lista: mínimo 2 frames e 55 ms.
+- OCR da linha selecionada: imediato em recognizer dedicado.
+- Retry de origem selecionada: 110 ms por tentativa segura.
+- Retry de evidência geral da linha: 260 ms quando necessário.
+- OCR semântico de resultado: ~220 ms.
+- Refresh OCR de página de fretes: ~420 ms; não bloqueia a seleção.
+- Mensagens de etapa: substituição imediata; sem fila de estado antigo.
+
+5. REGRESSÕES FÍSICAS INCORPORADAS
+
+Fixtures permanentes HF34:
+- scripts/fixtures/hf34-user-list-after-trip.png
+- scripts/fixtures/hf34-user-selected-freight-origin.png
+- scripts/fixtures/hf34-user-list-with-review.png
+
+Validação com GtoFastVisualDetector de produção:
+- lista página 2 após viagem: detectada como lista; 5 botões Aceitar.
+- gameplay depois de Barras de Ferro: não classificado como lista.
+- lista página 2 com overlay/revisão NVU: continua detectada; 5 botões Aceitar.
+
+Cenário semântico da captura Barras de Ferro incorporado ao policy test:
+- uma frase mesclada “Metalúrgica Dalavan” sem geometria suficiente NÃO é inventada como origem;
+- tokens separados com Dalavan como empresa de destino recuperam automaticamente “Metalúrgica” como origem;
+- consenso de página “Metalúrgica/METALURGICA/Metalurgica” recupera “Metalúrgica” sem ação do motorista.
+
+6. GATES EXECUTADOS
+
+Passaram nesta revisão, entre outros:
+- JavaSyntaxCheck: 43 fontes PASS.
+- validate:gto-native: 49/49.
+- Android Google Auth: 8/8.
+- senior-navigation: 10/10.
+- GTO auto-sync contract/integrity: PASS.
+- R3.29 strict screen: 15/15.
+- R3.30 selected freight: 17/17.
+- HF18 freight evidence: 16/16.
+- HF19 overlay visual: 24/24.
+- HF20 overlay anchor: 19/19.
+- HF21 selected-row authority: 13/13.
+- HF22 observer UX/diagnostics: 21/21 (atualizado para a semântica canônica HF34).
+- HF23 production model: 10/10.
+- HF24 resilience: 16/16.
+- HF25 focused fields: 16/16.
+- HF27 capture/destination: 16/16.
+- HF28 known destination: 13/13.
+- HF29 post-consent list recovery: 11/11.
+- HF30 continuous projection: 24/24.
+- HF31 bubble lifecycle: 16/16.
+- HF32 continuous recognition: 18/18.
+- HF34 deterministic lifecycle: PASS.
+- Auditorias R3.3, R3.5, R3.19 e R3.20: PASS com regras atuais.
+
+O comando verify:release foi executado e passou todos os gates anteriores até HF24 antes do limite temporal da ferramenta; os gates HF23-HF34 restantes foram executados separadamente e passaram. Isto equivale à cobertura funcional do pipeline em segmentos, sem esconder falhas por timeout.
+
+7. LIMITE DE CERTIFICAÇÃO DESTE AMBIENTE
+
+A compilação Gradle real do APK não pode ser concluída neste ambiente porque o wrapper Gradle 8.14.3 não está em cache e services.gradle.org não é resolvível daqui. A tentativa de :app:compileDebugJavaWithJavac falhou antes do Gradle/Javac por UnknownHostException, não por erro do projeto.
+
+O build Web completo também não pôde ser executado aqui: node_modules não estava presente e npm ci --offline falhou porque zwitch-2.0.4 não existe no cache local. A alteração Web é pequena/estrutural (remoção do status obsoleto e correção da mensagem), porém o dist deve ser gerado no ambiente conectado antes do deploy Netlify.
+
+Por isso:
+- a fonte Java foi compilada/validada pelos checkers/probes locais disponíveis;
+- o workflow de release está alinhado a 1.0.86 / versionCode 86;
+- HF34 deve alinhar Web/Netlify e APK porque o runtime Capacitor é remoto;
+- PREPARAR-ANDROID-WINDOWS.bat exige Java 21 e :app:compileDebugJavaWithJavac no ambiente de build real;
+- o APK assinado ainda precisa do gate físico no Android/OEM que apresentou as regressões.
+
+8. REGRA DE PROMOÇÃO
+
+HF34 é candidata de fonte para o próximo APK, não uma alegação de hardware já testado.
+Promover somente se o APK 1.0.86/86 passar no aparelho real:
+1) abrir GTO/autorizar uma vez;
+2) lista detectada automaticamente;
+3) Aceitar row exato;
+4) carga/origem/destino/km/valor automáticos;
+5) viagem preservada durante gameplay normal;
+6) reabrir lista -> viagem antiga imediatamente retirada -> nova seleção limpa;
+7) resultado/Receber detectados sem congelamento;
+8) sync/ACK concluídos;
+9) sair/voltar, notificação, rotação/resize e bolha sem perda do Observe.

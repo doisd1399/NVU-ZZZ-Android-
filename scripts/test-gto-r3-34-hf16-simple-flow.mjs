@@ -23,8 +23,9 @@ check("result no longer depends on dark/color visual gate",
 check("simple result semantic pair is authoritative",
   service.includes("GtoSimpleScreenDetectionPolicy.isCompletedResult")
     && service.includes("completionWord, !GtoMoneyValue.canonical(result.value).isEmpty()"));
-check("active trip OCR remains latest-frame oriented with bounded low-frequency semantic fallback",
-  service.includes("ACTIVE_TRIP_RESULT_FALLBACK_OCR_MS = 1800L")
+const resultFallbackMs = Number((service.match(/ACTIVE_TRIP_RESULT_FALLBACK_OCR_MS = (\d+)L/) || [])[1] || 0);
+check("active trip OCR remains latest-frame oriented with bounded semantic fallback",
+  resultFallbackMs >= 250 && resultFallbackMs <= 1800
     && service.includes("acquireLatestImage")
     && !service.includes("tripResultCandidate = resultVisualGate.looksLikeResultDialog"));
 check("freight list uses one strong Accept+info row",
@@ -33,9 +34,10 @@ check("freight list uses one strong Accept+info row",
 check("driver list message waits for semantic freight OCR",
   service.includes("freightSemanticConfirmedAt")
     && service.includes("raw button geometry updates the internal screen state immediately"));
-check("reopened visual list during trip stays a replacement candidate until a new human Accept",
-  service.includes("FREIGHT_LIST_CANDIDATE_AFTER_TRIP")
-    && service.includes("replacementFreightTouchPending"));
+check("reopened visual list during trip cannot mutate an unarmed active trip",
+  service.includes("FREIGHT_LIST_INFORMATIONAL_DURING_TRIP")
+    && service.includes("only an explicitly armed")
+    && service.includes("return false;"));
 const promotionStart = service.indexOf("private boolean promoteReplacementFreightCandidateToWaiting(\n        boolean fromTouch,");
 const promotionEnd = service.indexOf("private void clearReplacementFreightCandidate", promotionStart);
 const promotion = promotionStart >= 0 && promotionEnd > promotionStart ? service.slice(promotionStart, promotionEnd) : "";

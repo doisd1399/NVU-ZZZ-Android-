@@ -44,7 +44,7 @@ check('stale projection onStop cannot release new capture', has(service, 'Never 
 check('manual projection stop invalidates callbacks first', has(service, 'projectionGeneration++;') && has(service, 'Invalidate callbacks before calling MediaProjection.stop()'));
 check('system projection stop requests explicit reauthorization', has(service, 'putBoolean("projectionReauthRequired", true)') && has(service, 'Leitura da tela foi encerrada pelo Android'));
 check('projection reauthorization is visible to driver', has(service, 'maybeNotifyProjectionReauthorization()') && has(service, 'autorize novamente'));
-check('touch sensor cannot remain active without projection', /boolean shouldShow = gtoForeground\s*\n\s*&& projectionActive/.test(service));
+check('passive touch observer is scoped to enabled GTO foreground even across projection rebinds', has(service, 'GtoResultActionFlowPolicy.keepPassiveTouchObserver') && has(read('android/app/src/main/java/com/nvu/operacional/GtoResultActionFlowPolicy.java'), 'return observeEnabled && gtoForeground && overlayAllowed'));
 check('permission activity reports missing MediaProjectionManager', has(permission, 'MANAGER_UNAVAILABLE') && has(permission, 'MediaProjectionManager indisponível'));
 check('permission activity reports consent launch failure', has(permission, 'CONSENT_LAUNCH_FAILED'));
 

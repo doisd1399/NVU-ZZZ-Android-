@@ -1,0 +1,70 @@
+NVU R3.34-PC-HF45 — RELATÓRIO DE CORREÇÃO CRÍTICA
+Android 1.0.97 / versionCode 97
+Data: 2026-08-17
+Base: R3.34-PC-HF44
+
+SINTOMAS REPRODUZIDOS NAS CAPTURAS FÍSICAS
+1. A tela real "Concluído" era detectada corretamente.
+2. Depois que o modal desaparecia, a mensagem "toque em Receber" podia permanecer obsoleta.
+3. Uma nova lista real de 5 fretes podia estar visível, porém RESULT_DETECTED continuava autoritativo e a lista não assumia o fluxo.
+4. Uma entrega anterior na fila, especialmente sem autenticação nativa disponível, podia contaminar o status da sessão atual como "Envio pendente" e criar bloqueio indevido.
+5. Foi observada captura com valor final OCR extremamente incompatível (R$ 1.222.700,00), capaz de ser aceito cedo demais antes da validação contra o frete selecionado.
+
+CAUSAS RAIZ
+A) RESULTADO -> NOVA LISTA NÃO ERA UMA TRANSIÇÃO ATÔMICA.
+O reducer antigo selava a viagem em um ponto e promovia a lista em outro. Ao mudar para RESULT_CONFIRMED, a política de lista deixava de tratar aquele estado; a página nova podia permanecer visível enquanto o estado antigo continuava na UI. Além disso, a promoção destacava/limpava o candidato antes de garantir que o resultado protegido já estivesse selado.
+
+B) STATUS DE SINCRONIZAÇÃO SEM AUTENTICAÇÃO USAVA O SESSION ID ATUAL.
+GtoAutoTripSync.flushPending() verificava FirebaseAuth antes de enumerar a fila e notificava onPending() com mainPrefs.gtoTripSessionId. Depois de abrir a próxima sessão, esse ID já pertencia ao NOVO frete, embora a fila pertencesse à viagem ANTERIOR.
+
+C) MENSAGEM DE RECEBER ERA STICKY MESMO APÓS O MODAL SUMIR.
+O sistema aguardava toda a janela de inferência antes de substituir a instrução visual. Isso fazia o motorista ver uma ação impossível enquanto a viagem já estava preservada.
+
+D) VALOR DE RESULTADO ERA VALIDADO CONTRA O FRETE TARDE DEMAIS.
+A checagem de incompatibilidade monetária existia na criação/envio do payload, mas não antes do consenso do resultado. Um outlier OCR estável podia chegar à tela/estado protegido e só falhar depois.
+
+E) OCR SEMÂNTICO NÃO EXCLUÍA EXPLICITAMENTE OS OVERLAYS DA PRÓPRIA NVU.
+Menu/banner NVU podem conter palavras como viagem concluída, ADS e valores. Agora essas regiões são removidas da semântica do GTO e mantidas apenas no OCR de diagnóstico.
+
+CORREÇÕES HF45
+- Nova lista semântica certificada mantém seu snapshot/candidato até a entrega certificada anterior ser selada na fila local.
+- A mesma função de promoção agora é dona da fronteira resultado -> nova sessão.
+- RESULT_CONFIRMED gerado por essa fronteira não executa auto-next concorrente que destruiria a página já certificada.
+- Entrega selada não é marcada CANCELLED_IN_GAME e seu snapshot não é descartado como viagem cancelada.
+- Nova sessão recebe gtoPreviousQueuedSessionId para separar ACK/background sync da viagem atual.
+- Watchdog de foreground recupera automaticamente RESULT_CONFIRMED selado que por qualquer corrida não tenha virado WAITING_FREIGHT.
+- flushPending() enumera primeiro os session IDs reais da fila. Falta de FirebaseAuth nunca marca uma sessão atual que não esteja realmente na fila.
+- Menu mostra "Anterior em envio" quando a pendência pertence a outra sessão.
+- Após dois frames confirmando que o modal de resultado sumiu, a mensagem muda imediatamente para "Viagem preservada ✓ · verificando conclusão…".
+- Inferência passiva normal continua protegida contra ADS e foi reduzida para 4 frames / 2200 ms; Receber exato continua instantâneo e ADS explícito mantém a janela própria.
+- Valor final é comparado ao valor do frete antes de entrar no consenso. Outliers ~100x/extremos são descartados e relidos; a screenshot do resultado continua preservada como prova da viagem.
+- Linhas OCR dentro de menu, banner e bolinha NVU são excluídas da semântica do GTO.
+
+FIXTURES FÍSICAS INCORPORADAS
+scripts/fixtures/hf45-critical-flow/result-screen.png
+scripts/fixtures/hf45-critical-flow/result-exited-card.png
+scripts/fixtures/hf45-critical-flow/result-exited-banner.png
+scripts/fixtures/hf45-critical-flow/list-after-result.png
+scripts/fixtures/hf45-critical-flow/list-after-result-menu.png
+scripts/fixtures/hf45-critical-flow/sync-pending-next-ready.jpg
+scripts/fixtures/hf45-critical-flow/sync-auth-blocked.jpg
+scripts/fixtures/hf45-critical-flow/queued-next-ready.jpg
+
+VALIDAÇÕES EXECUTADAS
+- JavaSyntaxCheck: PASS (50 fontes)
+- validate:gto-native: 49/49 PASS
+- validate:gto-auto-sync: 74/74 PASS
+- HF39 certified-list boundary: PASS
+- HF40 cancelled-list bootstrap: 14/14 PASS
+- HF41 irreversible Receive: 14/14 PASS
+- HF42 result proof/readiness: 29/29 PASS
+- HF43 responsive messages: 17/17 PASS
+- HF44 live-list message: 17/17 PASS
+- HF45 critical-flow: 18/18 PASS
+- Capturas físicas list-after-result: detector OCR-free encontra 5/5 linhas com o card NVU fechado e 5/5 com o menu NVU aberto.
+
+LIMITAÇÃO DO AMBIENTE DE VALIDAÇÃO
+O Gradle real foi invocado, mas esta sandbox não resolve services.gradle.org e não consegue baixar Gradle 8.14.3. Por isso o PREPARAR-ANDROID-WINDOWS.bat mantém a compilação Java/Gradle real como gate obrigatório no Windows antes de gerar/publicar o APK.
+
+DEPLOY
+HF45 modifica somente Android nativo em relação à HF44. Web/Netlify e Firebase Functions permanecem inalterados.

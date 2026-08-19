@@ -1,0 +1,42 @@
+NVU R3.34-PC-HF49 — Android 1.0.101 / versionCode 101
+
+1) Extraia o ZIP HF49 em uma pasta nova e entre na raiz do projeto.
+
+2) Preparação e certificação automática:
+PREPARAR-ANDROID-WINDOWS.bat
+
+3) Build Gradle real, caso queira executar manualmente após a preparação:
+cd android
+gradlew.bat clean assembleRelease
+
+4) Confirme no APK/log:
+versionName = 1.0.101
+versionCode = 101
+applicationId = com.nvu.operacional
+
+APK esperado em:
+android\app\build\outputs\apk\release\
+
+GITHUB ACTIONS:
+O pacote contém .github/workflows/build-android-release.yml.
+Artifact esperado: NVU-R3.34-PC-HF49-release
+APK assinado esperado: NVU-R3.34-PC-HF49-release.apk
+
+TESTE FÍSICO HF49 — RESULTADO AUTOMÁTICO:
+A) inicie uma viagem normal com um frete confirmado;
+B) ao surgir a tela real “Concluído” com “Valor a receber”, NÃO toque em Receber;
+C) a NVU deve mostrar imediatamente: “Viagem concluída, enviando dados automaticamente...”;
+D) o botão ADS deve ficar protegido pela NVU enquanto a tela de resultado permanecer aberta;
+E) o registro deve ser selado na fila local durável sem depender do botão Receber;
+F) após ACK real do backend, deve aparecer: “Viagem registrada com sucesso!”;
+G) feche a tela de resultado/abra a próxima lista: o fluxo deve seguir normalmente, sem perder a viagem anterior;
+H) teste com rede lenta/offline: a viagem deve continuar preservada localmente e ser reenviada automaticamente quando a sincronização voltar;
+I) repita após sair/voltar ao GTO para confirmar que as proteções HF48 de captura/detecção continuam intactas.
+
+REGRA DE SEGURANÇA ADS:
+- A tela Concluído + valor certificada é prova terminal da viagem.
+- O toque em Receber é opcional e não é pré-requisito para registro.
+- Evidência positiva de anúncio/bônus assistido continua bloqueando o registro normal.
+- Após a certificação do resultado, a área ADS é protegida por overlay transparente; se o texto ADS não for lido, a geometria é inferida pela posição de Receber ou por uma região normalizada do modal.
+
+HF49 é Android-only em relação à HF48. Não é necessário novo deploy Web/Netlify/Functions apenas por esta hotfix.

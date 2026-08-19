@@ -1,0 +1,46 @@
+NVU R3.34-PC-HF59 SYNC SAFE — RELEASE LOCAL WINDOWS
+
+IDENTIDADE ESPERADA
+- applicationId: com.nvu.operacional
+- versionName: 1.0.111
+- versionCode: 111
+
+IMPORTANTE
+- HF59 e um hotfix Android-only sobre HF58 Cost Safe.
+- functions/src/gtoTrips.ts e functions/src/gtoState.ts permanecem byte-a-byte iguais ao HF58 ja publicado.
+- NAO e necessario publicar Firebase Functions novamente.
+- NAO e necessario publicar Web/Netlify para este hotfix.
+- Use a MESMA keystore oficial das releases NVU anteriores. Nao crie uma nova chave.
+
+1) PREPARAR E VALIDAR
+Na raiz do projeto execute:
+
+PREPARAR-ANDROID-WINDOWS.bat
+
+Somente prossiga se aparecer [OK] PROJETO PREPARADO COM SUCESSO.
+
+2) TESTE DEBUG OPCIONAL, RECOMENDADO
+
+GERAR-APK-DEBUG-WINDOWS.bat
+
+Instale e valide pelo menos um ciclo:
+lista -> aceitar -> viagem -> Concluido/Receber -> Viagem salva -> sincronizada.
+
+3) GERAR RELEASE ASSINADA
+Abra no Android Studio a pasta:
+
+android
+
+Depois:
+Build -> Generate Signed App Bundle or APK -> APK -> Next
+
+Selecione a MESMA keystore oficial, alias e senhas usados na release NVU anterior.
+Build Variant: release
+Gere o APK.
+
+4) CONFIRA A IDENTIDADE ANTES DE DISTRIBUIR
+Esperado:
+com.nvu.operacional / 1.0.111 / versionCode 111
+
+5) TESTE FINAL DA RELEASE
+Antes de distribuir em massa, instale a release assinada em um aparelho que possua uma release oficial anterior e confirme que a atualizacao e aceita sem desinstalar. Execute uma viagem completa e confirme a sincronizacao.

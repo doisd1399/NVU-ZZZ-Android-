@@ -1,4 +1,4 @@
-name: Build NVU R3.34 PC-HF26 Release
+name: Build NVU R3.34 PC-HF59 Release
 
 on:
   workflow_dispatch:
@@ -7,19 +7,19 @@ permissions:
   contents: read
 
 concurrency:
-  group: nvu-r3-34-pc-hf26-android-release
+  group: nvu-r3-34-pc-hf59-android-release
   cancel-in-progress: false
 
 jobs:
   build-release:
-    name: R3.34 PC-HF26 signed APK
+    name: R3.34 PC-HF59 signed APK
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
     env:
       EXPECTED_APPLICATION_ID: com.nvu.operacional
-      EXPECTED_VERSION_CODE: "78"
-      EXPECTED_VERSION_NAME: "1.0.78"
+      EXPECTED_VERSION_CODE: "111"
+      EXPECTED_VERSION_NAME: "1.0.111"
       ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
       ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
       ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
@@ -74,7 +74,7 @@ jobs:
           npm --prefix functions ci
           npm --prefix functions run build
 
-      - name: Validate R3.34 PC-HF26 source
+      - name: Validate R3.34 PC-HF59 source
         shell: bash
         run: |
           set -euo pipefail
@@ -94,8 +94,8 @@ jobs:
         run: |
           set -euo pipefail
           grep -Fq 'applicationId "com.nvu.operacional"' android/app/build.gradle
-          grep -Fq 'versionCode 78' android/app/build.gradle
-          grep -Fq 'versionName "1.0.78"' android/app/build.gradle
+          grep -Fq 'versionCode 111' android/app/build.gradle
+          grep -Fq 'versionName "1.0.111"' android/app/build.gradle
           echo "Android identity verified: $EXPECTED_APPLICATION_ID / $EXPECTED_VERSION_NAME ($EXPECTED_VERSION_CODE)"
 
       - name: Build unsigned release APK
@@ -106,6 +106,32 @@ jobs:
           cd android
           ./gradlew --stop || true
           ./gradlew clean assembleRelease --no-daemon
+
+      - name: Verify preserved approved voice assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          UNSIGNED_APK="android/app/build/outputs/apk/release/app-release-unsigned.apk"
+          if [ ! -f "$UNSIGNED_APK" ]; then
+            UNSIGNED_APK="$(find android/app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' | head -n 1)"
+          fi
+          test -f "$UNSIGNED_APK"
+
+          READY_ENTRY='res/raw/nvu_ready_voice_pt_br.mp3'
+          COMPLETED_ENTRY='res/raw/nvu_trip_completed_voice_pt_br.mp3'
+          READY_SHA256='b53a46523dbbe745ac0a9600637ffce7f1f9c34667c64b2b1730c0df32b60bf2'
+          COMPLETED_SHA256='49c9c7fb8585b4385971cc3d19c59f8df0015e6e2c74ab1ae4bce7cd45fb7179'
+
+          unzip -l "$UNSIGNED_APK" | grep -Fq "$READY_ENTRY"
+          unzip -l "$UNSIGNED_APK" | grep -Fq "$COMPLETED_ENTRY"
+
+          ACTUAL_READY_SHA256="$(unzip -p "$UNSIGNED_APK" "$READY_ENTRY" | sha256sum | awk '{print $1}')"
+          ACTUAL_COMPLETED_SHA256="$(unzip -p "$UNSIGNED_APK" "$COMPLETED_ENTRY" | sha256sum | awk '{print $1}')"
+
+          test "$ACTUAL_READY_SHA256" = "$READY_SHA256"
+          test "$ACTUAL_COMPLETED_SHA256" = "$COMPLETED_SHA256"
+
+          echo "HF59 preserved approved voice assets verified byte-for-byte inside APK."
 
       - name: Decode temporary signing keystore
         shell: bash
@@ -140,8 +166,8 @@ jobs:
           test -x "$AAPT"
 
           mkdir -p release-artifacts
-          ALIGNED_APK="$RUNNER_TEMP/NVU-R3.34-PC-HF26-aligned.apk"
-          SIGNED_APK="release-artifacts/NVU-R3.34-PC-HF26-release.apk"
+          ALIGNED_APK="$RUNNER_TEMP/NVU-R3.34-PC-HF59-aligned.apk"
+          SIGNED_APK="release-artifacts/NVU-R3.34-PC-HF59-release.apk"
 
           "$ZIPALIGN" -p -f 4 "$UNSIGNED_APK" "$ALIGNED_APK"
           "$APKSIGNER" sign \
@@ -178,9 +204,9 @@ jobs:
             echo "::warning::EXPECTED_SIGNING_CERT_SHA256 is not configured. APK signature is valid, but production-certificate pinning was not checked."
           fi
 
-          sha256sum "$SIGNED_APK" | tee release-artifacts/NVU-R3.34-PC-HF26-release.apk.sha256
+          sha256sum "$SIGNED_APK" | tee release-artifacts/NVU-R3.34-PC-HF59-release.apk.sha256
           cat > release-artifacts/release-info.txt <<EOF
-          NVU R3.34-PC-HF26 (base HF25 + human-action selection invariant, semantic list certification and low-evidence review safety)
+          NVU R3.34-PC-HF59 (HF58 Cost Safe preserved; adds crash-safe completion-to-queue self-healing and pauses non-recoverable registerGtoTrip retry loops while preserving the sealed trip)
           applicationId=$EXPECTED_APPLICATION_ID
           versionName=$EXPECTED_VERSION_NAME
           versionCode=$EXPECTED_VERSION_CODE
@@ -193,12 +219,12 @@ jobs:
         if: always()
         shell: bash
         run: |
-          rm -f "${KEYSTORE_PATH:-}" "$RUNNER_TEMP/NVU-R3.34-PC-HF26-aligned.apk"
+          rm -f "${KEYSTORE_PATH:-}" "$RUNNER_TEMP/NVU-R3.34-PC-HF59-aligned.apk"
 
       - name: Upload signed release APK
         uses: actions/upload-artifact@v4
         with:
-          name: NVU-R3.34-PC-HF26-release
+          name: NVU-R3.34-PC-HF59-release
           path: release-artifacts/
           if-no-files-found: error
           retention-days: 30

@@ -1,0 +1,57 @@
+NVU R3.34 PC-HF28 — Android 1.0.80 / versionCode 80
+
+OBJETIVO
+Usar a lista oficial/trusted de destinos GTO de forma segura após a seleção humana da linha, evitando erros como Itopetuna sem voltar à autocorreção cega.
+
+CAUSA
+A HF27 já possuía duas fontes de cidades confiáveis:
+1. lista fixa GTO_PREFERRED_DESTINATIONS / PREFERRED_DESTINATIONS;
+2. trustedGtoCitiesJson, alimentado pelas rotas do contrato atual.
+Porém o Android usava essas listas apenas como diagnóstico/releitura e não como normalizador seguro.
+
+CORREÇÃO HF28
+- novo canonicalizador uniqueOfficialCanonicalCandidate;
+- usa lista fixa + trustedGtoCitiesJson já existente;
+- só atua após seleção humana confirmada da linha;
+- exact normalized match restaura grafia oficial (ex.: Nova Macae -> Nova Macaé);
+- variante OCR de 1 edição só é corrigida se existir uma única cidade oficial compatível (ex.: Itopetuna -> Itapetuna);
+- duas candidatas igualmente prováveis => nenhuma correção automática;
+- OCR preciso desconhecido não pode ser sobrescrito pelo snapshot antigo;
+- conflito entre duas cidades oficiais continua indo para releitura/revisão;
+- nenhuma mudança em seleção por toque, captura, fila durável, ACK, Firebase, Functions ou Netlify.
+
+TESTES
+- Java syntax: PASS (41 fontes)
+- HF23 produção / 5 viagens distintas: 10/10 PASS, 5/5 viagens
+- HF26 human evidence: 20/20 PASS + 3.080 assertions
+- HF27 captura/destino: 16/16 PASS
+- HF28 known destination: 11/11 PASS
+- HF19: 24/24 PASS
+- HF20: 19/19 PASS
+- HF21: 13/13 PASS
+- HF22: 21/21 PASS
+- HF24: 16/16 PASS
+- HF25: 16/16 PASS
+- execução monolítica verify:release: passou todos os blocos até HF18; atingiu o timeout do executor no HF19. HF19-HF28 foram executados em sequência separada e todos passaram.
+
+CASOS HF28
+PASS Itopetuna -> Itapetuna quando é a única cidade oficial compatível.
+PASS Nova Macae -> Nova Macaé por correspondência normalizada oficial.
+PASS Aguas Velhas -> Águas Velhas.
+PASS cidade desconhecida permanece desconhecida/literal.
+PASS duas cidades igualmente próximas permanecem ambíguas.
+PASS snapshot antigo não substitui OCR preciso desconhecido.
+PASS releitura focalizada pode confirmar a mesma cidade oficial única.
+
+GITHUB ACTIONS
+Workflow alinhado a HF28 / versionCode 80 / versionName 1.0.80.
+Mantido parser apksigner V3 e checkout limpo.
+Artifact esperado: NVU-R3.34-PC-HF28-release.
+
+LIMITAÇÃO EXTERNA
+Gradle/Javac Android real não foi executado neste ambiente. A compilação e assinatura finais permanecem gate obrigatório no GitHub Actions ou Windows.
+
+WINDOWS COMPILE HOTFIX (2026-08-16)
+- MainActivity.onResume()/onPause() changed from protected to public to match Capacitor 8 BridgeActivity visibility.
+- HF28 release regression now checks these lifecycle override modifiers before the Gradle gate.
+- No observer, OCR, selection, sync, Firebase, Web or version identity change.

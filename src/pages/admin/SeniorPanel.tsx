@@ -139,8 +139,15 @@ export default function SeniorPanel() {
     setIsSeniorAuthenticated,
     switchRole,
     setSeniorCompanyId,
+    activeRole,
   } = useSessionStore();
-  const { setActiveCompanyId, removeDriverFromFleet } = useCompanyStore();
+  const {
+    setActiveCompanyId,
+    removeDriverFromFleet,
+    primeCompanyProfile,
+    memberships,
+    activeCompanyId,
+  } = useCompanyStore();
   const { simulators } = useOperationalStore();
   const [loadingAction, setLoadingAction] = useState(false);
   const [isCreateNewsModalOpen, setIsCreateNewsModalOpen] = useState(false);
@@ -1361,12 +1368,57 @@ export default function SeniorPanel() {
     }
   };
 
-  const viewCompanyProfile = (companyId: string) => {
+  const viewCompanyProfile = (company: any) => {
+    const companyId = String(company?.id || "").trim();
+    if (!companyId) {
+      toast.error("Não foi possível identificar a empresa selecionada.");
+      return;
+    }
+
+    // The Senior list already owns the exact company document that was
+    // selected. Hand it to the shared CompanyContext before navigating so the
+    // destination can paint immediately instead of depending on a second
+    // Firestore read during the route transition.
+    primeCompanyProfile(company);
+
+    // Preserve the user's operational workspace before entering a company via
+    // Senior mode. This origin is written only once so moving through Senior
+    // views can never replace it with the company being inspected.
+    const storedOriginCompanyId = sessionStorage.getItem(
+      "seniorOriginCompanyId",
+    );
+    const activeMemberships = memberships.filter(
+      (membership) => membership.status === "active",
+    );
+    const ownCompanyIds = new Set(
+      activeMemberships
+        .map((membership) => String(membership.companyId || "").trim())
+        .filter(Boolean),
+    );
+    const activeOriginCompanyId = String(activeCompanyId || "").trim();
+    const primaryCompanyId = String(currentUser?.companyId || "").trim();
+    const originCompanyId =
+      (activeOriginCompanyId && ownCompanyIds.has(activeOriginCompanyId)
+        ? activeOriginCompanyId
+        : "") ||
+      (primaryCompanyId && ownCompanyIds.has(primaryCompanyId)
+        ? primaryCompanyId
+        : "") ||
+      String(activeMemberships[0]?.companyId || "").trim();
+
+    if (!storedOriginCompanyId && originCompanyId && originCompanyId !== companyId) {
+      sessionStorage.setItem("seniorOriginCompanyId", originCompanyId);
+      sessionStorage.setItem(
+        "seniorOriginRole",
+        activeRole === "driver" ? "driver" : "admin",
+      );
+    }
+
     sessionStorage.setItem("seniorAccess", "true");
     sessionStorage.setItem("seniorCompanyId", companyId);
     setSeniorCompanyId(companyId);
     setActiveCompanyId(companyId);
-    switchRole("admin", companyId);
+    void switchRole("admin", companyId);
     navigate("/admin/fleet", {
       state: {
         activeTab: "company",
@@ -1986,7 +2038,7 @@ export default function SeniorPanel() {
                         <Trash2 size={14} /> <span className="hidden sm:inline ml-2">Excluir</span>
                       </Button>
                       <Button
-                        onClick={() => viewCompanyProfile(company.id)}
+                        onClick={() => viewCompanyProfile(company)}
                         className="h-8 sm:h-9 min-w-0 px-2 sm:px-4 bg-slate-50 hover:bg-slate-100 text-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800 dark:text-white rounded-[11px] sm:rounded-[12px] shadow-none font-semibold text-[10px] sm:text-sm whitespace-nowrap"
                       >
                         <span className="truncate">Acessar Painel</span><ArrowRight size={14} className="ml-1 shrink-0" />

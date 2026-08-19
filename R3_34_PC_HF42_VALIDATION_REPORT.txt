@@ -1,0 +1,139 @@
+NVU R3.34-PC-HF42 — VALIDATION REPORT
+Android 1.0.94 / versionCode 94
+Data: 2026-08-17
+Base: R3.34-PC-HF41
+Escopo: Android nativo apenas; Web/Netlify/Functions inalterados.
+
+OBJETIVO
+Eliminar a classe de falhas em que uma entrega real podia ficar presa ou ser perdida após a tela de resultado, e transformar a relação bolinha/permissão/captura/detector em uma única verdade operacional verificável e auto-recuperável.
+
+CAUSAS-RAIZ ENCONTRADAS
+1) A HF41 ainda usava evidências opcionais de HUD (FPS, km/h, "Desligado") como parte da recuperação pós-resultado. FPS era inclusive um overlay do aparelho, não uma assinatura do GTO. Isso não é universal.
+2) A tela real de resultado ainda dependia demais da resolução posterior do toque. O resultado precisava se tornar prova durável por si só antes de Receber/ADS, porque a tela é irreversível.
+3) A prova do resultado vivia junto de estado volátil do serviço. Um reset/lifecycle podia ameaçar o contexto antes do payload concluído estar selado na fila local.
+4) A semântica de ADS ainda tinha uma contradição: durante revisão de frete, um toque exato no botão ADS podia marcar pendingBonusDuringFreightReview e mais tarde promover REJECTED_BONUS sem prova de que o anúncio foi realmente assistido.
+5) A bolinha, a autorização do MediaProjection, a presença da surface e a atividade real do detector eram sinais independentes. Uma bolinha visível podia transmitir falsa impressão de sistema operacional mesmo sem frames reais/análise.
+6) O bootstrap de autorização podia perder um latch em lifecycle/OEM; e uma captura vinculada mas sem frames precisava ser tratada como problema de reparo, não como estado saudável.
+
+CORREÇÕES HF42
+A) RESULTADO COMO PROVA DURÁVEL
+- Concluído + valor monetário válido certifica a execução da entrega.
+- O resultado é gravado em GtoResultProofStore (SharedPreferences separado: nvu_gto_result_proof_v1) antes de qualquer branch rápido do Receber.
+- Um screenshot imutável do resultado é preservado.
+- clearTripAnalysis() se recusa a apagar uma entrega certificada ainda não selada na fila.
+- cancelTrip() não consegue destruir uma entrega já certificada.
+- Em restart de processo, o cofre local restaura a sessão/resultState e o snapshot imutável do frete.
+- Se a escrita inicial do cofre falhar, há retries automáticos; e uma prova certificada ainda existente no runtime é promovida de volta ao cofre antes do cleanup de startup.
+- Screenshot/prova só são removidos depois que enqueueConfirmedTrip() sela o payload concluído na fila durável.
+- Falha de rede/backend não remove o payload; o retry continua pelo GtoAutoTripSync.
+
+B) RECEBER SEM HUD FRÁGIL
+- FPS, km/h e "Desligado" foram removidos como decisão terminal.
+- Toque exato em Receber continua sendo o caminho instantâneo.
+- Se OEM/Android não entregar o callback, o sistema usa a continuidade do estado: resultado já certificado + diálogo persistentemente ausente + nenhuma evidência de anúncio.
+- Regra atual de fallback: pelo menos 6 frames de ausência e 4,2 s de graça para o caminho normal sem ação ADS.
+- Tela desconhecida/loading nunca descarta a entrega.
+
+C) ADS COM PROVA POSITIVA
+- O texto "ADS"/botão Dobrar valor não reprova.
+- Tocar ADS não reprova.
+- UI genérica de anúncio é HOLD-ONLY.
+- Só evidência terminal positiva (anúncio/vídeo assistido/concluído, recompensa concedida/recebida, valor/ganho dobrado etc.) marca resultWatchedAdEvidence e bloqueia o registro normal.
+- Correção adicional HF42: ADS tocado durante REVIEW_REQUIRED agora usa pendingAdsActionDuringFreightReview; nunca mais é convertido em pendingBonus/rejeição por tocar o botão.
+- Se houve toque ADS mas nenhuma prova positiva de anúncio assistido aparece, o resultado permanece protegido; o sistema não descarta a entrega apenas por hipótese.
+
+D) NOVA LISTA APÓS RESULTADO
+- Uma lista real continua exigindo certificação visual + semântica.
+- Se a lista certificada reaparece com um resultado já certificado e sem watched-ad evidence, a entrega anterior é selada normalmente ANTES da nova sessão de frete.
+- Falso positivo de HUB não possui autoridade para concluir/cancelar/substituir contexto.
+
+E) UMA ÚNICA VERDADE OPERACIONAL DO OBSERVE
+Novo GtoObserverOperationalPolicy define READY somente quando TODOS forem verdadeiros:
+- Observe habilitado;
+- bolinha realmente anexada à WindowManager;
+- GTO real em foreground;
+- MediaProjection ativa;
+- token/display/reader/handler vinculados;
+- frames reais recentes chegando;
+- detector realmente consumindo frames recentes;
+- estabilidade da captura pronta.
+
+AÇÕES DE AUTO-RECUPERAÇÃO
+- bolinha ausente/detach -> recriação automática;
+- autorização inicial sem latch -> rearmada automaticamente somente dentro do GTO;
+- token/display vinculados mas frames/análise sem saúde -> reconstrução ImageReader/surface na mesma autorização;
+- VirtualDisplay realmente perdida -> nova autorização somente quando Android exige;
+- retorno ao GTO -> barreira curta de frames frescos sem perder estado da viagem;
+- ponto branco da bolinha usa exatamente observerOperationalReady;
+- menu não diz mais "automação ativa" apenas porque a bolinha existe; mostra operacional somente em READY.
+
+INVARIANTES DE SEGURANÇA
+1) RESULT_CERTIFIED + sem watched-ad evidence não pode ser limpo/cancelado.
+2) Resultado certificado nunca depende de FPS, km/h, Desligado ou HUD específico.
+3) ADS touch != watched ad.
+4) ad UI/loading/unknown != watched ad.
+5) fila concluída selada é o único estado que permite remover a prova local normal.
+6) bolinha visível != detector operacional.
+7) ponto branco = captura real + análise real em GTO.
+8) Observe habilitado mantém reconhecimento elegível em todos os estados; estado da viagem apenas controla autoridade da evidência.
+
+VALIDAÇÕES EXECUTADAS NO CONTEÚDO HF42
+- JavaSyntaxCheck: PASS (50 fontes)
+- validate:gto-native: 49/49 PASS
+- validate:gto-auto-sync: 74/74 PASS
+- audit:gto-r2: 26/26 PASS
+- audit:gto-r3.3: 21/21 PASS
+- audit:gto-r3.5: 35/35 PASS
+- audit:gto-r3.6: 33/33 PASS
+- audit:gto-r3.7: 63/63 PASS
+- audit:gto-r3.13: 20/20 PASS
+- test:gto-r3.13-print: 12/12 PASS
+- audit:gto-r3.17-selection: 20/20 PASS
+- audit:gto-r3.19-end-to-end: 35/35 PASS
+- audit:gto-r3.20: 36/36 PASS
+- R3.21: 13/13 PASS
+- R3.22: 8/8 PASS
+- R3.23: 16/16 PASS
+- R3.24: 14/14 PASS
+- R3.25: 16/16 PASS
+- R3.27: 31/31 PASS
+- R3.28: 17/17 PASS
+- R3.29: 15/15 PASS
+- R3.30: 17/17 PASS
+- R3.32: 11/11 PASS
+- R3.33: 19/19 PASS
+- R3.34 money: 10/10 PASS
+- R3.34 PC hotfix: 24/24 PASS
+- HF10 projection/runtime: 33/33 PASS
+- HF12 intelligent-flow: 20/20 PASS
+- HF18 freight evidence: 16/16 PASS (gate histórico atualizado para assinatura boolean de clearTripAnalysis)
+- HF19: 24/24 PASS
+- HF20: 19/19 PASS
+- HF21: 13/13 PASS
+- HF22: 21/21 PASS
+- HF23 production: 10/10 PASS
+- HF24 resilience: 16/16 PASS
+- HF25 focused fields: 16/16 PASS
+- HF30 continuous projection: 24/24 PASS
+- HF31 bubble lifecycle: 16/16 PASS
+- HF32 continuous recognition: 18/18 PASS
+- HF34 deterministic lifecycle: 22/22 PASS
+- HF35 freight-list authority: 10/10 PASS
+- HF40 cancelled-list bootstrap: 14/14 PASS (gate histórico atualizado para assinatura boolean de clearTripAnalysis)
+- HF41 irreversible Receive: 14/14 PASS
+- HF42 certified-result/readiness: 29/29 PASS
+- As duas capturas físicas HF41 (resultado + gameplay depois do Receber) continuam fixtures permanentes e o resultado real segue reconhecido sem depender de HUD pós-resultado.
+
+OBSERVAÇÃO SOBRE GATES LONGOS
+Alguns gates HF36/HF37/HF38/HF39 executam regressões históricas recursivamente e excedem o timeout desta sandbox em uma única cadeia. Os componentes/policies centrais, gates dependentes e regressões posteriores foram executados em segmentos; HF37 foi executado integralmente (19/19), e HF39 teve seus checks/policies principais verdes antes do limite do subprocesso recursivo. O PREPARAR-ANDROID-WINDOWS.bat mantém verify:release completo para o ambiente Windows real.
+
+BUILD GRADLE REAL NESTA SANDBOX
+Tentado: ./gradlew :app:compileDebugJavaWithJavac --no-daemon
+Resultado: wrapper tentou baixar Gradle 8.14.3 e falhou por UnknownHostException em services.gradle.org (sem acesso de rede da sandbox). Não é erro de fonte Java. O PREPARAR-ANDROID-WINDOWS.bat executa esse gate no PC com acesso normal.
+
+IDENTIDADE FINAL
+functionalRelease: R3.34-PC-HF42
+Android versionName: 1.0.94
+Android versionCode: 94
+Web: 2.3.9 remoto, inalterado em relação à HF41/HF34
+Functions: inalteradas

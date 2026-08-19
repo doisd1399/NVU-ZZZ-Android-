@@ -1,0 +1,40 @@
+NVU R3.34-PC-HF52 — Android 1.0.104 / versionCode 104
+
+1) Extraia o ZIP HF52 em uma pasta nova.
+2) Abra o Prompt/PowerShell na raiz do projeto.
+3) Execute:
+
+PREPARAR-ANDROID-WINDOWS.bat
+
+O script deve concluir obrigatoriamente:
+- npm ci / dependências disponíveis no ambiente
+- verify:release, incluindo HF52 sync/finalization
+- build Web de fallback
+- cap sync android
+- verificação de assets
+- compilação Java real com JDK 21
+
+Para GitHub Actions:
+- envie o conteúdo HF52 ao repositório;
+- abra Actions;
+- execute "Build NVU R3.34 PC-HF52 Release";
+- o artefato esperado é NVU-R3.34-PC-HF52-release;
+- APK esperado: NVU-R3.34-PC-HF52-release.apk.
+
+Identidade obrigatória:
+applicationId = com.nvu.operacional
+versionName = 1.0.104
+versionCode = 104
+
+TESTE FÍSICO MÍNIMO ANTES DE PRODUÇÃO
+1. Entrar no NVU e ativar GTO Observe.
+2. Selecionar um frete e concluir normalmente.
+3. Confirmar a mensagem "Viagem salva ✓ · enviando em segundo plano. Próximo frete liberado.".
+4. Antes do ACK da anterior, selecionar/concluir outra entrega: a nova deve ser selada independentemente.
+5. Desligar internet, concluir uma entrega, avançar para o próximo frete, religar internet e confirmar que a fila anterior é drenada sem deixar "Anterior em envio" fantasma.
+6. Fechar/reabrir NVU durante retry e confirmar preservação da fila.
+7. Validar que anúncio/valor dobrado continua rejeitado.
+8. Confirmar os dois áudios locais aprovados.
+
+MODO PRINT / NETLIFY
+O APK usa Web remoto. O HF52 contém a correção de fase do upload por print no Web-fonte, mas o Web remoto atual possui alterações que não existem neste ZIP-base. NÃO faça deploy cego deste Web no Netlify. Primeiro faça merge/reconciliação com a versão Web atualmente publicada; depois valide e faça deploy. A correção Android de sincronização, por outro lado, faz parte do APK HF52.

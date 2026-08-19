@@ -1,0 +1,28 @@
+NVU R3.34-PC-HF45 — Android 1.0.97 / versionCode 97
+
+1) Extraia o ZIP HF45 em uma pasta nova e entre na raiz do projeto.
+
+2) Preparação e certificação automática:
+PREPARAR-ANDROID-WINDOWS.bat
+
+3) Build Gradle real, caso queira executar manualmente após a preparação:
+cd android
+gradlew.bat clean assembleRelease
+
+4) Confirme no APK/log:
+versionName = 1.0.97
+versionCode = 97
+
+APK esperado em:
+android\app\build\outputs\apk\release\
+
+TESTE FÍSICO HF45:
+A) conclua uma viagem e confirme que o resultado é preservado imediatamente;
+B) toque em Receber; quando o modal desaparecer, a NVU não pode continuar pedindo um botão que já não existe;
+C) sem esperar o ACK do servidor, abra uma lista real de fretes: a lista certificada deve assumir o fluxo e o resultado anterior deve permanecer selado na fila;
+D) com uma entrega anterior pendente de autenticação/rede, a nova sessão não pode aparecer como "Envio pendente" nem bloquear Aceitar;
+E) valide que o menu/banner da própria NVU nunca é interpretado como texto do GTO;
+F) valide um resultado com valor normal e confirme que outlier OCR extremo (ex.: aprox. 100x o valor ofertado) é descartado e relido, sem perder a prova da tela Concluído;
+G) repita lista -> Aceitar -> viagem -> resultado -> Receber -> nova lista várias vezes sem reiniciar o Observe.
+
+HF45 é Android-only em relação à HF44. Não é necessário novo deploy Web/Netlify/Functions apenas por esta correção.

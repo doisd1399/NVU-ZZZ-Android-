@@ -1,0 +1,36 @@
+NVU R3.34-PC-HF44 — LIVE FREIGHT-LIST MESSAGE
+Android 1.0.96 / versionCode 96
+
+CAUSA RAIZ COMPROVADA
+- As capturas físicas reportadas mostram uma página com 3 fretes enquanto a faixa NVU ainda exibe "5 opções" e outra página com 5 fretes enquanto a faixa ainda exibe "3 opções".
+- O detector visual de produção, executado sobre essas mesmas duas imagens, encontrou corretamente 3 e 5 botões Aceitar. Logo, a detecção da lista não era a origem do erro; a camada de mensagem estava stale.
+- announceDriverStage usava a chave sessionId|FREIGHT_LIST_DETECTED. Ao trocar de página dentro da mesma sessão, o code e sessionId continuavam iguais, então o novo texto não substituía o chip já exibido.
+- markFreightPageSemanticallyCertified também só anunciava na primeira certificação daquela generation e construía o texto a partir da contagem do parser OCR, embora a geometria dos botões Aceitar já tivesse a cardinalidade física atual.
+
+CORREÇÃO HF44
+- A contagem exibida usa a quantidade visual de linhas Aceitar quando disponível, após a página ter autoridade semântica.
+- Uma nova generation de página força a substituição da mensagem FREIGHT_LIST_DETECTED mesmo dentro da mesma sessão.
+- Enquanto a lista certificada permanece aberta, o detector OCR-free atualiza a cardinalidade visual do chip em tempo real.
+- Mudanças de cardinalidade precisam de 2 frames concordantes e >=24 ms para evitar uma oscilação de um frame.
+- Durante a janela crítica do toque em Aceitar, a contagem não é atualizada; a animação N -> N-1 do botão não pode virar mensagem falsa.
+- O TextView sticky é atualizado in-place, sem hide/recreate e sem flicker.
+- Essa atualização é exclusivamente visual: não cria lista, não cancela viagem, não confirma frete e não enfraquece HF35. A certificação semântica continua obrigatória para autoridade funcional.
+- Ao fechar a lista, estado de contagem e mensagem sticky são limpos.
+
+REGRESSÃO FÍSICA
+- scripts/fixtures/hf44-list-page-3.png: detector = 3 linhas.
+- scripts/fixtures/hf44-list-page-2.png: detector = 5 linhas.
+- GtoHf44LiveListScreenshotsTest: PASS.
+
+GATES PRINCIPAIS
+- JavaSyntaxCheck: PASS (50 sources).
+- validate:gto-native: 49/49 PASS.
+- validate:gto-auto-sync: 74/74 PASS.
+- HF42 result-proof/readiness: 29/29 PASS.
+- HF43 responsive messages: 17/17 PASS.
+- HF44 live-list-message: 17/17 PASS.
+- R3.33: 19/19 PASS; money integrity: 10/10; PC hotfix: 24/24; HF22: 21/21; HF34: 22/22; HF35: 10/10; HF36: 11/11 (executed during regression run).
+
+DEPLOY
+- Android-only versus HF43.
+- Web/Netlify/Functions unchanged.

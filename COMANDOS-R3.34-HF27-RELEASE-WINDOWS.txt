@@ -1,0 +1,13 @@
+NVU HF27 — Windows
+
+Na raiz do projeto:
+PREPARAR-ANDROID-WINDOWS.bat
+
+Se terminar com sucesso:
+cd android
+gradlew.bat assembleRelease --no-daemon
+
+Identidade esperada:
+applicationId com.nvu.operacional
+versionCode 79
+versionName 1.0.79

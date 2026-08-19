@@ -26,7 +26,7 @@ check('exact Receive immediately confirms and queues', /latchExactReceiveAndSend
 check('exact ADS never latches normal Receive', /putString\("resultAction", "ADS"\)[\s\S]*putBoolean\("resultReceiveLatched", false\)/.test(service));
 check('generic redacted touch remains durable pending action', /putString\("resultAction", "TOUCH_PENDING"\)/.test(service));
 check('pending/Receive action evidence has no age comparison', /touchAt <= 0L\) return false;/.test(service) && !/touchAt > RESULT_ACTION_CONFIRM_WINDOW_MS/.test(service));
-check('time-only HUD return can no longer confirm a trip', !/directLegacyReturn/.test(service) && /actionBackedReturn\)/.test(service));
+check('post-result return cannot confirm from HUD text; it needs certified result exit policy', !/directLegacyReturn/.test(service) && /shouldInferReceiveFromCertifiedExit/.test(service) && /resultDialogVisualAbsentFrames/.test(service));
 check('ADS semantic evidence remains authoritative', /containsPostResultAdEvidence\(normalized\)/.test(service) && /STATE_REJECTED_BONUS/.test(service));
 check('result value is restored before durable completion',
   /detectedResultValue = [\s\S]*GtoResultValueConsensus\.canonical\(prefs\.getString\("resultValueConsensusStable", ""\)\)/.test(service)
@@ -42,10 +42,11 @@ check('fast freight detector remains OCR-free', /class GtoFastVisualDetector/.te
 check('selection coordinator remains sequence based', /class GtoSelectionCoordinator/.test(coord) && /markTouch\(\)/.test(coord));
 
 // State-model checks for the intended rule.
-function resultFlow({action, adEvidence=false, next='NONE'}) {
+function resultFlow({action, adEvidence=false, next='NONE', certifiedVisualExit=false}) {
   if (action === 'ADS' || adEvidence) return 'REJECTED_BONUS';
   if (action === 'RECEIVE') return 'RESULT_CONFIRMED'; // immediate, no clock
   if (action === 'TOUCH_PENDING' && (next === 'GAMEPLAY' || next === 'FREIGHT_LIST')) return 'RESULT_CONFIRMED';
+  if (!action && next === 'GAMEPLAY' && certifiedVisualExit) return 'RESULT_CONFIRMED'; // HF41 OEM-drop self-recovery
   if (!action && next === 'FREIGHT_LIST') return 'RESULT_DETECTED'; // list is neutral until explicit recovery
   return 'RESULT_DETECTED';
 }
@@ -56,7 +57,8 @@ check('scenario: redacted touch + delayed jobs list preserves completed trip', r
 check('scenario: exact ADS does not register normal trip', resultFlow({action:'ADS', next:'GAMEPLAY'}) === 'REJECTED_BONUS');
 check('scenario: explicit ad evidence overrides pending action', resultFlow({action:'TOUCH_PENDING', adEvidence:true, next:'GAMEPLAY'}) === 'REJECTED_BONUS');
 check('scenario: no result action + jobs list preserves unfinished result', resultFlow({action:'', next:'FREIGHT_LIST'}) === 'RESULT_DETECTED');
-check('scenario: no action and no transition never auto-confirms', resultFlow({action:'', next:'NONE'}) === 'RESULT_DETECTED');
+check('scenario: certified result visually exits to stable gameplay even if OEM drops touch', resultFlow({action:'', next:'GAMEPLAY', certifiedVisualExit:true}) === 'RESULT_CONFIRMED');
+check('scenario: no action and no certified transition never auto-confirms', resultFlow({action:'', next:'NONE'}) === 'RESULT_DETECTED');
 
 const hash = (v) => crypto.createHash('sha256').update(v).digest('hex');
 console.log(`INFO freight detector sha256 ${hash(fast)}`);

@@ -1,0 +1,97 @@
+NVU R3.34-PC-HF50 — Android 1.0.102 / versionCode 102
+IMPLEMENTAÇÃO: AVISO DE VOZ FEMININA — SISTEMA_PRONTO
+Data: 2026-08-18
+
+OBJETIVO
+Adicionar uma extensão mínima de áudio ao fluxo GTO existente, sem criar detector paralelo, sem substituir MediaProjection e sem alterar a autoridade atual da máquina de estados.
+
+FRASE ÚNICA
+“Tudo preparado. Podemos partir.”
+
+PONTO EXATO DE INTEGRAÇÃO
+O evento SISTEMA_PRONTO é emitido dentro de transitionConfirmedFreightToTripInProgress(), depois que o fluxo existente:
+- confirmou a identidade da seleção humana;
+- consolidou os campos do frete;
+- bloqueou o snapshot imutável pelo GtoAutoTripSync;
+- realizou a transição autorizada para TRIP_IN_PROGRESS.
+
+Antes de emitir a voz, HF50 também exige:
+- sessionId válido;
+- snapshot recuperável/imutável existente;
+- nenhuma evidência de resultado terminal já pendente/certificada.
+
+Isso impede usar uma simples tela ou frame como gatilho. O áudio é consumidor do evento; não decide o estado.
+
+ARQUIVOS CRIADOS
+1. android/app/src/main/java/com/nvu/operacional/NvuAudioManager.java
+2. android/app/src/main/res/raw/nvu_ready_voice_pt_br.ogg
+3. scripts/test-gto-r3-34-hf50-ready-voice.mjs
+4. R3_34_PC_HF50_VALIDATION_REPORT.txt
+5. COMANDOS-R3.34-HF50-RELEASE-WINDOWS.txt
+
+ARQUIVOS EXISTENTES ALTERADOS
+1. android/app/src/main/java/com/nvu/operacional/GtoObserverService.java
+2. android/app/build.gradle
+3. package.json
+4. scripts/test-gto-r3-34-hf49-auto-result.mjs
+5. .github/workflows/build-android-release.yml
+6. NVU_RELEASE_METADATA.json
+7. PREPARAR-ANDROID-WINDOWS.bat
+
+AUDIO MANAGER
+NvuAudioManager:
+- carrega o recurso local durante onCreate do serviço;
+- reproduz via MediaPlayer sem bloquear o detector;
+- usa AudioAttributes USAGE_MEDIA + CONTENT_TYPE_SPEECH;
+- não muda volume do dispositivo;
+- não solicita audio focus que pare o GTO;
+- libera MediaPlayer em onDestroy;
+- registra erro sem alterar a máquina de estados.
+
+ANTI-REPETIÇÃO
+Existem duas barreiras persistentes:
+1. GtoObserverService: lastSistemaProntoEventId = SISTEMA_PRONTO|<sessionId>.
+2. NvuAudioManager: lastReadyVoiceEventId.
+
+Frames repetidos, callbacks repetidos, sair/voltar ao GTO ou recriar o serviço durante a mesma viagem não repetem a fala. Uma nova operação recebe novo sessionId em beginTrip() e pode tocar uma vez novamente.
+
+PERMISSÕES
+AndroidManifest.xml permanece byte-a-byte idêntico ao HF49.
+Não existe RECORD_AUDIO.
+Não existe CAPTURE_AUDIO_OUTPUT.
+Não existe MODIFY_AUDIO_SETTINGS.
+Nenhuma permissão nova foi adicionada.
+
+MEDIA PROJECTION / DETECÇÃO
+Permanecem byte-a-byte idênticos ao HF49:
+- GtoFastVisualDetector.java
+- GtoSelectionCoordinator.java
+- GtoProjectionContinuityPolicy.java
+- GtoProjectionRecoveryPolicy.java
+- GtoProjectionForegroundBridgePolicy.java
+- GtoCaptureHealthPolicy.java
+- AndroidManifest.xml
+
+Logo, HF50 não cria detector novo e não substitui MediaProjection.
+
+ARQUIVO DE AUDIO
+android/app/src/main/res/raw/nvu_ready_voice_pt_br.ogg
+Formato: OGG/Vorbis, mono, 44.1 kHz, aproximadamente 3.1 s.
+SHA-256: 928647652e4ad9ab0a0838097c15e8f42d77b311c03bb89812c3394a8f7e25d5
+O recurso é pré-gerado e local; não há TTS em runtime.
+
+EMPACOTAMENTO APK
+O workflow HF50 executa assembleRelease e, antes da assinatura, falha se o APK não contiver:
+res/raw/nvu_ready_voice_pt_br.ogg
+Assim a própria geração Release valida o recurso empacotado.
+
+VALIDAÇÃO
+- HF50 ready-voice: 30/30
+- JavaSyntaxCheck inclui NvuAudioManager
+- validate:gto-native mantém ausência de captura de áudio
+- validate:gto-auto-sync permanece inalterado
+- gates HF42-HF49 devem continuar verdes.
+
+DEPLOY
+Android-only em relação à HF49.
+Web/Netlify/Functions inalterados.

@@ -1,0 +1,39 @@
+NVU R3.34-PC-HF50 — Android 1.0.102 / versionCode 102
+
+1) Extraia o ZIP HF50 em uma pasta nova e entre na raiz do projeto.
+2) Execute:
+
+PREPARAR-ANDROID-WINDOWS.bat
+
+O preparador valida TypeScript, Functions, regressões GTO, Java nativo e o gate HF50 de voz SISTEMA_PRONTO.
+
+Identidade Android esperada:
+applicationId = com.nvu.operacional
+versionName = 1.0.102
+versionCode = 102
+
+GitHub Actions:
+- suba o conteúdo do projeto para um branch de release;
+- execute .github/workflows/build-android-release.yml;
+- selecione o branch HF50;
+- aguarde todos os gates verdes.
+
+Artifact esperado: NVU-R3.34-PC-HF50-release
+APK assinado esperado: NVU-R3.34-PC-HF50-release.apk
+
+TESTE FÍSICO HF50 — SISTEMA_PRONTO:
+1. Ative o GTO Observe normalmente.
+2. Abra uma lista real de fretes.
+3. Toque em Aceitar.
+4. Aguarde o fluxo existente confirmar integralmente o frete.
+5. Exatamente quando a NVU consolidar o frete e entrar em TRIP_IN_PROGRESS, deve tocar uma vez:
+   Tudo preparado. Podemos partir.
+6. Permaneça na mesma viagem por vários segundos: a frase não pode repetir.
+7. Saia e volte ao GTO durante a mesma viagem: a frase não pode repetir.
+8. Complete/cancele a operação, abra uma nova lista e confirme outro frete: a frase pode tocar uma vez para a nova sessionId.
+9. Verifique que a detecção, MediaProjection e sincronização continuam funcionando durante a reprodução.
+10. Não há permissão de microfone e não há TTS em runtime.
+
+O workflow valida ainda que res/raw/nvu_ready_voice_pt_br.ogg está fisicamente dentro do APK produzido.
+
+HF50 é Android-only em relação à HF49. Não é necessário novo deploy Web/Netlify/Functions apenas por esta extensão.

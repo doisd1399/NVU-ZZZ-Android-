@@ -1,0 +1,62 @@
+NVU R3.34-PC-HF53 — CERTIFICAÇÃO DE FONTE / FLUXO CRÍTICO
+Data: 18/08/2026
+Android: 1.0.105 (versionCode 105)
+Web: 2.3.9
+
+OBJETIVO
+Eliminar a combinação observada de viagem concluída preservada localmente, viagem anterior em retry/estado fantasma e fallback por print com progresso enganoso.
+
+CAUSAS COBERTAS
+1) Backend atual do Google AI Studio estava pré-HF14 e rejeitava destinationCompany vazio. Em rotas válidas sem empresa de destino, registerGtoTrip retornava invalid-argument e a fila durável permanecia em retry.
+2) HF51 podia manter ponteiros de "anterior em envio" mesmo após ACK/remoção real da fila. HF53 preserva byte-a-byte o hardening nativo HF52 que deriva o estado da fila selada, reconcilia marcadores e aceita ACK de qualquer sessão em segundo plano.
+3) RecordTrip usava isUploading também durante o envio final da viagem e podia reexibir "Enviando comprovante... 0%" mesmo com o comprovante já enviado. HF53 liga a UI do comprovante apenas a uploadPhase.
+4) O export atual continha runtimes Tesseract de 0 bytes. HF53 remove placeholders e faz predev/prebuild validar os assets gerados antes de prosseguir.
+
+INVARIANTES CRÍTICOS CERTIFICADOS
+- Tela Concluído certificada -> prova protegida/durável antes do avanço do fluxo.
+- Viagem atual -> selada em fila durável independentemente de uma viagem anterior em retry.
+- Falha de rede/backend -> não remove a viagem; permanece para retry.
+- ACK válido -> remove a sessão exata e reconcilia qualquer marcador antigo.
+- Viagem anterior -> nunca impede o selamento da atual.
+- destinationCompany -> metadado opcional no Android e no registerGtoTrip.
+- ADS -> somente evidência positiva de anúncio/recompensa assistida reprova; botão ADS normal não reprova sozinho.
+- Print -> upload do comprovante e envio final da viagem têm estados visuais separados.
+
+VALIDAÇÕES FINAIS EXECUTADAS NESTE PACOTE
+- HF53 sync/finalization: 29/29 PASS
+- HF53 AI Studio alignment: 15/15 PASS
+- GTO print upload HF1: 12/12 PASS
+- Android Java syntax: PASS, 53 sources
+- GTO durable auto-sync: 74/74 PASS
+- GTO native flow: 49/49 PASS
+- HF39 certified list boundary: PASS
+- HF40 cancelled-list bootstrap: 14/14 PASS
+- HF41 irreversible Receive: 14/14 PASS
+- HF42 certified result/readiness: 29/29 PASS
+- HF43 responsive messages: 17/17 PASS
+- HF44 live list message: 17/17 PASS
+- HF46 Receive exit: 10/10 PASS
+- HF47 certified result lifecycle: 13/13 PASS
+- HF48 return recognition: 17/17 PASS
+- HF50 ready voice: 30/30 PASS
+- HF45, HF49 e HF51 já haviam sido reexecutados neste HF53 e permaneceram verdes.
+- Regressões anteriores R3.x/HF10-HF38 foram executadas em segmentos; nenhuma regressão funcional foi encontrada.
+
+LIMITAÇÃO DO AMBIENTE DE CERTIFICAÇÃO
+O ambiente desta auditoria não conseguiu alcançar o registry npm. Por isso não foi possível executar aqui um npm ci + build Vite + build TypeScript completo das Firebase Functions nem um Gradle Android real dependente de resolução externa. Nenhum node_modules ou lib parcial é incluído no ZIP final.
+
+O workflow/PC de release DEVE executar com Internet:
+- npm ci (ou instalação compatível com o lock do projeto)
+- npm run build
+- npm --prefix functions install / npm --prefix functions run build
+- build Android assinado
+
+A pipeline HF53 contém validações de identidade e de assets. Falha de dependência/OCR agora deve interromper o build em vez de produzir silenciosamente um pacote incompleto.
+
+ORDEM DE PUBLICAÇÃO PARA CORRIGIR O INCIDENTE EM PRODUÇÃO
+1) Firebase Functions: registerGtoTrip atualizado.
+2) Web/Netlify: Dev HF53 reconciliado.
+3) APK Android HF53 1.0.105.
+
+IMPORTANTE
+O APK sozinho não pode corrigir uma Function já publicada que ainda exige destinationCompany. A persistência local protege a viagem, mas o backend precisa aceitar o contrato correto para que o ACK finalize a sincronização.

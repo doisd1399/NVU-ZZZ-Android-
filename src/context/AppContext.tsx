@@ -1348,7 +1348,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       (Array.isArray((currentUser as any)?.roles) &&
         (currentUser as any).roles.includes("senior")),
   );
-  const hasSeniorPanelAccess = hasVerifiedSeniorRole;
+  // The Firebase custom claim is the authorization source of truth for the
+  // Senior workspace. `currentUser.role/roles` is only a Firestore profile
+  // projection and can legitimately still be `admin` after the claim has been
+  // granted. Treat a claim-confirmed Senior session as Senior here as well;
+  // Firestore Rules continue to enforce the claim on every protected read/write.
+  const hasSeniorPanelAccess =
+    hasVerifiedSeniorRole || isSeniorAuthenticated;
 
   const [globalPeriodPreset, setGlobalPeriodPreset] = useState<"semana" | "mes" | "custom">("mes");
   const [globalStartDateStr, setGlobalStartDateStr] = useState<string>("");
@@ -1724,6 +1730,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     companyCatalogLoaded,
     companyCatalogAttempted,
     loadCompanyCatalog,
+    loadCompanyById,
+    primeCompanyProfile,
     companiesRef,
     companyCatalogLoadedRef,
   } = useCompanyDataController({
@@ -5067,6 +5075,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   const stableDeleteRecruitmentApplication = useStableEvent(deleteRecruitmentApplication);
   const stableRefreshSession = useStableEvent(refreshSession);
   const stableLoadCompanyCatalog = useStableEvent(loadCompanyCatalog);
+  const stableLoadCompanyById = useStableEvent(loadCompanyById);
+  const stablePrimeCompanyProfile = useStableEvent(primeCompanyProfile);
   const sessionReady =
     authInitialized &&
     (!firebaseSessionUid || Boolean(currentUser && membershipsLoaded));
@@ -5125,6 +5135,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       companyCatalogLoaded,
       companyCatalogAttempted,
       loadCompanyCatalog: stableLoadCompanyCatalog,
+      loadCompanyById: stableLoadCompanyById,
+      primeCompanyProfile: stablePrimeCompanyProfile,
       activeCompanyId,
       setActiveCompanyId,
       memberships,

@@ -1,7 +1,7 @@
 {
   "name": "nvu-operacional",
   "private": true,
-  "version": "2.3.9",
+  "version": "2.3.141",
   "type": "module",
   "scripts": {
     "prepare:ocr-assets": "node scripts/prepare-tesseract-assets.mjs",

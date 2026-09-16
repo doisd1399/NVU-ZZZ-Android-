@@ -35,7 +35,7 @@ import {
 
 import { cn } from "../../lib/utils";
 import { StableImage } from "../../components/common/StableImage";
-import { doc } from "firebase/firestore";
+import { doc, serverTimestamp } from "firebase/firestore";
 import { toast } from "sonner";
 import { db } from "../../lib/firebase";
 import { useTripHistory } from "../../hooks/useTripHistory";
@@ -105,6 +105,11 @@ export interface TripRecord {
   destino: string;
   [key: string]: any;
   valor: number;
+  valorCents?: number;
+  valorEditadoNoPainelSenior?: boolean;
+  valorEditadoPor?: string;
+  valorEditadoPorNome?: string;
+  valorEditadoEm?: any;
   comprovanteUrl: string;
   comprovanteTituloOriginal?: string;
   comprovanteNomeOriginal?: string;
@@ -2835,6 +2840,7 @@ export default function TripHistory({
                   const origem = form.origem.value;
                   const destino = form.destino.value;
                   const valor = parseTripValue(editingTripValorDisplay || form.valor.value);
+                  const valorCents = Math.round(valor * 100);
                   const distancia = editingTripRequiresDistance
                     ? parseTripDistance(form.distanciaPercorrida?.value)
                     : 0;
@@ -2848,6 +2854,11 @@ export default function TripHistory({
                     origem,
                     destino,
                     valor,
+                    valorCents,
+                    valorEditadoNoPainelSenior: isSeniorAccess,
+                    valorEditadoPor: currentUser?.id || "",
+                    valorEditadoPorNome: currentUser?.name || "Painel Senior NVU",
+                    valorEditadoEm: serverTimestamp(),
                     ...(editingTripRequiresDistance
                       ? { distanciaPercorrida: distancia }
                       : {}),

@@ -15,6 +15,13 @@ const commitRef = String(process.env.COMMIT_REF || "").trim();
 const buildId =
   explicitId ||
   [commitRef || "local", deployId || new Date().toISOString()].join("-");
+const runtimeRevision = String(
+  process.env.NVU_RUNTIME_REVISION ||
+    "R3.34-PC-WEB-AUTH-ARCHITECTURE-MODULAR",
+).trim();
+const nativeChannel = String(
+  process.env.NVU_NATIVE_CHANNEL || "production-359",
+).trim();
 
 await mkdir(dist, { recursive: true });
 await writeFile(
@@ -25,6 +32,9 @@ await writeFile(
       version: String(packageJson.version || "unknown"),
       generatedAt: new Date().toISOString(),
       source: "nvu-web",
+      runtimeRevision,
+      nativeChannel,
+      otaEnabled: true,
     },
     null,
     2,

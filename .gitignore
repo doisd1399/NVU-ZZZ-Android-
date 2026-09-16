@@ -1,0 +1,27 @@
+# Dependencies and caches
+web-project/node_modules/
+web-project/.npm/
+web-project/.vite/
+
+# Build outputs and generated Android intermediates
+dist/
+web-project/dist/
+android-project/.gradle/
+android-project/build/
+android-project/app/build/
+android-project/app/src/main/assets/public/
+
+# Local machine and secrets
+.env
+.env.*
+!.env.example
+android-project/local.properties
+android-project/app/google-services.json
+*.jks
+*.keystore
+*.p12
+
+# Logs and temporary files
+*.log
+.DS_Store
+coverage/

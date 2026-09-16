@@ -1,0 +1,14 @@
+{
+  "artifactType": "zip",
+  "bundleId": "production-358-2.3.141",
+  "webVersion": "2.3.141",
+  "buildId": "local-2026-09-16T02:40:32.840Z",
+  "runtimeRevision": "R3.34-PC-WEB-AUTH-ARCHITECTURE-MODULAR",
+  "nativeChannel": "production-358",
+  "nativeVersionCode": 358,
+  "downloadUrl": "https://stirring-pavlova-ca6808.netlify.app/ota/production-358/nvu-live-update-2.3.141.zip",
+  "checksum": "77510ef0412b1445a62af49aef29c8c7310c6c6f2ea49984cdd0d3a8c27df344",
+  "signature": "Rv6a19y7d7r7pfMisQu88Y2SSC6oavZOomYA2qVPUqEb0gZSsb/GJ+7/H0rhsZgoRhZ5LuZy4QclnAPQfH2mg8I2ZMTa4G29so78yq++z82v9W2QZ6/0+17Lzx1SS9XV+GVwJgQYOh5t6pqzbyLoCfcfyx9WZ4n9d9m8oaz/m6i48OXTXrPFTIw9Vex8Fi6EkN36ROCbiUbJoEUXEcc195WhJmMtEwEggvIcRoCO/fRMc/osFurw5o5VwBwPfWgwdLo1m1s9i6SrTSSQhQ1mLt9Vdq1Aff5MPXk2SvwTQZN8ik3VaJ42te06GQjmrDMGurvf72Oc83WfKgUnxFcugw==",
+  "signatureRequired": true,
+  "generatedAt": "2026-09-16T02:40:35.898Z"
+}

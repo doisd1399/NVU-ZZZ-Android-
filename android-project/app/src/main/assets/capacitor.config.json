@@ -1,0 +1,30 @@
+{
+	"appId": "com.nvu.operacional",
+	"appName": "nvu",
+	"webDir": "dist",
+	"plugins": {
+		"FirebaseAuthentication": {
+			"skipNativeAuth": false,
+			"providers": [
+				"google.com"
+			]
+		},
+		"SystemBars": {
+			"style": "LIGHT"
+		},
+		"PushNotifications": {
+			"presentationOptions": [
+				"badge",
+				"sound",
+				"alert"
+			]
+		},
+		"LiveUpdate": {
+			"autoUpdateStrategy": "none",
+			"autoBlockRolledBackBundles": true,
+			"readyTimeout": 10000,
+			"defaultChannel": "production-358",
+			"publicKey": "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAmCask8PdhvuMP6CDgV3g\naxrTWIkeNtffDG/TOrwidMWlQ5TYvsyd0oEun3VGAsQ196G1hsArbHJHlzSETaVU\ngagGnz9c7iObbeANdqzHbARfPzFCRlnskEWWYkp6ctQAMXdLVE51AuZ47/M0k+St\nGDrdox/QAQ8B6N85sMuf/PqfQKrKkWGuFzxA/PuEQW41ac3a8Ql4Rhpwcwus6Fje\nQsYGTNVxlx+wH22xfqHomXGQJSpGxza9xzaXNX9tKyVDqLIwsLWGViLgO+u1pm/q\nQI66z9SSUofKmwqYh62JjYPI+yrtFNBc/L0DRpDRVSc2XUQ5avifsC0RKuz/Uhek\n2wIDAQAB\n-----END PUBLIC KEY-----"
+		}
+	}
+}

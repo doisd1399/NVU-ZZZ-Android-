@@ -1,0 +1,13 @@
+{
+  "buildId": "local-2026-09-16T02:40:32.840Z",
+  "version": "2.3.141",
+  "stableReleaseName": "NVU Pro v1.2",
+  "officialStableRelease": true,
+  "generatedAt": "2026-09-16T02:40:32.840Z",
+  "source": "nvu-web",
+  "runtimeRevision": "R3.34-PC-WEB-AUTH-ARCHITECTURE-MODULAR",
+  "capacitorRuntime": "local",
+  "otaEnabled": true,
+  "otaManifestUrl": "https://stirring-pavlova-ca6808.netlify.app/ota/production-358/manifest.json",
+  "otaBundleId": ""
+}

@@ -24,7 +24,7 @@ O GTO Print promove o crop numérico como fonte `numeric-crop` e rejeita sobresc
 | Coordenador de conclusão operacional | **PASS** |
 | Imutabilidade OTA nativa | **PASS** |
 | Regressões de consistência | **PASS** |
-| Build Android Release | **PASS**, sem assinatura oficial |
+| Build Android Release | **PASS**, assinatura oficial NVU verificada |
 | Build Android Debug | **PASS**, assinatura APK v2 válida |
 
 ## Artefatos
@@ -35,13 +35,13 @@ Arquivo: `NVU-Pro-v1.2-senior-auth-parity-debug.apk`
 SHA-256: `f7ef1d5c5dbf9710a5a4536819c8905034dff6d5f2598d30cf94a3460964244a`  
 Assinatura: debug keystore, APK Signature Scheme v2 verificada.
 
-### APK Release
+### APK Release assinado
 
-Arquivo: `NVU-Pro-v1.2-senior-auth-parity-release-unsigned.apk`  
-SHA-256: `29297688ef8f2d9171717cf1408ca4d215fffdd8cb75ee474c301ce00ff65511`  
+Arquivo: `NVU-Pro-v1.2-senior-auth-parity-release.apk`  
+SHA-256: `a77efea8849c1bdc950366d7ddb1370e155a6112f7ed83bca1767a8fec635a65`  
 Identidade: `com.nvu.operacional`, version code `358`, versão `1.0.358`.  
-Estado: compilado, porém sem a keystore oficial de produção; requer assinatura oficial antes da distribuição.
+Assinatura: APK Signature Scheme v2/v3 verificada. Certificado SHA-256 `806a03ea92b69e7f9a70526e9c4d6a4ae52ec4f9cf7cac05ddb1aa28084246ea`.
 
 ## Segurança e backup
 
-O `google-services.json`, keystores, senhas, `.env` e propriedades locais não fazem parte do backup nem do Git. O arquivo Firebase foi usado somente durante o build local e removido ao final. O backup contém o código-fonte Web/Android, documentação, manifesto e `dist` sem dependências, intermediários ou credenciais.
+O `google-services.json`, keystores, senhas, `.env` e propriedades locais não fazem parte do backup nem do Git. O arquivo Firebase e a keystore oficial foram usados somente durante o build/assinatura local e removidos ao final. O backup contém o código-fonte Web/Android, documentação, manifesto e `dist` sem dependências, intermediários ou credenciais.

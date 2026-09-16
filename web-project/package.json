@@ -73,6 +73,7 @@
     "test:trip-value-integrity": "node scripts/test-trip-value-integrity.mjs",
     "test:fleet-removal-immediate-ui": "node scripts/test-fleet-removal-immediate-ui.mjs",
     "test:desktop-layout-contract": "node scripts/test-desktop-layout-contract.mjs",
+    "test:driver-desktop-shell-contract": "node scripts/test-driver-desktop-shell-contract.mjs",
     "test:senior-trip-history-auth": "node scripts/test-senior-trip-history-auth.mjs",
     "test:gto-print-minimal-evidence": "node scripts/test-gto-print-minimal-evidence.mjs",
     "test:gto-ocr-value-extraction": "tsx scripts/test-gto-ocr-value-extraction.mjs",

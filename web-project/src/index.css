@@ -399,6 +399,31 @@ html.nvu-route-loading-active [data-nvu-layout-brand] {
   }
 }
 
+/* Desktop Web shell: mirror the Android floating menu interaction without
+ * reserving a permanent left rail. Touch layouts keep the Android drawer. */
+@media (min-width: 1024px) and (pointer: fine) {
+  .nvu-desktop-floating-menu {
+    top: calc(3rem + 0.75rem) !important;
+    bottom: auto !important;
+    left: 50% !important;
+    width: min(420px, calc(100vw - 2rem)) !important;
+    max-height: calc(100vh - 5rem) !important;
+    border: 1px solid rgba(148, 163, 184, 0.32) !important;
+    border-radius: 1.25rem !important;
+    box-shadow: 0 24px 70px rgba(15, 23, 42, 0.22), 0 8px 22px rgba(15, 23, 42, 0.10) !important;
+    transform: translateX(-50%) translateY(-10px) !important;
+  }
+
+  .nvu-desktop-floating-menu.nvu-native-sidebar-open {
+    transform: translateX(-50%) translateY(0) !important;
+  }
+
+  .dark .nvu-desktop-floating-menu {
+    border-color: rgba(255, 255, 255, 0.14) !important;
+    box-shadow: 0 24px 70px rgba(0, 0, 0, 0.42), 0 8px 22px rgba(0, 0, 0, 0.24) !important;
+  }
+}
+
 @media (min-width: 768px) {
   .nvu-native-android .nvu-native-sidebar,
   .nvu-native-android.nvu-native-profile-route .nvu-native-menu-overlay {

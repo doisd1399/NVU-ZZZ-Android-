@@ -143,7 +143,7 @@ export function GlobalMenu({
         data-nvu-menu-open={open ? "true" : "false"}
         aria-label={copy.menuLabel}
         className={cn(
-          "nvu-native-sidebar nvu-floating-menu-card nvu-profile-menu-card w-64 bg-white dark:bg-[#09090b] border-r border-gray-100 dark:border-[#2A2F3A] flex flex-col fixed top-11 md:top-12 bottom-0 left-0 z-40 shadow-sm dark:shadow-none transition-transform duration-300 ease-in-out hidden md:flex",
+          "nvu-native-sidebar nvu-floating-menu-card nvu-profile-menu-card nvu-desktop-floating-menu w-64 bg-white dark:bg-[#09090b] border-r border-gray-100 dark:border-[#2A2F3A] flex flex-col fixed top-11 md:top-12 bottom-0 left-0 z-40 shadow-sm dark:shadow-none transition-transform duration-300 ease-in-out hidden md:flex",
           isCompany && "nvu-admin-sidebar",
           open ? "nvu-native-sidebar-open flex translate-x-0" : "nvu-native-sidebar-closed -translate-x-full",
         )}

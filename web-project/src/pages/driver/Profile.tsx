@@ -933,7 +933,7 @@ function DriverProfileContent({ currentUser }: { currentUser: User }) {
       </div>
 
       {isPageSelectorOpen && (
-        <div className="w-full bg-white dark:bg-[#1A1F26] border border-slate-200 dark:border-[#2A2F3A] rounded-lg shadow-sm overflow-hidden animate-in fade-in slide-in-from-top-2">
+        <div className="w-full lg:max-w-[1280px] lg:mx-auto bg-white dark:bg-[#1A1F26] border border-slate-200 dark:border-[#2A2F3A] rounded-lg shadow-sm overflow-hidden animate-in fade-in slide-in-from-top-2">
           {pageOptions.map((opt) => {
             const Icon = opt.icon;
             return (
@@ -972,7 +972,7 @@ function DriverProfileContent({ currentUser }: { currentUser: User }) {
   );
 
   return (
-    <div className="w-full flex flex-col gap-3 sm:gap-4 pb-8">
+    <div className="w-full lg:max-w-[1440px] lg:mx-auto flex flex-col gap-3 sm:gap-4 pb-8">
       <GtoWorkModeDialog
         open={isGtoModeDialogOpen}
         variant={isGtoWork ? "gto" : "simple"}
@@ -985,13 +985,13 @@ function DriverProfileContent({ currentUser }: { currentUser: User }) {
       {/* iOS Style Nav Bar Content */}
       <div className="flex items-center justify-center px-4 py-0 sm:py-2"></div>
 
-      <div className="nvu-profile-stack space-y-3 sm:space-y-4 w-full box-border">
+      <div className="nvu-profile-stack space-y-3 sm:space-y-4 lg:max-w-[1280px] lg:mx-auto w-full box-border">
         {/* Action Buttons */}
 
         {/* Profile Header — hero visual inspirado na referência; handlers preservados. */}
         <section
           data-nvu-profile-banner
-          className="nvu-profile-hero relative isolate -mx-2 -mt-2 h-[300px] min-h-0 overflow-hidden rounded-b-[18px] bg-[#0e1d29] shadow-[0_18px_45px_rgba(7,23,37,0.18)] sm:-mx-4 sm:-mt-4 sm:h-[320px] sm:rounded-b-[22px]"
+          className="nvu-profile-hero relative isolate lg:-mx-8 -mx-2 -mt-2 h-[300px] min-h-0 overflow-hidden rounded-b-[18px] bg-[#0e1d29] shadow-[0_18px_45px_rgba(7,23,37,0.18)] sm:-mx-4 sm:-mt-4 sm:h-[320px] lg:h-[248px] sm:rounded-b-[22px] lg:rounded-b-[26px]"
           onClick={() => window.dispatchEvent(new CustomEvent("nvu-profile-banner-tapped", { detail: { scope: "driver" } }))}
         >
           <div className="absolute inset-0 overflow-hidden rounded-b-[18px] sm:rounded-b-[22px]">

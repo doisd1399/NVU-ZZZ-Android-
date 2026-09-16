@@ -516,7 +516,7 @@ export default function DriverLayout() {
                 aria-controls="nvu-profile-floating-menu"
                 aria-label={isMobileMenuOpen ? "Fechar menu" : "Abrir menu"}
                 className={cn(
-                  "nvu-native-menu-button md:hidden p-1.5 -ml-1.5 rounded-lg transition-colors",
+                  "nvu-native-menu-button inline-flex p-1.5 -ml-1.5 rounded-lg transition-colors",
                   isDriverProfileRoute
                     ? "text-white hover:bg-white/10"
                     : "text-gray-600 dark:text-[#d4d4d8] hover:bg-gray-50 dark:bg-[#09090b] dark:hover:bg-[#3f3f46]",
@@ -704,10 +704,10 @@ export default function DriverLayout() {
             />
 
             {/* Main Content Viewport */}
-            <main className="nvu-native-main flex-1 min-w-0 md:ml-64 flex flex-col min-h-[calc(100vh-3.5rem)] md:min-h-[calc(100vh-4rem)] max-w-full">
+            <main className="nvu-native-main flex-1 min-w-0 md:ml-64 lg:ml-0 lg:w-full lg:max-w-[1440px] lg:mx-auto flex flex-col min-h-[calc(100vh-3.5rem)] md:min-h-[calc(100vh-4rem)] max-w-full">
               <div
                 className={cn(
-                  "nvu-native-content p-2 sm:p-4 md:p-6 flex-1 w-full max-w-full overflow-hidden",
+                  "nvu-native-content p-2 sm:p-4 md:p-6 lg:px-8 lg:py-6 flex-1 w-full max-w-full overflow-hidden",
                   isDriverProfileRoute && "nvu-native-profile-content",
                 )}
               >

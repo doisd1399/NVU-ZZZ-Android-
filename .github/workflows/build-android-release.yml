@@ -7,7 +7,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: nvu-r3-34-ota359-android-release
+  group: nvu-r3-34-pc-hf62-android-release
   cancel-in-progress: false
 
 jobs:

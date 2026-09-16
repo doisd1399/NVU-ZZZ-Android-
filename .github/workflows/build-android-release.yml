@@ -1,4 +1,4 @@
-name: Build NVU R3.34 OTA359 Release
+name: Build NVU R3.34 PC-HF62 OTA359 Release
 
 on:
   workflow_dispatch:

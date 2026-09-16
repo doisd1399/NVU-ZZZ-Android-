@@ -5,6 +5,7 @@ const login = read('src/pages/Login.tsx');
 const selectProfile = read('src/pages/SelectProfile.tsx');
 const appContext = read('src/context/AppContext.tsx');
 const adminLayout = read('src/layouts/AdminLayout.tsx');
+const tripHistory = read('src/pages/driver/TripHistory.tsx');
 
 const checks = [
   ['Login has no automatic navigation to Senior Panel', !/navigate\(\s*["']\/admin\/senior["']/.test(login)],
@@ -17,6 +18,7 @@ const checks = [
   ['Senior Panel navigation exists as explicit AdminLayout action', /navigate\(["']\/admin\/senior["']\)/.test(adminLayout)],
   ['Senior Panel button is always visible inside the admin-only layout and remains inside the secure route gate', /const hasSeniorPanelAccess = true;/.test(adminLayout) && /\{hasSeniorPanelAccess && \(/.test(adminLayout)],
   ['Senior Panel label is explicit', /Painel Sênior/.test(adminLayout)],
+  ['TripHistory uses Firebase-validated Senior session as primary access', /const \{ currentUser, activeRole, isSeniorAuthenticated \} = useSessionStore\(\)/.test(tripHistory) && /isSeniorAuthenticated \|\| sessionStorage\.getItem\(["']seniorAccess["']\) === ["']true["']/.test(tripHistory)],
 ];
 
 let passed = 0;

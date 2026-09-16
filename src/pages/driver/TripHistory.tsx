@@ -1044,7 +1044,7 @@ export default function TripHistory({
   companyId?: string;
 } = {}) {
   const navigate = useNavigate();
-  const { currentUser, activeRole } = useSessionStore();
+  const { currentUser, activeRole, isSeniorAuthenticated } = useSessionStore();
   const {
     activeCompanyId: contextActiveCompanyId,
     companies,
@@ -1136,7 +1136,11 @@ export default function TripHistory({
   }, []);
 
   const currentCompany = companies.find((c: any) => c.id === activeCompanyId);
-  const isSeniorAccess = sessionStorage.getItem("seniorAccess") === "true";
+  // The Firebase-validated Senior session is the authorization source of truth.
+  // Keep the sessionStorage flag only as a compatibility fallback for the
+  // approved-company preview flow while older sessions are still in use.
+  const isSeniorAccess =
+    isSeniorAuthenticated || sessionStorage.getItem("seniorAccess") === "true";
   const isAdminOrSenior = activeRole === "admin" || isSeniorAccess;
 
   const initialFilters = {

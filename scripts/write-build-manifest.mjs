@@ -20,7 +20,7 @@ const runtimeRevision = String(
     "R3.34-PC-WEB-AUTH-ARCHITECTURE-MODULAR",
 ).trim();
 const nativeChannel = String(
-  process.env.NVU_NATIVE_CHANNEL || "production-359",
+  process.env.NVU_NATIVE_CHANNEL || "production-358",
 ).trim();
 
 await mkdir(dist, { recursive: true });

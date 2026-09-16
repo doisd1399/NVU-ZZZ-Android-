@@ -684,7 +684,7 @@ export default function AdminLayout() {
         />
 
         {/* Main Content Viewport */}
-        <main className="flex-1 min-w-0 lg:ml-64 flex flex-col min-h-[calc(100vh-3.5rem)] md:min-h-[calc(100vh-4rem)] max-w-full">
+        <main className="flex-1 min-w-0 lg:ml-0 lg:w-full lg:max-w-[1440px] lg:mx-auto flex flex-col min-h-[calc(100vh-3.5rem)] md:min-h-[calc(100vh-4rem)] max-w-full">
           <div
             className={cn(
               "flex-1",
@@ -694,13 +694,13 @@ export default function AdminLayout() {
                   ? "px-0 pt-0 pb-4 sm:px-2 sm:pt-1 md:px-4 md:pt-2"
                   : isNewsRoute
                     ? "p-2 sm:p-4 md:p-6"
-                    : "p-4 sm:p-6 md:p-10",
+                    : "p-4 sm:p-6 md:p-10 lg:px-8 lg:py-6",
             )}
           >
             <div className={cn(
               "w-full",
-              location.pathname.startsWith("/admin/fleet")
-                ? ""
+                location.pathname.startsWith("/admin/fleet")
+                ? "max-w-[1280px] mx-auto"
                 : "max-w-6xl mx-auto",
             )}>
               {!isSeniorPanelRoute &&

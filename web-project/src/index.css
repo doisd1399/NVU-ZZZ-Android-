@@ -2440,3 +2440,83 @@ body:has(.nvu-ranking-overlay) .nvu-native-android .nvu-admin-sidebar {
     max-height: calc(100dvh - var(--nvu-native-header-height) - 0.85rem) !important;
   }
 }
+
+
+/* NVU desktop composition: Android's compact hierarchy adapted to a larger
+ * canvas. Keep these rules scoped to fine-pointer desktop browsers so the
+ * native/mobile proportions remain untouched. */
+@media (min-width: 1024px) and (pointer: fine) {
+  .nvu-admin-shell,
+  .nvu-native-driver-shell {
+    background: #f4f7f9;
+  }
+
+  .dark .nvu-admin-shell,
+  .dark .nvu-native-driver-shell {
+    background: #09090b;
+  }
+
+  .nvu-admin-header,
+  .nvu-native-driver-shell .nvu-native-header {
+    height: 3.5rem !important;
+    padding-inline: clamp(1.25rem, 3vw, 2.5rem) !important;
+  }
+
+  .nvu-admin-shell .nvu-admin-company-page,
+  .nvu-native-driver-shell .nvu-native-content {
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .nvu-desktop-floating-menu {
+    width: min(360px, calc(100vw - 2rem)) !important;
+    max-height: min(620px, calc(100vh - 5.25rem)) !important;
+  }
+
+  .nvu-desktop-floating-menu .nvu-profile-menu-intro {
+    padding: 0.85rem 1rem;
+  }
+
+  .nvu-desktop-floating-menu .nvu-profile-menu-account {
+    padding: 0.6rem;
+  }
+
+  .nvu-desktop-floating-menu .nvu-profile-menu-nav,
+  .nvu-desktop-floating-menu .nvu-admin-menu-nav {
+    padding: 0.75rem 0.8rem;
+    gap: 0.25rem;
+  }
+
+  .nvu-desktop-floating-menu .nvu-profile-menu-item,
+  .nvu-desktop-floating-menu .nvu-profile-menu-action,
+  .nvu-desktop-floating-menu .nvu-admin-menu-item,
+  .nvu-desktop-floating-menu .nvu-admin-menu-action {
+    min-height: 2.25rem;
+    padding: 0.52rem 0.75rem;
+    border-radius: 0.7rem;
+    font-size: 0.78rem;
+  }
+
+  .nvu-desktop-floating-menu .nvu-profile-menu-footer,
+  .nvu-desktop-floating-menu .nvu-admin-menu-footer {
+    padding: 0.75rem;
+    gap: 0.4rem;
+  }
+
+  .nvu-desktop-floating-menu .nvu-profile-logout-button,
+  .nvu-desktop-floating-menu .nvu-admin-logout-button {
+    min-height: 2.25rem;
+    padding-block: 0.5rem;
+    font-size: 0.78rem;
+  }
+
+  .nvu-admin-shell .nvu-admin-company-page > div,
+  .nvu-native-driver-shell .nvu-profile-stack {
+    box-sizing: border-box;
+  }
+
+  .nvu-admin-shell .nvu-admin-company-page .nvu-profile-hero,
+  .nvu-native-driver-shell .nvu-profile-hero {
+    box-shadow: 0 12px 30px rgba(7, 23, 37, 0.14);
+  }
+}

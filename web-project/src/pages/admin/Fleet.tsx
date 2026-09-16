@@ -453,8 +453,8 @@ export default function Fleet() {
       <div className={cn(
         "flex flex-col gap-4 pt-4 sm:pt-6 w-full px-4 sm:px-4 md:px-0 lg:px-8 box-border",
         activeTab === "company"
-          ? "max-w-none"
-          : "max-w-3xl mx-auto lg:max-w-[1440px]",
+          ? "max-w-[1280px] mx-auto"
+          : "max-w-3xl mx-auto lg:max-w-[1280px]",
       )}>
         {/* Company Profile Hero — visual parity with the Driver Profile. */}
         {activeCompany && !isRecruitmentFormOpen && !isTripDetailsOpen && (

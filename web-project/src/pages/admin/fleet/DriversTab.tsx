@@ -326,7 +326,7 @@ function DriversTab() {
             </p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 md:gap-4 w-full relative">
+          <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-3 md:gap-4 lg:gap-3 w-full relative">
             {openDropdownId && (
               <div 
                 className="fixed inset-0 z-40" 
@@ -342,9 +342,9 @@ function DriversTab() {
               return (
                 <Card
                   key={driver.id}
-                  className="rounded-[20px] border border-gray-200/60 dark:border-gray-800 shadow-sm hover:shadow-md dark:shadow-none relative bg-white dark:bg-[#1A1F26] group transition-all duration-200 w-full overflow-visible"
+                  className="rounded-[20px] lg:rounded-2xl border border-gray-200/60 dark:border-gray-800 shadow-sm hover:shadow-md dark:shadow-none relative bg-white dark:bg-[#1A1F26] group transition-all duration-200 w-full overflow-visible"
                 >
-                  <CardContent className="p-3 md:p-4 flex flex-col w-full gap-2.5 md:gap-3">
+                  <CardContent className="p-3 md:p-4 lg:p-3 flex flex-col w-full gap-2.5 md:gap-3 lg:gap-2.5">
                     {/* 1. Cabeçalho */}
                     <div className="flex items-start w-full gap-2.5 md:gap-3">
                       {resolveDriverPhoto(driver) ? (

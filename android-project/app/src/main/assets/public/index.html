@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="transparent" />
+    <title>NVU</title>
+    <script
+      src="https://accounts.google.com/gsi/client"
+      async
+      defer
+    ></script>
+    <script>
+      try {
+        var nvuTheme =
+          localStorage.getItem("frotalog-theme") === "dark" ? "dark" : "light";
+        document.documentElement.classList.add(nvuTheme);
+        document
+          .querySelector('meta[name="theme-color"]')
+          .setAttribute("content", "transparent");
+      } catch (error) {
+        document.documentElement.classList.add("light");
+      }
+    </script>
+    <script type="module" crossorigin src="/assets/index-MuZvV_Pq.js"></script>
+    <link rel="modulepreload" crossorigin href="/assets/vendor-BbvKNChJ.js">
+    <link rel="modulepreload" crossorigin href="/assets/vendor-icons-DnfiRwyI.js">
+    <link rel="stylesheet" crossorigin href="/assets/vendor-D6alEHDY.css">
+    <link rel="stylesheet" crossorigin href="/assets/index-D8l5s-jw.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>

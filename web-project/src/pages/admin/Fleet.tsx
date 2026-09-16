@@ -451,14 +451,16 @@ export default function Fleet() {
   return (
     <div className="nvu-admin-company-page min-h-[calc(100vh-64px)] bg-slate-50 dark:bg-[#09090b] font-sans pb-8 w-full box-border">
       <div className={cn(
-        "flex flex-col gap-4 pt-4 sm:pt-6 w-full px-4 sm:px-4 md:px-0 box-border",
-        activeTab === "company" ? "max-w-none" : "max-w-3xl mx-auto",
+        "flex flex-col gap-4 pt-4 sm:pt-6 w-full px-4 sm:px-4 md:px-0 lg:px-8 box-border",
+        activeTab === "company"
+          ? "max-w-none"
+          : "max-w-3xl mx-auto lg:max-w-[1440px]",
       )}>
         {/* Company Profile Hero — visual parity with the Driver Profile. */}
         {activeCompany && !isRecruitmentFormOpen && !isTripDetailsOpen && (
           <section
             data-nvu-profile-banner
-            className="nvu-admin-company-hero nvu-profile-hero relative isolate -mx-4 h-[300px] min-h-0 overflow-hidden rounded-b-[18px] bg-[#0e1d29] shadow-[0_18px_45px_rgba(7,23,37,0.18)] sm:-mt-6 sm:h-[320px] sm:rounded-b-[22px]"
+            className="nvu-admin-company-hero nvu-profile-hero relative isolate -mx-4 lg:-mx-8 h-[300px] min-h-0 overflow-hidden rounded-b-[18px] bg-[#0e1d29] shadow-[0_18px_45px_rgba(7,23,37,0.18)] sm:-mt-6 sm:h-[320px] lg:h-[248px] sm:rounded-b-[22px] lg:rounded-b-[26px]"
             onClick={() => window.dispatchEvent(new CustomEvent("nvu-profile-banner-tapped", { detail: { scope: "company" } }))}
           >
             <div className="absolute inset-0 overflow-hidden rounded-b-[18px] sm:rounded-b-[22px]">

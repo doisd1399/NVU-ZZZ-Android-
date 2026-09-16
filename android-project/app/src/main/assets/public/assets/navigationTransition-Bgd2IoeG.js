@@ -1,0 +1,1 @@
+function o(i){i()}function a(i,t){o(t);let r=null;try{r=Promise.resolve(i())}catch{}return r?r.then(()=>{},()=>{}):Promise.resolve()}function n(i){return i.button===0&&!i.metaKey&&!i.ctrlKey&&!i.shiftKey&&!i.altKey}export{n as i,a as p};

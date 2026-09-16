@@ -23,6 +23,7 @@ import {
   Bell,
   Pencil,
   Menu,
+  X,
   User,
   Moon,
   Sun,
@@ -513,13 +514,13 @@ export default function AdminLayout() {
             aria-controls="nvu-admin-floating-menu"
             aria-label={isMobileMenuOpen ? "Fechar menu corporativo" : "Abrir menu corporativo"}
             className={cn(
-              "nvu-admin-menu-button lg:hidden p-1.5 -ml-1.5 rounded-lg",
+              "nvu-admin-menu-button inline-flex p-1.5 -ml-1.5 rounded-lg",
               nativeAndroid && isAdminCompanyRoute
                 ? "text-white hover:bg-white/10"
                 : "text-gray-600 dark:text-[#d4d4d8] hover:bg-gray-50 dark:bg-[#09090b] dark:hover:bg-[#3f3f46]",
             )}
           >
-            <Menu size={24} />
+            {isMobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
           </button>
           <div
             data-nvu-background-brand

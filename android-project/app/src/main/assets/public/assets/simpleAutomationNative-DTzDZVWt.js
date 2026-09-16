@@ -1,0 +1,1 @@
+import{C as i,I as a}from"./vendor-BbvKNChJ.js";const r=a("SimpleAutomation"),e=()=>i.isNativePlatform()&&i.getPlatform()==="android"&&i.isPluginAvailable("SimpleAutomation");function n(o,t){e()&&r.recordProTiming({stage:o,elapsedMs:t}).catch(()=>{})}export{r as S,e as i,n as r};

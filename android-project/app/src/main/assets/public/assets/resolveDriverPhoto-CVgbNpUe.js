@@ -1,0 +1,1 @@
+function a(o,t){return o?.profilePhotoURL||o?.photoURL||o?.photoUrl||o?.avatar||o?.profileImage||o?.imageUrl||o?.photo||t?.profilePhotoURL||t?.photoURL||t?.photoUrl||t?.avatar||t?.profileImage||t?.imageUrl||t?.photo||""}export{a as r};

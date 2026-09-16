@@ -148,8 +148,8 @@ jobs:
           test -x "$AAPT"
 
           mkdir -p release-artifacts
-          ALIGNED_APK="$RUNNER_TEMP/NVU-R3.34-OTA358-aligned.apk"
-          SIGNED_APK="release-artifacts/NVU-R3.34-OTA358-release.apk"
+          ALIGNED_APK="$RUNNER_TEMP/NVU-R3.34-PC-HF58-aligned.apk"
+          SIGNED_APK="release-artifacts/NVU-R3.34-PC-HF58-release.apk"
 
           "$ZIPALIGN" -p -f 4 "$UNSIGNED_APK" "$ALIGNED_APK"
           "$APKSIGNER" sign \
@@ -186,7 +186,7 @@ jobs:
             echo "::warning::EXPECTED_SIGNING_CERT_SHA256 is not configured. APK signature is valid, but production-certificate pinning was not checked."
           fi
 
-          sha256sum "$SIGNED_APK" | tee release-artifacts/NVU-R3.34-OTA358-release.apk.sha256
+          sha256sum "$SIGNED_APK" | tee release-artifacts/NVU-R3.34-PC-HF58-release.apk.sha256
           cat > release-artifacts/release-info.txt <<EOF
           NVU R3.34-OTA358 (Web 2.3.141, Senior monetary audit fields and production-358 channel)
           applicationId=$EXPECTED_APPLICATION_ID
@@ -201,12 +201,12 @@ jobs:
         if: always()
         shell: bash
         run: |
-          rm -f "${KEYSTORE_PATH:-}" "$RUNNER_TEMP/NVU-R3.34-OTA358-aligned.apk"
+          rm -f "${KEYSTORE_PATH:-}" "$RUNNER_TEMP/NVU-R3.34-PC-HF58-aligned.apk"
 
       - name: Upload signed release APK
         uses: actions/upload-artifact@v4
         with:
-          name: NVU-R3.34-OTA358-release
+          name: NVU-R3.34-PC-HF58-release
           path: release-artifacts/
           if-no-files-found: error
           retention-days: 30

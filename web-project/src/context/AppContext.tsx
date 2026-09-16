@@ -5364,6 +5364,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       }
 
       await removalBatch.commit();
+
+      // The Firestore listeners will publish the same deletion asynchronously.
+      // Do not keep the fleet card visible during that round trip: the batch is
+      // already the authoritative success boundary, so update every local
+      // projection immediately and let the next snapshots reconcile it.
+      setAllCompanyMembers((currentMembers) =>
+        currentMembers.filter(
+          (member) =>
+            member.companyId !== targetCompanyId || member.userId !== driverId,
+        ),
+      );
+      setUsers((currentUsers) =>
+        currentUsers.filter((user) => user.id !== driverId),
+      );
+      setFetchedMissingUsers((currentUsers) =>
+        currentUsers.filter((user) => user.id !== driverId),
+      );
+
       toast.success("Motorista removido da empresa com sucesso.");
       console.log("Driver removido com sucesso!");
     } catch (e) {

@@ -71,6 +71,7 @@
     "test:trip-history-persistent-cache": "tsx scripts/test-trip-history-persistent-cache.mjs",
     "test:active-profile-resume": "node scripts/test-active-profile-resume.mjs",
     "test:trip-value-integrity": "node scripts/test-trip-value-integrity.mjs",
+    "test:fleet-removal-immediate-ui": "node scripts/test-fleet-removal-immediate-ui.mjs",
     "test:senior-trip-history-auth": "node scripts/test-senior-trip-history-auth.mjs",
     "test:gto-print-minimal-evidence": "node scripts/test-gto-print-minimal-evidence.mjs",
     "test:gto-ocr-value-extraction": "tsx scripts/test-gto-ocr-value-extraction.mjs",

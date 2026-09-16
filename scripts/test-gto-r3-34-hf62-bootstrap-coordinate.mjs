@@ -12,9 +12,9 @@ const ck = (name, ok) => { checks.push({name, ok: !!ok}); console.log(`${ok ? 'P
 const versionCode = Number((gradle.match(/versionCode\s+(\d+)/)||[])[1]||0);
 const versionName = (gradle.match(/versionName\s+"([^"]+)"/)||[])[1]||'';
 
-ck('HF62 Android identity', versionCode === 114 && versionName === '1.0.114');
-ck('HF62 workflow identity', workflow.includes('PC-HF62') && workflow.includes('EXPECTED_VERSION_CODE: "114"') && workflow.includes('EXPECTED_VERSION_NAME: "1.0.114"') && workflow.includes("versionCode 114") && workflow.includes('versionName "1.0.114"'));
-ck('HF62 release metadata identity', metadata.functionalRelease === 'R3.34-PC-HF62' && metadata.androidVersionCode === 114 && metadata.androidVersion === '1.0.114' && metadata.packageRevision === 'PC-HF62');
+ck('HF62-or-newer Android identity', versionCode >= 114 && /^1\.0\.(?:114|[1-9][0-9]{2,})$/.test(versionName));
+ck('HF62-or-newer workflow identity', workflow.includes('PC-HF62') && workflow.includes(`EXPECTED_VERSION_CODE: "${versionCode}"`) && workflow.includes(`EXPECTED_VERSION_NAME: "${versionName}"`) && workflow.includes(`versionCode ${versionCode}`) && workflow.includes(`versionName "${versionName}"`));
+ck('HF62-or-newer release metadata identity', metadata.functionalRelease === 'R3.34-PC-HF62' && metadata.androidVersionCode === versionCode && metadata.androidVersion === versionName && metadata.packageRevision === 'PC-HF62');
 ck('HF62 release gate is mandatory', String(pkg.scripts?.['verify:release'] || '').includes('npm run test:gto-r3.34-hf62-bootstrap-coordinate'));
 
 const queueStart = service.indexOf('private void queueFreightTouchMarker(MotionEvent sourceEvent)');

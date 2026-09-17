@@ -35,8 +35,8 @@ export async function runDiagnostics(): Promise<DiagnosticResult> {
     }
   };
 
-  // Build manifest.version is the Web/package version (currently 2.3.141),
-  // not the Android version shown by the installed APK. Read the native
+  // Build manifest.version is the Web/package version, not the Android
+  // version shown by the installed APK. Read the native
   // package identity from the App plugin so diagnostics never report an old
   // Web version as the Android release.
   try {

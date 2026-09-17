@@ -1,8 +1,8 @@
 {
   "functionalRelease": "R3.34-PC-HF62",
-  "webVersion": "2.3.141",
-  "androidVersion": "1.0.359",
-  "androidVersionCode": 359,
+  "webVersion": "1.31.0",
+  "androidVersion": "1.31.0",
+  "androidVersionCode": 1310,
   "capacitorRuntime": "bundled-local",
   "netlifyUrl": "https://stirring-pavlova-ca6808.netlify.app",
   "firebaseProjectId": "vtc-frota-log",

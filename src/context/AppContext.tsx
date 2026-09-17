@@ -4462,6 +4462,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       }
 
       await removalBatch.commit();
+      // Usuários hidratados a partir de companyMembers não desaparecem do
+      // listener de users (eles podem não ter users.companyId). Invalide as
+      // duas fontes locais imediatamente após o commit.
+      setUsers((current) => current.filter((user) => user.id !== driverId));
+      setFetchedMissingUsers((current) =>
+        current.filter((user) => user.id !== driverId),
+      );
       console.log("Driver removido com sucesso!");
     } catch (e) {
       console.error("Erro ao remover driver:", e);

@@ -545,7 +545,7 @@ export default function AdminLayout() {
         >
           <div className="p-4 flex flex-col gap-2 relative border-b border-gray-100 dark:border-[#2A2F3A] bg-gray-50 dark:bg-[#09090b]">
             {isProfileMenuOpen && (
-              <div className="absolute left-4 right-4 top-full mt-2 bg-white dark:bg-[#09090b] border border-gray-200 dark:border-[#2A2F3A] shadow-lg dark:shadow-none rounded-xl overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-200">
+              <div className="nvu-profile-menu-panel absolute left-4 right-4 top-full mt-2 bg-white dark:bg-[#09090b] border border-gray-200 dark:border-[#2A2F3A] shadow-lg dark:shadow-none rounded-xl overflow-hidden z-50">
                 {showCompanySwitch ? (
                   <>
                     <div className="px-3 py-2 border-b border-gray-100 dark:border-[#2A2F3A] bg-gray-50 dark:bg-[#09090b] flex items-center justify-between">

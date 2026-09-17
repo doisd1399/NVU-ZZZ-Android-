@@ -1,9 +1,9 @@
 {
   "functionalRelease": "R3.34-PC-HF62",
   "webVersion": "2.3.141",
-  "androidVersion": "1.0.358",
-  "androidVersionCode": 358,
-  "capacitorRuntime": "remote",
+  "androidVersion": "1.0.359",
+  "androidVersionCode": 359,
+  "capacitorRuntime": "bundled-local",
   "netlifyUrl": "https://stirring-pavlova-ca6808.netlify.app",
   "firebaseProjectId": "vtc-frota-log",
   "canonicalGtoState": "native deterministic state machine + immutable freight snapshot + durable Firebase/Firestore mirror",

@@ -13,13 +13,13 @@ This backup intentionally includes the complete project tree without excluding:
 
 Primary signed APK:
 android/app/build/outputs/apk/release/app-release.apk
-Version: 1.0.358 / versionCode 358
+Version: 1.0.359 / versionCode 359
 Signature: APK Signature Scheme v2, one signer
 SHA-256: 94a2e4060b27db799fc56f9deb53092c9993aab7d4c8d53c51f41417b0433cfe
 
 Web build:
 dist/
-dist/nvu-build.json contains otaEnabled=true and nativeChannel=production-358.
+dist/nvu-build.json contains otaEnabled=true and nativeChannel=production-359.
 
 Keystore:
 android/app/release-keystore.jks

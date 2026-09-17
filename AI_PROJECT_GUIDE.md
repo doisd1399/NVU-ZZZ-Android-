@@ -41,11 +41,11 @@ A integração Capacitor fica em:
 Conferir em `android/app/build.gradle`:
 
 ```text
-versionCode 358
-versionName "1.0.358"
+versionCode 359
+versionName "1.0.359"
 ```
 
-A build Web correspondente gera `dist/nvu-build.json`, que deve indicar `otaEnabled: true` e `nativeChannel: production-358`.
+A build Web correspondente gera `dist/nvu-build.json`, que deve indicar `otaEnabled: true` e `nativeChannel: production-359`.
 
 ## Procedimento para futuras atualizações
 

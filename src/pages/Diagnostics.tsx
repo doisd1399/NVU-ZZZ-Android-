@@ -79,10 +79,20 @@ export default function Diagnostics() {
               {result.buildManifest ? (
                 <ul className="space-y-3 text-sm">
                   <li className="flex justify-between">
-                    <span className="text-gray-500">Version</span>
+                    <span className="text-gray-500">Android version</span>
                     <span className="font-mono font-medium text-emerald-600 dark:text-emerald-400">
-                      {result.buildManifest.version}
+                      {result.nativeVersion || "Unavailable"}
                     </span>
+                  </li>
+                  <li className="flex justify-between">
+                    <span className="text-gray-500">Android build</span>
+                    <span className="font-mono">
+                      {result.nativeBuild || "Unavailable"}
+                    </span>
+                  </li>
+                  <li className="flex justify-between">
+                    <span className="text-gray-500">Web version</span>
+                    <span className="font-mono">{result.buildManifest.version}</span>
                   </li>
                   <li className="flex justify-between">
                     <span className="text-gray-500">Build ID</span>

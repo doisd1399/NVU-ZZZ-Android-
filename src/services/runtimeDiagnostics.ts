@@ -1,5 +1,6 @@
 import { auth, db, storage, functions } from "../lib/firebase";
 import { Capacitor } from "@capacitor/core";
+import { App } from "@capacitor/app";
 
 export const REMOTE_APP_URL = import.meta.env.VITE_NVU_NETLIFY_URL || "https://stirring-pavlova-ca6808.netlify.app";
 
@@ -7,6 +8,8 @@ export interface DiagnosticResult {
   platform: string;
   isNativePlatform: boolean;
   remoteAppUrl: string;
+  nativeVersion?: string;
+  nativeBuild?: number;
   buildManifest?: any;
   manifestError?: string;
   firebase: {
@@ -31,6 +34,18 @@ export async function runDiagnostics(): Promise<DiagnosticResult> {
       functions: 'uninitialized',
     }
   };
+
+  // Build manifest.version is the Web/package version (currently 2.3.141),
+  // not the Android version shown by the installed APK. Read the native
+  // package identity from the App plugin so diagnostics never report an old
+  // Web version as the Android release.
+  try {
+    const nativeInfo = await App.getInfo();
+    result.nativeVersion = nativeInfo.version;
+    result.nativeBuild = Number(nativeInfo.build);
+  } catch {
+    // Browser builds do not expose native package metadata.
+  }
 
   try {
     // 1. Fetch Build Manifest

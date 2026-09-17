@@ -2,7 +2,7 @@
 
 ## Fonte única
 
-O Web e o APK devem ser gerados a partir do mesmo commit. O build Web de produção usa a versão `1.31.0`, o runtime `R3.34-PC-WEB-AUTH-ARCHITECTURE-MODULAR` e o canal nativo `production-1310`. Nunca publique um `dist` gerado de outra cópia do projeto.
+O Web e o APK devem ser gerados a partir do mesmo commit. O build Web de produção usa a versão `2.3.141`, o runtime `R3.34-PC-WEB-AUTH-ARCHITECTURE-MODULAR` e o canal nativo `production-358`. Nunca publique um `dist` gerado de outra cópia do projeto.
 
 ## Correção monetária Senior
 
@@ -10,7 +10,7 @@ A edição de viagem no Histórico usa a sessão Senior validada pelo Firebase c
 
 ## Manifesto OTA
 
-O manifesto precisa conter `artifactType: zip`, `bundleId: production-1310-<webVersion>`, `webVersion`, `runtimeRevision`, `nativeChannel: production-1310`, `nativeVersionCode` igual ao `versionCode` do APK, `downloadUrl` HTTPS na mesma origem do manifesto, checksum SHA-256 do ZIP e `signature` RSA válida.
+O manifesto precisa conter `artifactType: zip`, `bundleId: production-358-<webVersion>`, `webVersion`, `runtimeRevision`, `nativeChannel: production-358`, `nativeVersionCode` igual ao `versionCode` do APK, `downloadUrl` HTTPS na mesma origem do manifesto, checksum SHA-256 do ZIP e `signature` RSA válida.
 
 ## Chaves
 

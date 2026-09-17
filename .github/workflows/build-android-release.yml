@@ -12,14 +12,14 @@ concurrency:
 
 jobs:
   build-release:
-    name: NVU Pro v1.31 signed APK
+    name: R3.34 OTA358 signed APK
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
     env:
       EXPECTED_APPLICATION_ID: com.nvu.operacional
-      EXPECTED_VERSION_CODE: "1310"
-      EXPECTED_VERSION_NAME: "1.31.0"
+      EXPECTED_VERSION_CODE: "358"
+      EXPECTED_VERSION_NAME: "1.0.358"
       ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
       ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
       ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
@@ -96,8 +96,8 @@ jobs:
         run: |
           set -euo pipefail
           grep -Fq 'applicationId "com.nvu.operacional"' android/app/build.gradle
-            grep -Fq 'versionCode 1310' android/app/build.gradle
-            grep -Fq 'versionName "1.31.0"' android/app/build.gradle
+            grep -Fq 'versionCode 358' android/app/build.gradle
+            grep -Fq 'versionName "1.0.358"' android/app/build.gradle
           echo "Android identity verified: $EXPECTED_APPLICATION_ID / $EXPECTED_VERSION_NAME ($EXPECTED_VERSION_CODE)"
 
       - name: Build unsigned release APK
@@ -188,7 +188,7 @@ jobs:
 
           sha256sum "$SIGNED_APK" | tee release-artifacts/NVU-R3.34-PC-HF62-release.apk.sha256
           cat > release-artifacts/release-info.txt <<EOF
-          NVU Pro v1.31 (Web 1.31.0, current bundled Web runtime and production-1310 channel)
+          NVU R3.34-OTA358 (Web 2.3.141, current bundled Web runtime and production-358 channel)
           applicationId=$EXPECTED_APPLICATION_ID
           versionName=$EXPECTED_VERSION_NAME
           versionCode=$EXPECTED_VERSION_CODE

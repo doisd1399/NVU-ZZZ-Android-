@@ -174,11 +174,19 @@ interface GtoObserverPlugin {
 
 export const GtoObserver = registerPlugin<GtoObserverPlugin>("GtoObserver");
 
-export const isNativeAndroid = (): boolean =>
-  Capacitor.isNativePlatform() && Capacitor.getPlatform() === "android";
-
 export const isGtoObserverAvailable = (): boolean =>
   Capacitor.isPluginAvailable("GtoObserver");
+
+/**
+ * Production APKs load the Web UI from the remote OTA URL. On some Android
+ * WebViews Capacitor reports the remote runtime as `web` even though the
+ * explicitly registered GtoObserver plugin is available and callable.
+ * The plugin is the authoritative capability signal; the platform check is
+ * retained for normal local Capacitor builds.
+ */
+export const isNativeAndroid = (): boolean =>
+  (Capacitor.isNativePlatform() && Capacitor.getPlatform() === "android") ||
+  isGtoObserverAvailable();
 
 export const isGtoSimulator = (simulatorId?: string, simulatorName?: string): boolean => {
   const value = `${simulatorId || ""} ${simulatorName || ""}`

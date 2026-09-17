@@ -264,6 +264,7 @@ function CompanyTab({
   const [logoPreviewUrl, setLogoPreviewUrl] = useState<string | null>(null);
   const [isProcessingLogo, setIsProcessingLogo] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isSavingSimulators, setIsSavingSimulators] = useState(false);
   const [logoUploadProgress, setLogoUploadProgress] = useState(0);
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -443,6 +444,45 @@ function CompanyTab({
     } finally {
       setIsSaving(false);
       setLogoUploadProgress(0);
+    }
+  };
+
+  const handleSaveSimulatorConfiguration = async () => {
+    if (!activeCompany || isSavingSimulators) return;
+
+    const simulatorIds = Array.from(
+      new Set(
+        (formData.simulatorIds || [])
+          .map((id) => String(id).trim())
+          .filter(Boolean),
+      ),
+    );
+    if (simulatorIds.length === 0) {
+      toast.error("Selecione ao menos um simulador de atuação.");
+      return;
+    }
+
+    const defaultSimulatorId = simulatorIds.includes(formData.simulatorId)
+      ? formData.simulatorId
+      : simulatorIds[0];
+    const defaultOption = safeSimulatorOptions.find(
+      (option) => option.value === defaultSimulatorId,
+    );
+
+    setIsSavingSimulators(true);
+    try {
+      await updateCompany(activeCompany.id, {
+        simulatorIds,
+        simulatorId: defaultSimulatorId,
+        defaultSimulatorId,
+        simulatorName: defaultOption?.label || formData.simulatorName || "",
+      });
+      toast.success("Simuladores de atuação atualizados.");
+    } catch (error) {
+      console.error("Falha ao salvar simuladores da empresa:", error);
+      toast.error("Não foi possível salvar os simuladores da empresa.");
+    } finally {
+      setIsSavingSimulators(false);
     }
   };
 
@@ -954,6 +994,87 @@ function CompanyTab({
         </div>,
         document.body
       )}
+
+      <section className="rounded-[20px] border border-slate-200 bg-white p-5 shadow-sm dark:border-[#2A2F3A] dark:bg-[#1A1F26]">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h3 className="text-[16px] font-bold text-slate-900 dark:text-white">
+              Simulador de atuação da empresa
+            </h3>
+            <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">
+              Escolha quais simuladores esta empresa pode utilizar nas operações e defina o padrão.
+            </p>
+          </div>
+          <Button
+            type="button"
+            onClick={() => void handleSaveSimulatorConfiguration()}
+            disabled={isSavingSimulators || safeSimulatorOptions.length === 0}
+            className="h-9 shrink-0 rounded-xl bg-blue-600 px-4 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {isSavingSimulators ? "Salvando..." : "Salvar simuladores"}
+          </Button>
+        </div>
+
+        {safeSimulatorOptions.length === 0 ? (
+          <p className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-200">
+            Nenhum simulador ativo está disponível no catálogo.
+          </p>
+        ) : (
+          <div className="mt-4 grid gap-2 sm:grid-cols-2">
+            {safeSimulatorOptions.map((option) => {
+              const checked = formData.simulatorIds.includes(option.value);
+              const isDefault = formData.simulatorId === option.value;
+              return (
+                <div
+                  key={option.value}
+                  className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 px-3 py-2.5 dark:border-[#2A2F3A]"
+                >
+                  <label className="flex min-w-0 items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-200">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => setFormData((current) => {
+                        const nextIds = checked
+                          ? current.simulatorIds.filter((id) => id !== option.value)
+                          : [...current.simulatorIds, option.value];
+                        const nextDefault = nextIds.includes(current.simulatorId)
+                          ? current.simulatorId
+                          : nextIds[0] || "";
+                        const nextOption = safeSimulatorOptions.find(
+                          (item) => item.value === nextDefault,
+                        );
+                        return {
+                          ...current,
+                          simulatorIds: nextIds,
+                          simulatorId: nextDefault,
+                          simulatorName: nextOption?.label || "",
+                        };
+                      })}
+                      className="h-4 w-4 accent-blue-600"
+                    />
+                    <span className="truncate">{option.label}</span>
+                  </label>
+                  <label className="flex shrink-0 items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400">
+                    <input
+                      type="radio"
+                      name="company-default-simulator"
+                      checked={isDefault}
+                      disabled={!checked}
+                      onChange={() => setFormData((current) => ({
+                        ...current,
+                        simulatorId: option.value,
+                        simulatorName: option.label,
+                      }))}
+                      className="h-3.5 w-3.5 accent-blue-600"
+                    />
+                    padrão
+                  </label>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
 
       {performanceReady ? (
         <CompanyPerformanceCard

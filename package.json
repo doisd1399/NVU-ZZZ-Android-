@@ -133,7 +133,8 @@
     "test:gto-r3.34-hf59-sync-safe": "node scripts/test-gto-r3-34-hf59-sync-safe.mjs",
     "test:gto-r3.34-hf60-terminal-safe": "node scripts/test-gto-r3-34-hf60-terminal-safe.mjs",
     "test:gto-r3.34-hf61-completion-commit": "node scripts/test-gto-r3-34-hf61-completion-commit.mjs",
-    "test:gto-r3.34-hf62-bootstrap-coordinate": "node scripts/test-gto-r3-34-hf62-bootstrap-coordinate.mjs"
+    "test:gto-r3.34-hf62-bootstrap-coordinate": "node scripts/test-gto-r3-34-hf62-bootstrap-coordinate.mjs",
+    "test:gto-operation-card-refresh": "node scripts/test-gto-operation-card-refresh.mjs"
   },
   "dependencies": {
     "@capacitor-firebase/authentication": "^8.3.0",

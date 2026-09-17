@@ -4681,7 +4681,25 @@ public class GtoObserverService extends Service {
             + "|" + prefs.getString("selectedKm", "")
             + "|" + prefs.getString("selectedValue", "")
             + "|" + prefs.getString("resultValue", "")
-            + "|" + prefs.getString("gtoTripSyncStatus", "");
+            + "|" + prefs.getString("gtoTripSyncStatus", "")
+            // The floating Operation card is driven by the operation-level ACK
+            // fields below. They must participate in the render signature: the
+            // sync listener calls refreshMenuContents() after an ACK, but without
+            // these values the early-return guard treated the card as unchanged.
+            + "|operation=" + prefs.getString("contractName", "")
+            + "|job=" + prefs.getString("jobId", "")
+            + "|jobProgress=" + prefs.getInt("jobProgress", 0)
+            + "|gtoJobProgress=" + prefs.getInt("gtoJobProgress", 0)
+            + "|jobTotalDeliveries=" + prefs.getInt("jobTotalDeliveries", 0)
+            + "|gtoJobStatus=" + prefs.getString("gtoJobStatus", "")
+            + "|gtoBackendJobClosed=" + prefs.getBoolean("gtoBackendJobClosed", false)
+            + "|vehicle=" + prefs.getString("vehicleName", "")
+            + "|trailer=" + prefs.getString("trailerName", "")
+            + "|observerReady=" + prefs.getBoolean("observerOperationalReady", false)
+            + "|observerStatus=" + prefs.getString("observerOperationalStatus", "")
+            + "|completionStatus=" + prefs.getString("completionStatus", "")
+            + "|backgroundPendingSession=" + prefs.getString("backgroundSyncPendingSessionId", "")
+            + "|backgroundPendingAt=" + prefs.getLong("backgroundSyncPendingAt", 0L);
     }
 
     private void refreshMenuContents() {

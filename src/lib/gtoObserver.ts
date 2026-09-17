@@ -178,15 +178,22 @@ export const isGtoObserverAvailable = (): boolean =>
   Capacitor.isPluginAvailable("GtoObserver");
 
 /**
- * Production APKs load the Web UI from the remote OTA URL. On some Android
- * WebViews Capacitor reports the remote runtime as `web` even though the
- * explicitly registered GtoObserver plugin is available and callable.
- * The plugin is the authoritative capability signal; the platform check is
- * retained for normal local Capacitor builds.
+ * The Web UI may run from the bundled assets or from the remote OTA URL.
+ * When it runs remotely, some Capacitor versions report `web` and
+ * `isNativePlatform()` as false even though the Android bridge is injected.
+ * The bridge/plugin and the Android WebView user agent are therefore valid
+ * Android signals in addition to the normal Capacitor platform signal.
  */
-export const isNativeAndroid = (): boolean =>
-  (Capacitor.isNativePlatform() && Capacitor.getPlatform() === "android") ||
-  isGtoObserverAvailable();
+export const isNativeAndroid = (): boolean => {
+  if (Capacitor.getPlatform() === "android") return true;
+  if (Capacitor.isNativePlatform() && Capacitor.getPlatform() !== "ios") return true;
+  if (isGtoObserverAvailable()) return true;
+
+  const win = typeof window !== "undefined" ? (window as any) : undefined;
+  const userAgent = typeof navigator !== "undefined" ? navigator.userAgent : "";
+  const androidWebView = /android/i.test(userAgent) && /\bwv\b|; wv\)/i.test(userAgent);
+  return Boolean(androidWebView && win?.Capacitor);
+};
 
 export const isGtoSimulator = (simulatorId?: string, simulatorName?: string): boolean => {
   const value = `${simulatorId || ""} ${simulatorName || ""}`

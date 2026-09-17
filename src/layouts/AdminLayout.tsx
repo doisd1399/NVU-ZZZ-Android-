@@ -40,6 +40,7 @@ import { auth } from "../lib/firebase";
 import { ProfileModal } from "../components/ProfileModal";
 import { StableImage } from "../components/common/StableImage";
 import { NotificationCenter } from "../components/NotificationCenter";
+import { SimulatorContextSelector } from "../components/common/SimulatorContextSelector";
 import { preloadRoute } from "../lib/routePreload";
 import {
   commitRoleVisualTransition,
@@ -465,6 +466,7 @@ export default function AdminLayout() {
 
         {/* Right Box: Bell and User */}
         <div className="flex items-center gap-1.5 md:gap-4">
+          <SimulatorContextSelector />
           {isSeniorCompanyPreview && (
             <button
               type="button"

@@ -30,6 +30,13 @@ import {
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { syncSingleSimulatorMember, removeSimulatorMember } from "../lib/syncSimulatorMembers";
 import { resolveOperationalCompanyId } from "../lib/companyScope";
+import {
+  chooseValidCompanySimulator,
+  getCompanySimulatorIds,
+  persistSimulatorSelection,
+  readSimulatorSelection,
+  resolveEntitySimulator,
+} from "../lib/simulatorContext";
 import { generateCnpj } from "../lib/cnpj";
 import { preloadImages } from "../lib/imageCache";
 import { warmRankingUserProfiles } from "../lib/rankingPhotoWarmup";
@@ -220,6 +227,8 @@ export interface CompanyProfile {
   fleetName?: string; // Fallback temporário
   simulatorName: string;
   simulatorId?: string;
+  simulatorIds?: string[];
+  defaultSimulatorId?: string;
   ownerName: string;
   email?: string;
   ownerEmail?: string;
@@ -507,6 +516,10 @@ export interface OperationalStoreType {
   simulators: Simulator[];
   simulatorsLoading: boolean;
   simulatorsError: string | null;
+  activeSimulatorId: string | null;
+  activeSimulatorSource: "explicit" | "company-single" | "catalog" | null;
+  availableCompanySimulatorIds: string[];
+  setActiveSimulatorId: (id: string | null) => void;
   /** True only after the first authoritative scoped snapshots have settled. */
   operationalDataReady: boolean;
   /** True while a cached/previous scoped snapshot remains visible during refresh. */
@@ -1723,6 +1736,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   const [simulators, setSimulators] = useState<Simulator[]>([]);
   const [simulatorsLoading, setSimulatorsLoading] = useState(true);
   const [simulatorsError, setSimulatorsError] = useState<string | null>(null);
+  const [activeSimulatorId, setActiveSimulatorIdState] = useState<string | null>(null);
   const {
     companies,
     setCompanies,
@@ -1818,6 +1832,44 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
 
     return () => unsub();
   }, [foregroundPathname, interactionFirstRoute]);
+
+  const activeCompanyForSimulator = useMemo(
+    () => companies.find((company) => company.id === activeCompanyId) || null,
+    [activeCompanyId, companies],
+  );
+  const availableCompanySimulatorIds = useMemo(
+    () => getCompanySimulatorIds(activeCompanyForSimulator, simulators as any[]),
+    [activeCompanyForSimulator, simulators],
+  );
+  const setActiveSimulatorId = useStableEvent((requestedId: string | null) => {
+    const normalized = requestedId?.trim() || null;
+    const next = normalized && availableCompanySimulatorIds.includes(normalized)
+      ? normalized
+      : chooseValidCompanySimulator(activeCompanyForSimulator, simulators as any[], normalized);
+    setActiveSimulatorIdState(next);
+    persistSimulatorSelection(currentUser?.id, activeCompanyId, next);
+  });
+  useEffect(() => {
+    if (!activeCompanyId || !currentUser?.id) {
+      setActiveSimulatorIdState(null);
+      return;
+    }
+    const stored = readSimulatorSelection(currentUser.id, activeCompanyId);
+    const next = chooseValidCompanySimulator(
+      activeCompanyForSimulator,
+      simulators as any[],
+      stored,
+    );
+    setActiveSimulatorIdState((current) => current === next ? current : next);
+    persistSimulatorSelection(currentUser.id, activeCompanyId, next);
+  }, [activeCompanyForSimulator, activeCompanyId, currentUser?.id, simulators]);
+  const activeSimulatorSource = activeSimulatorId
+    ? availableCompanySimulatorIds.length === 1
+      ? "company-single" as const
+      : readSimulatorSelection(currentUser?.id, activeCompanyId) === activeSimulatorId
+        ? "explicit" as const
+        : "catalog" as const
+    : null;
 
   // --- Real-time Firestore Subscriptions (Authenticated) ---
   useEffect(() => {
@@ -3352,6 +3404,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         .toLowerCase();
       const payload = {
         ...data,
+        simulatorIds: Array.from(
+          new Set([
+            ...(Array.isArray(data.simulatorIds) ? data.simulatorIds : []),
+            ...(data.simulatorId ? [data.simulatorId] : []),
+          ].filter(Boolean)),
+        ),
+        defaultSimulatorId: data.defaultSimulatorId || data.simulatorId || "",
         ...(ownerEmail && {
           email: ownerEmail,
           ownerEmail,
@@ -3405,13 +3464,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     try {
       getCurrentUserId(); // valida se tá autenticado
 
-      // Company name and simulator define the platform identity of an existing
-      // company. They are set during creation and are not editable through the
-      // regular owner/admin profile update flow.
+      // Company name remains immutable here, while simulator availability is
+      // explicitly editable and never deletes historical records.
       const editableUpdates = { ...updates };
       delete editableUpdates.companyName;
-      delete editableUpdates.simulatorId;
-      delete editableUpdates.simulatorName;
 
       await updateDoc(doc(db, "frotas", id), editableUpdates);
       setCompanies((current) => {
@@ -3507,7 +3563,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       
       const rawPayload = {
         ...data,
-        simulator: activeCompany.simulatorName, // Auto-populate simulator
+        simulator: activeCompany.simulatorName, // Legacy compatibility field
+        simulatorId: activeSimulatorId || activeCompany.defaultSimulatorId || activeCompany.simulatorId || "",
+        simulatorName: activeCompany.simulatorName || "",
+        simulatorIds: activeCompany.simulatorIds || [],
         companyName: activeCompany.companyName, // Auto-populate company name
         userId: uid,
         companyId: activeCompanyId,
@@ -3616,6 +3675,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       const uid = getCurrentUserId();
       const contract = contracts.find((c) => c.id === contractId);
       if (!contract) return;
+      const operationSimulatorId =
+        (contract as any).simulatorId || activeSimulatorId || "";
+      const operationSimulatorName =
+        (contract as any).simulatorName || (contract as any).simulator || "";
 
       const deadline = new Date();
       if (
@@ -3641,6 +3704,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         userId: uid,
         companyId: activeCompanyId,
         contractId,
+        simulatorId: operationSimulatorId,
+        simulatorName: operationSimulatorName,
         driverId,
         motoristaId: driverId, // user asked for motoristaId
         assignedDriverId: driverId, // Ensure assignedDriverId exists for data link
@@ -5208,18 +5273,38 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         trailers.length > 0 ||
         users.length > 0),
   );
+  const scopedContracts = useMemo(() => {
+    if (!activeSimulatorId) return contracts;
+    return contracts.filter((contract) =>
+      resolveEntitySimulator(contract as any, { simulators: simulators as any[] }).simulatorId === activeSimulatorId,
+    );
+  }, [activeSimulatorId, contracts, simulators]);
+  const scopedJobs = useMemo(() => {
+    if (!activeSimulatorId) return jobs;
+    const contractById = new Map(contracts.map((contract) => [contract.id, contract]));
+    return jobs.filter((job) =>
+      resolveEntitySimulator(job as any, {
+        simulators: simulators as any[],
+        contract: contractById.get(job.contractId) as any,
+      }).simulatorId === activeSimulatorId,
+    );
+  }, [activeSimulatorId, contracts, jobs, simulators]);
 
   const operationalValue = useMemo<OperationalStoreType>(
     () => ({
       users: combinedUsers,
       vehicles,
       trailers,
-      contracts,
+      contracts: scopedContracts,
       sequences,
-      jobs,
+      jobs: scopedJobs,
       simulators,
       simulatorsLoading,
       simulatorsError,
+      activeSimulatorId,
+      activeSimulatorSource,
+      availableCompanySimulatorIds,
+      setActiveSimulatorId,
       operationalDataReady,
       operationalDataRefreshing,
       jobsReady: operationalReadiness.jobs,
@@ -5252,12 +5337,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     }),
     [
       combinedUsers,
-      contracts,
-      jobs,
+      scopedContracts,
+      scopedJobs,
       sequences,
       simulators,
       simulatorsError,
       simulatorsLoading,
+      activeSimulatorId,
+      activeSimulatorSource,
+      availableCompanySimulatorIds,
+      setActiveSimulatorId,
       operationalDataReady,
       operationalDataRefreshing,
       operationalReadiness,

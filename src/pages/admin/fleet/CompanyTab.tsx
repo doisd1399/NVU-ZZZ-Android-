@@ -270,6 +270,7 @@ function CompanyTab({
   const [formData, setFormData] = useState({
     companyName: "",
     simulatorId: "",
+    simulatorIds: [] as string[],
     simulatorName: "",
     ownerName: "",
     whatsapp: "",
@@ -336,6 +337,10 @@ function CompanyTab({
           activeCompany.simulatorId ||
           activeCompanySimulatorOption?.value ||
           "",
+        simulatorIds: Array.from(new Set([
+          ...(Array.isArray((activeCompany as any).simulatorIds) ? (activeCompany as any).simulatorIds : []),
+          activeCompanySimulatorOption?.canonicalId || activeCompany.simulatorId || "",
+        ].filter(Boolean))),
         simulatorName:
           activeCompanySimulatorOption?.label ||
           activeCompany.simulatorName ||
@@ -403,8 +408,6 @@ function CompanyTab({
         // in local state for display and for the company-creation flow.
         const editableCompanyData = { ...companyData };
         delete editableCompanyData.companyName;
-        delete editableCompanyData.simulatorId;
-        delete editableCompanyData.simulatorName;
         await updateCompany(activeCompany.id, editableCompanyData);
         setFormData({
           ...companyData,
@@ -418,6 +421,7 @@ function CompanyTab({
             activeCompanySimulatorOption?.label ||
             activeCompany.simulatorName ||
             "",
+          simulatorIds: companyData.simulatorIds,
         });
         setPendingLogoFile(null);
         setLogoPreviewUrl(null);
@@ -592,27 +596,69 @@ function CompanyTab({
                 </div>
                 <div>
                   <label className="block text-[14px] font-medium text-slate-700 dark:text-[#a1a1aa] mb-1.5 ml-1">
-                    Simulador Padrão
+                    Simuladores ativos
                   </label>
-                  <SafeSelect
-                    title="Selecionar simulador"
-                    placeholder="Selecione um simulador"
-                    value={selectedSimulatorValue}
-                    options={safeSimulatorOptions}
-                    onChange={(simulatorId) => {
-                      const option = simulatorOptions.find(
-                        (item) => (item.canonicalId || item.value) === simulatorId,
+                  <div className="space-y-2 rounded-xl border border-slate-200 dark:border-[#2A2F3A] p-3">
+                    {safeSimulatorOptions.length === 0 ? (
+                      <p className="text-sm text-slate-500">Nenhum simulador ativo disponível.</p>
+                    ) : safeSimulatorOptions.map((option) => {
+                      const checked = formData.simulatorIds.includes(option.value);
+                      return (
+                        <label key={option.value} className="flex items-center gap-3 text-sm text-slate-700 dark:text-slate-200 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => setFormData((current) => {
+                              const nextIds = checked
+                                ? current.simulatorIds.filter((id) => id !== option.value)
+                                : [...current.simulatorIds, option.value];
+                              const nextDefault = nextIds.includes(current.simulatorId)
+                                ? current.simulatorId
+                                : nextIds[0] || "";
+                              const nextOption = simulatorOptions.find((item) => (item.canonicalId || item.value) === nextDefault);
+                              return { ...current, simulatorIds: nextIds, simulatorId: nextDefault, simulatorName: nextOption?.label || "" };
+                            })}
+                            className="h-4 w-4 accent-blue-600"
+                          />
+                          <span>{option.label}</span>
+                          {option.value === formData.simulatorId && <span className="text-xs text-blue-600">padrão</span>}
+                        </label>
                       );
-                      setFormData((current) => ({
-                        ...current,
-                        simulatorId,
-                        simulatorName: option?.label || "",
-                      }));
-                    }}
-                    emptyMessage="Nenhum simulador ativo disponível."
-                  />
+                    })}
+                  </div>
                 </div>
               </>
+            )}
+            {!isAddingNew && isEditing && (
+              <div>
+                <label className="block text-[14px] font-medium text-slate-700 dark:text-[#a1a1aa] mb-1.5 ml-1">
+                  Simuladores ativos da empresa
+                </label>
+                <div className="space-y-2 rounded-xl border border-slate-200 dark:border-[#2A2F3A] p-3">
+                  {safeSimulatorOptions.map((option) => {
+                    const checked = formData.simulatorIds.includes(option.value);
+                    return (
+                      <label key={option.value} className="flex items-center gap-3 text-sm text-slate-700 dark:text-slate-200 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => setFormData((current) => {
+                            const nextIds = checked
+                              ? current.simulatorIds.filter((id) => id !== option.value)
+                              : [...current.simulatorIds, option.value];
+                            const nextDefault = nextIds.includes(current.simulatorId) ? current.simulatorId : nextIds[0] || "";
+                            const nextOption = simulatorOptions.find((item) => (item.canonicalId || item.value) === nextDefault);
+                            return { ...current, simulatorIds: nextIds, simulatorId: nextDefault, simulatorName: nextOption?.label || "" };
+                          })}
+                          className="h-4 w-4 accent-blue-600"
+                        />
+                        <span>{option.label}</span>
+                        {option.value === formData.simulatorId && <span className="text-xs text-blue-600">padrão</span>}
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
             )}
             <div>
               <label className="block text-[14px] font-medium text-slate-700 dark:text-[#a1a1aa] mb-1.5 ml-1">

@@ -31,6 +31,7 @@ import { auth } from "../lib/firebase";
 import { ProfileModal } from "../components/ProfileModal";
 import { StableImage } from "../components/common/StableImage";
 import { NotificationCenter } from "../components/NotificationCenter";
+import { SimulatorContextSelector } from "../components/common/SimulatorContextSelector";
 import { preloadRoute } from "../lib/routePreload";
 import {
   commitRoleVisualTransition,
@@ -375,7 +376,8 @@ export default function DriverLayout() {
         <>
           {/* Top Bar (Header) fixed at the top */}
           <header className="fixed top-0 left-0 right-0 h-11 md:h-12 bg-white dark:bg-[#09090b] border-b border-gray-100 dark:border-[#2A2F3A] flex items-center px-4 md:px-6 justify-between z-50">
-            <div className="flex items-center gap-3 md:gap-4">
+            <div className="flex items-center gap-1.5 md:gap-4">
+              <SimulatorContextSelector />
               <button
                 onClick={() => setIsMobileMenuOpen(true)}
                 className="md:hidden p-1.5 -ml-1.5 text-gray-600 dark:text-[#d4d4d8] hover:bg-gray-50 dark:bg-[#09090b] dark:hover:bg-[#3f3f46] rounded-lg"

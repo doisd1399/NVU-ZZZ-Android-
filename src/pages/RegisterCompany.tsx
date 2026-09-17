@@ -162,6 +162,7 @@ export default function RegisterCompany() {
     cnpj: generateCnpj(),
     simulatorName: "",
     simulatorId: "",
+    simulatorIds: [] as string[],
     companyLogoURL: "",
     ownerPhotoUrl: "",
   });
@@ -303,6 +304,10 @@ export default function RegisterCompany() {
       toast.error("A foto do proprietário é obrigatória.");
       return;
     }
+    if (!formData.simulatorId && formData.simulatorIds.length === 0) {
+      toast.error("Selecione ao menos um simulador.");
+      return;
+    }
     const authenticatedUid = auth.currentUser?.uid || null;
     if (!authenticatedUid) {
       toast.error("Acesse com Google antes de enviar o cadastro da empresa.");
@@ -371,7 +376,8 @@ export default function RegisterCompany() {
             currentRecruitmentApplicationId: applicationRef.id,
             currentRecruitmentStatus: "pending",
             currentRecruitmentType: "company_registration",
-            currentRecruitmentSimulatorId: formData.simulatorId || "",
+            currentRecruitmentSimulatorId: formData.simulatorId || formData.simulatorIds[0] || "",
+            currentRecruitmentSimulatorIds: formData.simulatorIds,
           },
           { merge: true },
         );
@@ -671,26 +677,30 @@ export default function RegisterCompany() {
                         Nenhum simulador disponível no sistema.
                       </div>
                     ) : (
-                      <SafeSelect
-                        title="Selecionar simulador"
-                        placeholder="Selecione..."
-                        value={formData.simulatorId}
-                        options={activeSimulators.map((sim: any) => ({
-                          value: sim.id,
-                          label: sim.name,
-                        }))}
-                        onChange={(simulatorId) => {
-                          const selected = activeSimulators.find(
-                            (sim: any) => sim.id === simulatorId,
+                      <div className="space-y-2 rounded-xl border border-slate-200 dark:border-[#2A2F3A] p-3">
+                        {activeSimulators.map((sim: any) => {
+                          const checked = formData.simulatorIds.includes(sim.id);
+                          return (
+                            <label key={sim.id} className="flex items-center gap-3 text-sm text-slate-700 dark:text-slate-200 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => setFormData((current) => {
+                                  const nextIds = checked
+                                    ? current.simulatorIds.filter((id) => id !== sim.id)
+                                    : [...current.simulatorIds, sim.id];
+                                  const nextDefault = nextIds.includes(current.simulatorId) ? current.simulatorId : nextIds[0] || "";
+                                  const selected = activeSimulators.find((item: any) => item.id === nextDefault);
+                                  return { ...current, simulatorIds: nextIds, simulatorId: nextDefault, simulatorName: selected?.name || "" };
+                                })}
+                                className="h-4 w-4 accent-blue-600"
+                              />
+                              <span>{sim.name}</span>
+                              {sim.id === formData.simulatorId && <span className="text-xs text-blue-600">padrão</span>}
+                            </label>
                           );
-                          setFormData((current) => ({
-                            ...current,
-                            simulatorId,
-                            simulatorName: selected?.name || "",
-                          }));
-                        }}
-                        emptyMessage="Nenhum simulador disponível."
-                      />
+                        })}
+                      </div>
                     )}
                   </div>
                 </div>
@@ -705,7 +715,7 @@ export default function RegisterCompany() {
                     Cancelar
                   </Button>
                   <Button
-                    disabled={submitting || uploadingImage || !formData.simulatorId}
+                    disabled={submitting || uploadingImage || (!formData.simulatorId && formData.simulatorIds.length === 0)}
                     type="submit"
                     className="w-full sm:w-2/3 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-xl h-12 text-[15px] font-bold shadow-sm transition-all disabled:opacity-50"
                   >

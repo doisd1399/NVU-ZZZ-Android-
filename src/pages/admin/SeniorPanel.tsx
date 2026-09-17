@@ -789,6 +789,18 @@ export default function SeniorPanel() {
           rawSimulatorValue ||
           "Simulador não informado",
       ).trim();
+      const canonicalSimulatorIds = Array.from(new Set([
+        ...(Array.isArray(normalizedRegistration.simulatorIds)
+          ? normalizedRegistration.simulatorIds
+          : []),
+        canonicalSimulatorId,
+      ].map((value) => {
+        const raw = String(value || "").trim();
+        const match = (Array.isArray(simulators) ? simulators : []).find(
+          (simulator: any) => String(simulator.id || "").toLowerCase() === raw.toLowerCase() || String(simulator.name || "").toLowerCase() === raw.toLowerCase(),
+        );
+        return String(match?.id || raw);
+      }).filter(Boolean)));
       const companyCreatedAt = new Date().toISOString();
       const registrationEmail = String(normalizedRegistration.email || "")
         .trim()
@@ -804,6 +816,8 @@ export default function SeniorPanel() {
         ownerEmail: registrationEmail,
         simulatorId: canonicalSimulatorId,
         simulatorName: canonicalSimulatorName,
+        simulatorIds: canonicalSimulatorIds,
+        defaultSimulatorId: canonicalSimulatorId || canonicalSimulatorIds[0] || "",
         cnpj: normalizedRegistration.cnpj,
         whatsapp: normalizedRegistration.whatsapp || "",
         userId: "",

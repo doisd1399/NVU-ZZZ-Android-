@@ -2,7 +2,7 @@ import { auth, db, storage, functions } from "../lib/firebase";
 import { Capacitor } from "@capacitor/core";
 import { App } from "@capacitor/app";
 
-export const REMOTE_APP_URL = import.meta.env.VITE_NVU_NETLIFY_URL || "https://stirring-pavlova-ca6808.netlify.app";
+export const REMOTE_APP_URL = String(import.meta.env.VITE_NVU_NETLIFY_URL || "").trim();
 
 export interface DiagnosticResult {
   platform: string;
@@ -25,7 +25,7 @@ export async function runDiagnostics(): Promise<DiagnosticResult> {
   const result: DiagnosticResult = {
     platform: Capacitor.getPlatform(),
     isNativePlatform: Capacitor.isNativePlatform(),
-    remoteAppUrl: REMOTE_APP_URL,
+    remoteAppUrl: REMOTE_APP_URL || "Runtime local empacotado no APK",
     firebase: {
       initialized: false,
       auth: 'uninitialized',
@@ -50,9 +50,8 @@ export async function runDiagnostics(): Promise<DiagnosticResult> {
   try {
     // 1. Fetch Build Manifest
     // In a browser, this fetches from the current domain.
-    // In Capacitor, if we want to ensure we are running the remote version,
-    // we could fetch from REMOTE_APP_URL. 
-    // We fetch from window.location.origin to see the current active build manifest.
+    // Always inspect the manifest served by the active WebView origin. For the
+    // production APK this is the locally bundled Web asset, not the Netlify URL.
     const manifestUrl = `${window.location.origin}/nvu-build.json?t=${Date.now()}`;
     const manifestRes = await fetch(manifestUrl);
     

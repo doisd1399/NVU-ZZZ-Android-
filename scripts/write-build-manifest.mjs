@@ -22,6 +22,7 @@ const runtimeRevision = String(
 const nativeChannel = String(
   process.env.NVU_NATIVE_CHANNEL || "production-358",
 ).trim();
+const otaEnabled = process.env.CAPACITOR_REMOTE_ENABLED === "true";
 
 await mkdir(dist, { recursive: true });
 await writeFile(
@@ -34,7 +35,7 @@ await writeFile(
       source: "nvu-web",
       runtimeRevision,
       nativeChannel,
-      otaEnabled: true,
+      otaEnabled,
     },
     null,
     2,
